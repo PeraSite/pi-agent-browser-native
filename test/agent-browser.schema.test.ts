@@ -44,6 +44,14 @@ test("agent_browser exposes only compact native command input", () => {
 	assert.ok(Buffer.byteLength(JSON.stringify(schema)) < 1400);
 });
 
+test("agent_browser_code exposes Anthropic-compatible timeout schema", () => {
+	const schema = createAgentBrowserCodeParamsSchema() as unknown as { properties: Record<string, Record<string, unknown>> };
+	const timeout = schema.properties.timeoutMs;
+	assert.equal(timeout.type, "integer");
+	assert.equal(timeout.minimum, undefined);
+	assert.equal(timeout.maximum, undefined);
+});
+
 test("semantic schema keeps optional properties visible to Pi null normalization", () => {
 	const semantic = createAgentBrowserActionParamsSchema() as { properties?: Record<string, unknown>; required?: string[] };
 	for (const field of ["locator", "value", "values", "selector", "text", "role", "name", "session"]) {

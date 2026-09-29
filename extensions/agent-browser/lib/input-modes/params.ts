@@ -115,7 +115,8 @@ export function createAgentBrowserCodeParamsSchema(Type: JsonSchemaBuilder = Jso
 		session: Type.Optional(Type.String({ description: "Explicit native session; omitted uses the ordinary default browser.", minLength: 1 })),
 		namespace: Type.Optional(Type.String({ description: "Native namespace; empty string selects the default namespace." })),
 		...outputProperties(Type),
-		timeoutMs: Type.Optional(Type.Integer({ minimum: 1, maximum: AGENT_BROWSER_CODE_MAX_TIMEOUT_MS })),
+		// Anthropic rejects integer bounds in tool schemas; execution still validates this range.
+		timeoutMs: Type.Optional(Type.Integer({ description: `Timeout in ms (1–${AGENT_BROWSER_CODE_MAX_TIMEOUT_MS}).` })),
 	}, { additionalProperties: false }));
 }
 
