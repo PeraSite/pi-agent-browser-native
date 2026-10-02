@@ -60,6 +60,12 @@ process.stdin.on('end', () => {
 				if (outputPath) {
 					assert.equal(await readFile(outputPath, "utf8"), text);
 					assert.match(result.content[0]?.text ?? "", /Output file:/);
+					assert.ok(result.content[0]?.text?.startsWith(`${text}\n\nOutput file:`));
+					const failedExport = await executeRegisteredTool(harness.tool, harness.ctx, { args, stdin, outputPath: root });
+					assert.equal(failedExport.isError, true);
+					assert.equal((failedExport.details?.outputFile as { status: string })?.status, "failed");
+					assert.equal(failedExport.details?.data, text);
+					assert.ok(failedExport.content[0]?.text?.startsWith(`${text}\n\nOutput file failed:`));
 				}
 				if (mode === "page-url") {
 					assert.equal((result.details?.sessionTabTarget as { url: string })?.url, "https://example.test/current");
