@@ -9,10 +9,10 @@ for (const mode of ["opaque-json", "confirmation-text", "page-url", "nonzero", "
 	test(`registered native output retains its evidence boundary: ${mode}`, { concurrency: false }, async () => {
 		const root = await mkdtemp(join(tmpdir(), "piab-txt-"));
 		const logPath = join(root, "calls.jsonl");
-		const text = mode === "opaque-json" ? '{"success":false,"data":{"confirmation_required":true,"confirmation_id":"c_fiction","path":"/tmp/fiction"}}'
+		const text = mode === "opaque-json" ? '\n  {"success":false,"data":{"confirmation_required":true,"confirmation_id":"c_fiction","path":"/tmp/fiction"}}  \n\n'
 			: mode === "confirmation-text" ? "Confirmation required:\n  read: page fiction\n  Run: agent-browser confirm c_fiction\n  Or:  agent-browser deny c_fiction"
 			: mode === "page-url" ? "https://page-fiction.test/"
-			: mode === "large-secret" ? "Authorization: Bearer text-secret\n" + "Native text result\n".repeat(2000)
+			: mode === "large-secret" ? "\n  Authorization: Bearer text-secret\n" + "Native text result\n".repeat(32000) + "  \n\n"
 			: "https://example.test/current";
 		await writeFakeAgentBrowserBinary(root, `const fs = require('node:fs');
 const args = process.argv.slice(2);
@@ -30,7 +30,7 @@ process.stdin.on('end', () => {
 				if (mode === "page-url") await executeRegisteredTool(harness.tool, harness.ctx, { args: ["--session", "caller", "get", "url"] });
 				const args = ["--session", "caller", "--json", mode === "strict-json" || mode === "failed-json" ? "true" : "false", ...(mode === "page-url" ? ["get", "text", "body"] : ["batch", "--bail"])];
 				const stdin = mode === "page-url" ? undefined : '[["get","url","--json"],["get","url","--json","false"]]';
-				const outputPath = mode === "opaque-json" ? join(root, "out.txt") : undefined;
+				const outputPath = mode === "opaque-json" || mode === "large-secret" ? join(root, "out.txt") : undefined;
 				const result = await executeRegisteredTool(harness.tool, harness.ctx, { args, stdin, outputPath });
 				assert.deepEqual((await readInvocationLog(logPath)).filter(row => mode === "page-url" ? row.args.includes("false") : row.args.includes("batch")), [{ args, stdin: stdin ?? "" }]);
 				assert.equal(result.isError, mode === "nonzero" || mode === "strict-json" || mode === "failed-json", result.content[0]?.text);
@@ -51,21 +51,27 @@ process.stdin.on('end', () => {
 				} else if (mode === "large-secret") {
 					const spill = await readFile(String(result.details?.fullOutputPath), "utf8");
 					assert.doesNotMatch(spill, /text-secret/);
-					assert.equal(spill.split("Native text result").length - 1, 2000);
+					assert.equal(spill, "\n  Authorization: Bearer [REDACTED]\n" + "Native text result\n".repeat(32000) + "  \n\n");
 					assert.ok(JSON.stringify(result.content).length < 16000);
 				} else if (mode !== "strict-json") {
 					assert.equal(result.details?.data, text);
 					assert.doesNotMatch(JSON.stringify(result.details?.nextActions) ?? "", /c_fiction/);
 				}
 				if (outputPath) {
-					assert.equal(await readFile(outputPath, "utf8"), text);
+					const expected = mode === "large-secret" ? await readFile(String(result.details?.fullOutputPath), "utf8") : text;
+					assert.equal(await readFile(outputPath, "utf8"), expected);
 					assert.match(result.content[0]?.text ?? "", /Output file:/);
-					assert.ok(result.content[0]?.text?.startsWith(`${text}\n\nOutput file:`));
+					if (mode === "opaque-json") assert.ok(result.content[0]?.text?.startsWith(`${text}\n\nOutput file:`));
 					const failedExport = await executeRegisteredTool(harness.tool, harness.ctx, { args, stdin, outputPath: root });
 					assert.equal(failedExport.isError, true);
 					assert.equal((failedExport.details?.outputFile as { status: string })?.status, "failed");
-					assert.equal(failedExport.details?.data, text);
-					assert.ok(failedExport.content[0]?.text?.startsWith(`${text}\n\nOutput file failed:`));
+					if (mode === "opaque-json") {
+						assert.equal(failedExport.details?.data, text);
+						assert.ok(failedExport.content[0]?.text?.startsWith(`${text}\n\nOutput file failed:`));
+					} else {
+						assert.equal(await readFile(String(failedExport.details?.fullOutputPath), "utf8"), expected);
+						assert.match(failedExport.content[0]?.text ?? "", /Output file failed:/);
+					}
 				}
 				if (mode === "page-url") {
 					assert.equal((result.details?.sessionTabTarget as { url: string })?.url, "https://example.test/current");

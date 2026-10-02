@@ -57,10 +57,10 @@ export async function parseAgentBrowserEnvelope(options: string | { stdout: stri
 		return { parseError: error instanceof Error ? error.message : String(error) };
 	}
 
-	const trimmed = stdout.trim();
 	// ponytail: native text has no machine receipts; use JSON mode for structured evidence.
 	// JSON-looking page text must never become an envelope, confirmation, or batch row.
-	if (typeof options !== "string" && options.textOutput) return { envelope: { success: true, data: trimmed } };
+	if (typeof options !== "string" && options.textOutput) return { envelope: { success: true, data: stdout } };
+	const trimmed = stdout.trim();
 	const plainText = typeof options !== "string" && options.plainText === true;
 	if (trimmed.length === 0 && !plainText) {
 		return { parseError: "agent-browser returned no JSON output." };
