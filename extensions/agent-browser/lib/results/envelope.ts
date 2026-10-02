@@ -46,7 +46,7 @@ export function extractEnvelopeErrorText(error: unknown): string | undefined {
 	return fallback.length > 0 && fallback !== "{}" ? fallback : undefined;
 }
 
-export async function parseAgentBrowserEnvelope(options: string | { stdout: string; stdoutPath?: string; plainText?: boolean }): Promise<{
+export async function parseAgentBrowserEnvelope(options: string | { stdout: string; stdoutPath?: string; plainText?: boolean; textOutput?: boolean }): Promise<{
 	envelope?: AgentBrowserEnvelope;
 	parseError?: string;
 }> {
@@ -58,6 +58,9 @@ export async function parseAgentBrowserEnvelope(options: string | { stdout: stri
 	}
 
 	const trimmed = stdout.trim();
+	// ponytail: native text has no machine receipts; use JSON mode for structured evidence.
+	// JSON-looking page text must never become an envelope, confirmation, or batch row.
+	if (typeof options !== "string" && options.textOutput) return { envelope: { success: true, data: trimmed } };
 	const plainText = typeof options !== "string" && options.plainText === true;
 	if (trimmed.length === 0 && !plainText) {
 		return { parseError: "agent-browser returned no JSON output." };
@@ -177,7 +180,7 @@ export function getAgentBrowserErrorText(options: {
 	if (timedOut) return buildWatchdogTimeoutMessage(options);
 	if (aborted) return "agent-browser was aborted.";
 	if (spawnError) return spawnError.message;
-	if (parseError) return parseError;
+	if (parseError) return exitCode !== 0 && stderr.trim() ? stderr.trim() : parseError;
 	if (envelope?.success === false) {
 		const explicitErrorText = extractEnvelopeErrorText(envelope.error);
 		if ((hasStructuredBatchStepFailure(envelope.data) || detectConfirmationRequired(envelope.data)) && explicitErrorText === undefined) {

@@ -18,7 +18,7 @@ test("native environment defaults share caller ownership across Pi sessions and 
 	const log = join(root, "calls.jsonl");
 	await writeFakeAgentBrowserBinary(root, `
 const args = process.argv.slice(2);
-require("node:fs").appendFileSync(${JSON.stringify(log)}, JSON.stringify({ args, idleTimeout: process.env.AGENT_BROWSER_IDLE_TIMEOUT_MS ?? null }) + "\\n");
+require("node:fs").appendFileSync(${JSON.stringify(log)}, JSON.stringify({ args, idleTimeout: process.env.AGENT_BROWSER_IDLE_TIMEOUT_MS ?? null, actionPolicy: process.env.AGENT_BROWSER_ACTION_POLICY ?? null, confirmActions: process.env.AGENT_BROWSER_CONFIRM_ACTIONS ?? null }) + "\\n");
 const data = args.includes("snapshot") ? { snapshot: "- button \\"Continue\\" [ref=e1]", refs: { e1: { role: "button", name: "Continue" } }, url: "https://fixture.test/" } : { title: "Fixture", url: "https://fixture.test/" };
 console.log(JSON.stringify({ success: true, data }));
 `);
@@ -35,15 +35,18 @@ console.log(JSON.stringify({ success: true, data }));
 				assert.equal(result.details?.usedImplicitSession, false);
 				assert.equal(result.details?.managedSessionOutcome, undefined);
 			}
-			const override = await executeRegisteredTool(two.tool, two.ctx, { args: ["--namespace", "", "--session", "override", "--idle-timeout", "42", "get", "title"] });
+			const override = await executeRegisteredTool(two.tool, two.ctx, { args: ["--namespace", "", "--session", "override", "--idle-timeout", "42", "--action-policy", "old.json", "--action-policy", "policy.json", "--confirm-actions", "click", "--confirm-actions", "navigate", "get", "title"] });
 			assert.equal(override.isError, false, override.content[0]?.text);
 			assert.equal(override.details?.sessionName, "override");
 			assert.equal(override.details?.namespace, "");
+			assert.equal((await executeRegisteredTool(one.tool, one.ctx, { args: ["get", "title"] })).isError, false);
 			await runExtensionEvent(one.handlers, "session_shutdown", { reason: "quit" }, one.ctx);
 			await runExtensionEvent(two.handlers, "session_shutdown", { reason: "quit" }, two.ctx);
-			const calls = await readInvocationLog(log);
+			const calls = await readInvocationLog(log) as Array<{ args: string[]; idleTimeout: string | null; actionPolicy: string | null; confirmActions: string | null }>;
 			assert.ok(calls.some((call) => call.args.includes("url")), "caller-owned live target helpers run");
 			assert.ok(calls.every((call) => call.idleTimeout === (call.args.includes("override") ? "42" : null)), "native idle selection is consistent across caller-owned helpers and main calls");
+			assert.ok(calls.filter(call => call.args.includes("override")).some(call => call.args.includes("url")), "explicit policy call reaches its live page helper");
+			assert.ok(calls.every(call => call.actionPolicy === (call.args.includes("override") ? "policy.json" : null) && call.confirmActions === (call.args.includes("override") ? "navigate" : null)), "last explicit policy values reach every helper without leaking into later calls");
 			assert.ok(calls.every((call) => !call.args.includes("close")), "Pi quit leaves shared caller-owned browser alone");
 		});
 	} finally { await rm(root, { recursive: true, force: true }); }

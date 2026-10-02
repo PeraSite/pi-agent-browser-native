@@ -115,8 +115,12 @@ export async function withNativeSessionDefaults(input: ResolvedAgentBrowserValid
 	let args = input.toolArgs;
 	if (session !== undefined && extractExplicitSessionName(args) === undefined) args = ["--session", session, ...args];
 	const idleTimeout = scanUpstreamGlobalFlagOccurrences(args, "--idle-timeout").at(-1)?.value;
+	const actionPolicy = scanUpstreamGlobalFlagOccurrences(args, "--action-policy").at(-1)?.value;
+	const confirmActions = scanUpstreamGlobalFlagOccurrences(args, "--confirm-actions").at(-1)?.value;
 	return withAgentBrowserProcessEnvironment({
 		...(idleTimeout !== undefined ? { AGENT_BROWSER_IDLE_TIMEOUT_MS: idleTimeout } : {}),
+		...(actionPolicy !== undefined ? { AGENT_BROWSER_ACTION_POLICY: actionPolicy } : {}),
+		...(confirmActions !== undefined ? { AGENT_BROWSER_CONFIRM_ACTIONS: confirmActions } : {}),
 		...(configPath !== undefined ? { AGENT_BROWSER_CONFIG: resolve(cwd, configPath) } : {}),
 		...(session !== undefined ? { AGENT_BROWSER_SESSION: session } : {}),
 		...(namespace !== undefined ? { AGENT_BROWSER_NAMESPACE: namespace } : {}),

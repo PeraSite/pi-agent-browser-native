@@ -3,7 +3,7 @@ import { observeNativeWebMcp } from "../../webmcp-observation.js";
 
 import { parseArgvDescriptor } from "../../argv-descriptor.js";
 import { isBrowserIndependentRead, needsManagedSession } from "../../command-policy.js";
-import { deleteIdentityKeysInNamespace, getAgentBrowserSessionIdentityKey, isAgentBrowserSessionIdentityKeyInNamespace } from "../../argv-grammar.js";
+import { deleteIdentityKeysInNamespace, getAgentBrowserSessionIdentityKey, getBooleanFlagValue, isAgentBrowserSessionIdentityKeyInNamespace } from "../../argv-grammar.js";
 import { batchHasSuccessfulCloseAll, getSuccessfulBatchCloseLifecycle } from "../../batch-lifecycle.js";
 import { isCloseAllCommand, isCloseCommand, isNavigationObservableCommandName, isOpenNavigationCommand, isPageMutationCommand, isRecordPageTransitionCommand, isUnverifiedPageTransitionCommand, isWindowOrDiffPageTransitionCommand } from "../../command-taxonomy.js";
 import { OPEN_RESULT_TAB_CORRECTION_FLAGS } from "../../launch-scoped-flags.js";
@@ -241,9 +241,10 @@ export async function processBrowserOutput(input: ProcessBrowserOutputInput): Pr
 	let networkRoutesBySession = state.networkRoutesBySession;
 	try {
 		const persistentArtifactStore = getPersistentSessionArtifactStore(ctx);
-		// Native upgrade prints text even with --json; all other command shapes keep strict JSON parsing.
+		// Native upgrade prints text even with --json; explicit false selects opaque native text.
 		const plainTextUpgrade = !prepared.executionPlan.plainTextInspection && prepared.executionPlan.commandInfo.command === "upgrade" && !needsManagedSession(parseArgvDescriptor(prepared.runtimeToolArgs));
-		const parsed = await parseAgentBrowserEnvelope({ stdout: processResult.stdout, stdoutPath: processResult.stdoutSpillPath, plainText: plainTextUpgrade });
+		const textOutput = getBooleanFlagValue(prepared.processArgs, "--json") === false;
+		const parsed = await parseAgentBrowserEnvelope({ stdout: processResult.stdout, stdoutPath: processResult.stdoutSpillPath, plainText: plainTextUpgrade, textOutput });
 		observeNativeWebMcp(parsed.envelope?.data);
 		let parseError = parsed.parseError;
 		const recordingStopRecovery = await recoverRecordingStop({
@@ -407,7 +408,7 @@ export async function processBrowserOutput(input: ProcessBrowserOutputInput): Pr
 			// Re-verifying a failed transition's URL does not make its prior refs valid.
 			failedTransitionReverification = navigationSummary !== undefined;
 		}
-		if (navigationSummary && presentationEnvelope && prepared.executionPlan.commandInfo.command !== "eval" && !Array.isArray(presentationEnvelope.data)) presentationEnvelope = { ...presentationEnvelope, data: mergeNavigationSummaryIntoData(presentationEnvelope.data, navigationSummary) };
+		if (!textOutput && navigationSummary && presentationEnvelope && prepared.executionPlan.commandInfo.command !== "eval" && !Array.isArray(presentationEnvelope.data)) presentationEnvelope = { ...presentationEnvelope, data: mergeNavigationSummaryIntoData(presentationEnvelope.data, navigationSummary) };
 		let overlayBlockerDiagnostic: Awaited<ReturnType<typeof collectOverlayBlockerDiagnostic>>;
 
 		let openResultTabCorrection: Awaited<ReturnType<typeof collectOpenResultTabCorrection>>;
@@ -766,7 +767,7 @@ export async function processBrowserOutput(input: ProcessBrowserOutputInput): Pr
 			errorText = redactClipboardPermissionEcho(prepared.executionPlan.commandInfo, errorText);
 			if (presentationEnvelope?.error !== undefined) presentationEnvelope = { ...presentationEnvelope, error: redactClipboardPermissionErrorValue(prepared.executionPlan.commandInfo, presentationEnvelope.error, clipboardWritePayloadCandidates) };
 		}
-		if (plainTextUpgrade && errorText) presentationEnvelope = { ...presentationEnvelope, success: false, error: errorText };
+		if ((plainTextUpgrade || textOutput) && errorText) presentationEnvelope = { ...presentationEnvelope, success: false, error: errorText };
 		const resultRetainsPreparedManagedSession = !managedSessionOutcome || (
 			managedSessionOutcome.activeAfter
 			&& managedSessionOutcome.attemptedSessionName === managedSessionOutcome.currentSessionName
@@ -793,8 +794,11 @@ export async function processBrowserOutput(input: ProcessBrowserOutputInput): Pr
 				success: row.success, lifecycle: extractAgentBrowserLifecycle(row.result),
 			})) : undefined,
 		};
-		let presentation = plainTextInspection ? { artifacts: undefined, batchFailure: undefined, batchSteps: undefined, content: [{ type: "text" as const, text: inspectionText ?? "" }], data: undefined, fullOutputPath: undefined, fullOutputPaths: undefined, imagePath: undefined, imagePaths: undefined, savedFile: undefined, savedFilePath: undefined, summary: `${prepared.redactedArgs.join(" ")} completed` } : recordingStopRecovery && !recordingStopRecovery.batch ? recordingStopRecovery.presentation : await buildToolPresentation({ modelVisible: input.modelVisible, args: prepared.redactedProcessArgs, artifactManifest, artifactMaxUpdatedAtMs: Date.now(), artifactMinUpdatedAtMs: input.artifactRunStartedAtMs, artifactRequest: screenshotArtifactRequest, batchArtifactRequests: batchScreenshotArtifactRequests, commandInfo: prepared.executionPlan.commandInfo, compiledSemanticAction: prepared.compiledSemanticAction, cwd: operationCwd, envelope: presentationEnvelope, errorText, namespace: prepared.executionPlan.namespace, networkRouteDiagnostics, networkRoutes: activeNetworkRoutes, persistentArtifactStore, previousRecordingContactSheetPath: sessionStateKey ? state.activeRecordingReservations?.get(sessionStateKey)?.contactSheetPath : undefined, piCleanupOwnership: sessionStateKey && (state.ownedManagedSessions.has(sessionStateKey) || prepared.executionPlan.managedSessionName !== undefined) ? "wrapper-managed" : "caller-owned", sessionName: prepared.executionPlan.sessionName });
+		let presentation = plainTextInspection ? { artifacts: undefined, batchFailure: undefined, batchSteps: undefined, content: [{ type: "text" as const, text: inspectionText ?? "" }], data: undefined, fullOutputPath: undefined, fullOutputPaths: undefined, imagePath: undefined, imagePaths: undefined, savedFile: undefined, savedFilePath: undefined, summary: `${prepared.redactedArgs.join(" ")} completed` } : recordingStopRecovery && !recordingStopRecovery.batch ? recordingStopRecovery.presentation : await buildToolPresentation({ textOutput, modelVisible: input.modelVisible, args: prepared.redactedProcessArgs, artifactManifest, artifactMaxUpdatedAtMs: Date.now(), artifactMinUpdatedAtMs: input.artifactRunStartedAtMs, artifactRequest: screenshotArtifactRequest, batchArtifactRequests: batchScreenshotArtifactRequests, commandInfo: prepared.executionPlan.commandInfo, compiledSemanticAction: prepared.compiledSemanticAction, cwd: operationCwd, envelope: presentationEnvelope, errorText, namespace: prepared.executionPlan.namespace, networkRouteDiagnostics, networkRoutes: activeNetworkRoutes, persistentArtifactStore, previousRecordingContactSheetPath: sessionStateKey ? state.activeRecordingReservations?.get(sessionStateKey)?.contactSheetPath : undefined, piCleanupOwnership: sessionStateKey && (state.ownedManagedSessions.has(sessionStateKey) || prepared.executionPlan.managedSessionName !== undefined) ? "wrapper-managed" : "caller-owned", sessionName: prepared.executionPlan.sessionName });
 		if (recordingStopRecovery) presentation = mergeRecordingRecoveryPresentation(presentation, recordingStopRecovery);
+		if (parseError && processResult.exitCode !== 0 && processResult.stderr.trim() && !processResult.timedOut && !processResult.aborted && !processResult.spawnError) {
+			presentation.failureCategory = "upstream-error";
+		}
 		const confirmation = readConfirmationEvent ?? prepared.readConfirmation;
 		if (confirmation) {
 			presentation.readConfirmation = confirmation;
