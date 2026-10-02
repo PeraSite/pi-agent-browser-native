@@ -327,7 +327,7 @@ Profile hints with `authenticated-only` remain advisory. Global/override profile
 
 You usually prompt the agent in natural language. These JSON snippets show the exact native tool shape the agent should use.
 
-Open a page and inspect it (first-call recipe: open → snapshot -i → interact with current `@refs` → snapshot -i after changes). Omit `--json` unless you need JSON text; structured details are available by default. Explicit `--json false` selects native text without trusted row, confirmation, lifecycle or artifact receipts; see [the output contract](docs/TOOL_CONTRACT.md#wrapper-json).
+Open a page and inspect it (first-call recipe: open → snapshot -i → interact with current `@refs` → snapshot -i after changes). Omit `--json` unless you need JSON text; structured details are available by default. Explicit `--json false` selects native text without trusted row, confirmation, lifecycle, page-target or artifact receipts; see [the output contract](docs/TOOL_CONTRACT.md#wrapper-json).
 
 ```json
 { "args": ["open", "https://example.com"] }

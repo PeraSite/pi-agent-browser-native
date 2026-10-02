@@ -432,16 +432,17 @@ export async function processBrowserOutput(input: ProcessBrowserOutputInput): Pr
 		);
 		const unsettledWebMcpMutation = pendingWebMcpMutation || failedWebMcpSettlement;
 
+		const pageTargetData = textOutput ? undefined : presentationEnvelope?.data;
 		let observedSessionTabTarget = unsettledWebMcpMutation || (unobservedMutation && !failedTransitionReverification)
 			? undefined
 			: normalizeSessionTabTarget(navigationSummary)
-				?? (trustsReportedPageTarget ? extractSessionTabTargetFromBatchResults(presentationEnvelope?.data) : undefined)
-				?? (succeeded && trustsReportedPageTarget ? extractSessionTabTargetFromCommandData(prepared.commandTokens, presentationEnvelope?.data) : undefined);
+				?? (trustsReportedPageTarget ? extractSessionTabTargetFromBatchResults(pageTargetData) : undefined)
+				?? (succeeded && trustsReportedPageTarget ? extractSessionTabTargetFromCommandData(prepared.commandTokens, pageTargetData) : undefined);
 		if (observedSessionTabTarget && !browserIndependentRead && !nestedBatchClosed && !isCloseCommand(prepared.executionPlan.commandInfo.command)) {
 			const reportedTarget = prepared.executionPlan.commandInfo.command === "batch"
-				? extractSessionTabTargetFromBatchResults(presentationEnvelope?.data)
+				? extractSessionTabTargetFromBatchResults(pageTargetData)
 				: prepared.commandTokens[0] === "tab" && prepared.commandTokens[1] === "close" ? undefined
-				: extractSessionTabTargetFromCommandData(prepared.commandTokens, presentationEnvelope?.data);
+				: extractSessionTabTargetFromCommandData(prepared.commandTokens, pageTargetData);
 			if (reportedTarget?.targetId) observedSessionTabTarget.targetId = reportedTarget.targetId;
 			else observedSessionTabTarget = await collectSessionTabTarget({ cwd, namespace: prepared.executionPlan.namespace, sessionName: prepared.executionPlan.sessionName, signal, target: observedSessionTabTarget });
 		}
@@ -451,7 +452,7 @@ export async function processBrowserOutput(input: ProcessBrowserOutputInput): Pr
 			// Window/diff responses do not report the final URL; URL2 is intent, not redirect evidence.
 			currentSessionTabTarget = resultingPageState.pageTargetMayHaveChanged
 				? succeeded && !destinationTransition ? normalizeSessionTabTarget({ url: resultingPageState.currentPageUrl }) : undefined
-				: deriveSessionTabTarget({ command: prepared.executionPlan.commandInfo.command, data: presentationEnvelope?.data, navigationSummary, previousTarget: prepared.priorSessionTabTarget, subcommand: prepared.executionPlan.commandInfo.subcommand });
+				: deriveSessionTabTarget({ command: prepared.executionPlan.commandInfo.command, data: pageTargetData, navigationSummary, previousTarget: prepared.priorSessionTabTarget, subcommand: prepared.executionPlan.commandInfo.subcommand });
 		}
 		let aboutBlankSessionMismatch: AboutBlankSessionMismatch | undefined;
 		let electronPostCommandHealth: ReturnType<typeof buildElectronPostCommandHealthDiagnostic>;
