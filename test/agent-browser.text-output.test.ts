@@ -5,6 +5,44 @@ import { join } from "node:path";
 import test from "node:test";
 import { createExtensionHarness, executeRegisteredTool, readInvocationLog, runExtensionEvent, withPatchedEnv, writeFakeAgentBrowserBinary } from "./helpers/agent-browser-harness.js";
 
+for (const mode of ["cookies", "storage", "storage-key", "raw-batch", "stdin-batch", "large-storage", "ordinary"] as const) {
+	test(`native text command redaction protects presentation and export: ${mode}`, { concurrency: false }, async () => {
+		const root = await mkdtemp(join(tmpdir(), "piab-txt-"));
+		const log = join(root, "calls.jsonl");
+		const cookieText = "csrftoken=Q2x9Lm3Np4Rs\nsid=8f3a9c2b1d4e5f6a\n";
+		const storageText = "refresh: 8f3a9c2b1d4e5f6a\ntheme: dark\n";
+		const ordinary = "\n  Plain page content\n{\"success\":false,\"error\":\"page fiction\"}  \n\n";
+		const text = mode === "cookies" ? cookieText : mode === "storage-key" ? "refresh: opaque-first-line\nopaque-continuation\n"
+			: mode === "raw-batch" || mode === "stdin-batch" ? cookieText + "\n" + storageText + "\n" + ordinary
+			: mode === "ordinary" ? ordinary : storageText.repeat(mode === "large-storage" ? 32000 : 1);
+		const steps = [["cookies", "get"], ["storage", "local"], ["get", "text", "body"]];
+		const args = ["--session", "caller", "--json", "false", ...(mode === "cookies" ? ["cookies", "get"] : mode === "ordinary" ? ["get", "text", "body"]
+			: mode === "raw-batch" ? ["batch", "cookies get", "storage local", "get text body"] : mode === "stdin-batch" ? ["batch"]
+			: ["storage", "local", ...(mode === "storage-key" ? ["get", "refresh"] : [])])];
+		// Displaced stdin must not contribute redaction commands to a raw batch.
+		const stdin = mode === "stdin-batch" ? JSON.stringify(steps) : mode === "raw-batch" ? '[["storage","session","get","ignored"]]' : undefined;
+		await writeFakeAgentBrowserBinary(root, `const fs=require('node:fs');const args=process.argv.slice(2);const stdin=fs.readFileSync(0,'utf8');fs.appendFileSync(${JSON.stringify(log)},JSON.stringify({args,stdin})+'\\n');process.stdout.write(args.includes('false')?${JSON.stringify(text)}:JSON.stringify({success:true,data:{url:'https://fixture.test/current',title:'Current'}}));`);
+		try {
+			await withPatchedEnv({ PATH: `${root}:${process.env.PATH ?? ""}` }, async () => {
+				const harness = createExtensionHarness({ cwd: root });
+				const outputPath = join(root, "out.txt");
+				const result = await executeRegisteredTool(harness.tool, harness.ctx, { args, stdin, outputPath });
+				assert.equal(result.isError, false, result.content[0]?.text);
+				assert.doesNotMatch(JSON.stringify(result), /Q2x9Lm3Np4Rs|8f3a9c2b1d4e5f6a|opaque-first-line|opaque-continuation/);
+				const saved = await readFile(outputPath, "utf8");
+				assert.doesNotMatch(saved, /Q2x9Lm3Np4Rs|8f3a9c2b1d4e5f6a|opaque-first-line|opaque-continuation/);
+				const expected = text.replaceAll("Q2x9Lm3Np4Rs", "[REDACTED]").replaceAll("8f3a9c2b1d4e5f6a", "[REDACTED]")
+					.replace("opaque-first-line\nopaque-continuation", "[REDACTED]");
+				assert.equal(saved, expected, "names, benign values and ordinary opaque whitespace survive redaction");
+				if (mode === "large-storage") assert.equal(await readFile(String(result.details?.fullOutputPath), "utf8"), expected);
+				else assert.equal(result.details?.data, expected);
+				assert.equal(result.details?.batchSteps, undefined, "redaction never invents text row provenance");
+				assert.deepEqual((await readInvocationLog(log)).filter(row => row.args.includes("false")), [{ args, stdin: stdin ?? "" }]);
+			});
+		} finally { await rm(root, { recursive: true, force: true }); }
+	});
+}
+
 for (const mode of ["opaque-json", "confirmation-text", "page-url", "nonzero", "failed-json", "large-secret", "strict-json"] as const) {
 	test(`registered native output retains its evidence boundary: ${mode}`, { concurrency: false }, async () => {
 		const root = await mkdtemp(join(tmpdir(), "piab-txt-"));

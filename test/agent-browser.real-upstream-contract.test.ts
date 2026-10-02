@@ -102,6 +102,29 @@ test("real native explicit text preserves standalone, compound batch and opaque 
 				assert.equal(structured.isError, false, structured.content[0]?.text);
 				assert.ok(Array.isArray(structured.details?.data));
 				assert.equal(JSON.parse(structured.content[0]?.text ?? "").success, true);
+				await t.test("empty native rows preserve screenshot ownership", async () => {
+					const paths = ["first.png", "second.png", "third.png"].map(name => join(root, name));
+					const result = await call(["batch"], JSON.stringify([["screenshot", paths[0]], [], ["get", "title"], ["screenshot", paths[1]], [], ["screenshot", paths[2]]]));
+					assert.equal(result.isError, false, result.content[0]?.text);
+					const rows = result.details?.batchSteps as Array<{ artifacts?: Array<{ requestedPath: string; absolutePath: string; status: string }> }>;
+					assert.equal(rows.length, 4);
+					assert.deepEqual([rows[0], rows[2], rows[3]].map(row => row.artifacts?.[0]?.requestedPath), paths);
+					assert.deepEqual([rows[0], rows[2], rows[3]].map(row => row.artifacts?.[0]?.absolutePath), paths);
+					t.diagnostic(JSON.stringify({ paths, artifacts: rows.map(row => row.artifacts) }));
+				});
+				await t.test("native cookie and storage observations redact content, details and exports", async () => {
+					assert.equal((await call(["eval", 'document.cookie="sid=Q2x9Lm3Np4Rs; path=/";localStorage.setItem("refresh","8f3a9c2b1d4e5f6a");localStorage.setItem("theme","dark");sessionStorage.setItem("refresh","opaque-first-line\\nopaque-continuation");true'])).isError, false);
+					for (const args of [["--json", "false", "cookies", "get"], ["--json", "false", "storage", "local"], ["--json", "false", "storage", "session", "get", "refresh"], ["--json", "false", "batch", "cookies get", "storage local"], ["storage", "local"]]) {
+						const outputPath = join(root, "sensitive-output.txt");
+						const result = await executeRegisteredTool(harness.tool, harness.ctx, { args: ["--session", sessionName, ...args], outputPath });
+						assert.equal(result.isError, false, result.content[0]?.text);
+						const saved = await readFile(outputPath, "utf8");
+						assert.doesNotMatch(JSON.stringify(result) + saved, /Q2x9Lm3Np4Rs|8f3a9c2b1d4e5f6a|opaque-first-line|opaque-continuation/);
+						assert.match(saved, /sid|refresh/);
+						if (args.includes("local")) assert.match(saved, /theme.*dark/s);
+						t.diagnostic(JSON.stringify({ args, data: result.details?.data, savedBytes: Buffer.byteLength(saved) }));
+					}
+				});
 				await t.test("empty stdin rows are skipped without dropping later native outcomes", async () => {
 					const rows = [["get", "url"], [], [""], ["eval", "'🚀'"], ["get", "url"]];
 					const continued = await call(["batch"], JSON.stringify(rows));

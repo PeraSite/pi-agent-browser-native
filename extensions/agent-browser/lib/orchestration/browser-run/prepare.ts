@@ -197,7 +197,7 @@ async function prepareBatchScreenshotPaths(args: string[], stdin: string | undef
 	return changed
 		? {
 				args,
-				batchScreenshotPathRequests,
+				batchScreenshotPathRequests: parsed.steps.flatMap((step, index) => Array.isArray(step) && step.length === 0 ? [] : [batchScreenshotPathRequests[index]]),
 				stdin: JSON.stringify(preparedSteps),
 		  }
 		: undefined;

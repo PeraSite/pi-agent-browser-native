@@ -28,6 +28,8 @@ When upstream ships a new `agent-browser` or the inventory changes:
 
 ## Current browser contract
 
+Native text and artifact ownership: the registered artifact owner covers empty-row screenshot alignment, nonscreenshot placeholders and bail truncation; the upgrade owner covers one-copy failed explicit text. The text/presentation owners cover cookie/storage format redaction across content, details, complete spills and exports, effective raw/stdin batch intent and native JSON all-entry maps. Real-native cases exercise screenshot paths, sensitive storage and CLI true/false helper continuity over opposite env/config defaults. Native unescaped multiline all-entry/raw-batch text retains the documented heuristic ceiling; structured JSON provides the unambiguous storage boundary.
+
 The compact direct/code/loader surface replaces public multimode inputs while retaining native commands and advanced outcomes. This section describes the implementation contract; dated evidence below does not qualify new Pi 1.0 code.
 
 | Area | Contract and verification target |

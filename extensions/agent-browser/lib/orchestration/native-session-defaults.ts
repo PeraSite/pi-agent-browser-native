@@ -117,10 +117,14 @@ export async function withNativeSessionDefaults(input: ResolvedAgentBrowserValid
 	const idleTimeout = scanUpstreamGlobalFlagOccurrences(args, "--idle-timeout").at(-1)?.value;
 	const actionPolicy = scanUpstreamGlobalFlagOccurrences(args, "--action-policy").at(-1)?.value;
 	const confirmActions = scanUpstreamGlobalFlagOccurrences(args, "--confirm-actions").at(-1)?.value;
+	const debug = getBooleanFlagValue(args, "--debug");
+	const noAutoDialog = getBooleanFlagValue(args, "--no-auto-dialog");
 	return withAgentBrowserProcessEnvironment({
 		...(idleTimeout !== undefined ? { AGENT_BROWSER_IDLE_TIMEOUT_MS: idleTimeout } : {}),
 		...(actionPolicy !== undefined ? { AGENT_BROWSER_ACTION_POLICY: actionPolicy } : {}),
 		...(confirmActions !== undefined ? { AGENT_BROWSER_CONFIRM_ACTIONS: confirmActions } : {}),
+		...(debug !== undefined ? { AGENT_BROWSER_DEBUG: debug ? "1" : "0" } : {}),
+		...(noAutoDialog !== undefined ? { AGENT_BROWSER_NO_AUTO_DIALOG: noAutoDialog ? "1" : "0" } : {}),
 		...(configPath !== undefined ? { AGENT_BROWSER_CONFIG: resolve(cwd, configPath) } : {}),
 		...(session !== undefined ? { AGENT_BROWSER_SESSION: session } : {}),
 		...(namespace !== undefined ? { AGENT_BROWSER_NAMESPACE: namespace } : {}),
@@ -149,5 +153,8 @@ export async function withNativeSessionDefaults(input: ResolvedAgentBrowserValid
 			...(profile !== undefined ? { AGENT_BROWSER_PROFILE: profile } : {}),
 			...(executablePath !== undefined ? { AGENT_BROWSER_EXECUTABLE_PATH: executablePath } : {}),
 		}, () => withChromeStartupArgs(bootstrap || configuredChromeLaunch ? chromeStartupArgs : undefined, () => browserRun(bootstrap)));
-	}));
+	}), [
+		...(debug !== undefined ? [["--debug", String(debug)] as [string, string]] : []),
+		...(noAutoDialog !== undefined ? [["--no-auto-dialog", String(noAutoDialog)] as [string, string]] : []),
+	]); // Native ORs env/config booleans; helpers need CLI false to override true config.
 }
