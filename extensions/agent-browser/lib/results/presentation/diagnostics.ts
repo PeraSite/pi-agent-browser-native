@@ -960,14 +960,14 @@ function redactNativeContextText(commandInfo: CommandInfo, text: string, stdin?:
 	const tokens = commandInfo.commandTokens;
 	const operation = tokens?.[2];
 	const key = operation === "get" ? tokens?.[3] : operation === "set" || operation === "clear" ? undefined : operation;
-	if (key && text.startsWith(`${key}: `)) {
+	if (key !== undefined && text.startsWith(`${key}: `)) {
 		const suffix = text.endsWith("\n") ? "\n" : "";
 		const value = text.slice(key.length + 2, suffix ? -1 : undefined);
 		return `${key}: ${formatStorageValue(key, value)}${suffix}`;
 	}
 	// ponytail: native all-entry/raw-batch text does not escape multiline values.
 	// Format heuristics cannot separate lookalike entries; use structured JSON for sensitive storage.
-	return text.replace(/^([^:\r\n]+): ([^\r\n]*)/gm, (_line, key: string, value: string) => `${key}: ${formatStorageValue(key, value)}`);
+	return text.replace(/^([^:\r\n]*): ([^\r\n]*)/gm, (_line, key: string, value: string) => `${key}: ${formatStorageValue(key, value)}`);
 }
 
 export function redactPresentationData(commandInfo: CommandInfo, data: unknown, stdin?: string): unknown {

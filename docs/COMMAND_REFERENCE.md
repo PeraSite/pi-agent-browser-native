@@ -761,7 +761,7 @@ These calls return plain text and stay stateless: the extension does not inject 
 
 `cookies set --curl <file>` selects native file-import mode even when `--curl` follows other set operands. Ordinary import paths remain visible in invocation echoes and failed batch diagnostics; inline cookie values, sensitive flags, and secret-bearing path text still redact. File contents are not echoed by this exception.
 
-With explicit `--json false`, cookie `name=value` (including empty names) and storage `key: value` output use command-aware redaction before presentation and export; benign preferences remain visible. Standalone `storage local|session get <key>` and shorthand `storage local|session <key>` redact the whole sensitive value, including embedded newlines. All-entry/raw-batch text has unescaped multiline values and no row provenance, so use structured JSON for unambiguous sensitive storage. See [the output contract](TOOL_CONTRACT.md#wrapper-json).
+With explicit `--json false`, cookie `name=value` (including empty names) and storage `key: value` (including empty keys) output use command-aware redaction before presentation and export; benign preferences remain visible. Standalone `storage local|session get <key>` and shorthand `storage local|session <key>` redact the whole sensitive value, including embedded newlines. All-entry/raw-batch text has unescaped multiline values and no row provenance, so use structured JSON for unambiguous sensitive storage. See [the output contract](TOOL_CONTRACT.md#wrapper-json).
 
 Privacy note: `cookies get` can expose real profile cookies. Do not run it against `--profile Default` or other authenticated profiles unless the user explicitly needs cookie inspection; prefer task-specific page actions and storage checks.
 
