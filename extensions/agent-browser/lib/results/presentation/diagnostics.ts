@@ -967,7 +967,7 @@ function redactNativeContextText(commandInfo: CommandInfo, text: string, stdin?:
 	}
 	// ponytail: native all-entry/raw-batch text does not escape multiline values.
 	// Format heuristics cannot separate lookalike entries; use structured JSON for sensitive storage.
-	return text.replace(/^([^:\r\n]*): ([^\r\n]*)/gm, (_line, key: string, value: string) => `${key}: ${formatStorageValue(key, value)}`);
+	return text.replace(/^([^\r\n]*?): ([^\r\n]*)/gm, (_line, key: string, value: string) => `${key}: ${formatStorageValue(key, value)}`);
 }
 
 export function redactPresentationData(commandInfo: CommandInfo, data: unknown, stdin?: string): unknown {
