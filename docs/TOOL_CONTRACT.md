@@ -509,14 +509,14 @@ Recommended use:
 
 ## Wrapper behavior
 
-Caller `args` should omit `--json`; the wrapper prepends it for normal execution so `details` and presentation stay structured. See [Wrapper `--json`](#wrapper-json).
+Caller `args` may omit `--json` for structured details and prose; explicit `--json false` selects opaque native text. See [Wrapper `--json`](#wrapper-json).
 
 The extension should:
-- inject `--json`
+- inject `--json` when no caller output mode is selected
 - invoke `agent-browser` directly, not through a shell
-- parse JSON output into tool details
+- parse JSON-mode output into tool details
 - handle observed JSON result shapes, including the array returned by `batch --json`
-- allow plain-text output for native inspection calls and valid sessionless `upgrade` commands; all other commands retain JSON envelope validation
+- allow plain-text output for native inspection calls, valid sessionless `upgrade` commands and explicit `--json false`; JSON-mode browser commands retain strict envelope validation
 - support those inspection calls unconditionally so the tool contract stays local and predictable
 
 <!-- agent-browser-playbook:start inspection -->
