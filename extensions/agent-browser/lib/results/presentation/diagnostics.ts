@@ -955,10 +955,11 @@ function redactNativeContextText(commandInfo: CommandInfo, text: string, stdin?:
 		if (steps.some(step => step[0] === "storage")) text = redactNativeContextText({ command: "storage" }, text);
 		return text;
 	}
-	if (commandInfo.command === "cookies") return text.replace(/^([^=\r\n]+)=([^\r\n]*)/gm, "$1=[REDACTED]");
+	if (commandInfo.command === "cookies") return text.replace(/^([^=\r\n]*)=([^\r\n]*)/gm, "$1=[REDACTED]");
 	if (commandInfo.command !== "storage") return text;
 	const tokens = commandInfo.commandTokens;
-	const key = tokens?.[2] === "get" ? tokens[3] : undefined;
+	const operation = tokens?.[2];
+	const key = operation === "get" ? tokens?.[3] : operation === "set" || operation === "clear" ? undefined : operation;
 	if (key && text.startsWith(`${key}: `)) {
 		const suffix = text.endsWith("\n") ? "\n" : "";
 		const value = text.slice(key.length + 2, suffix ? -1 : undefined);

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import test from "node:test";
@@ -47,7 +47,7 @@ console.log(JSON.stringify({ success: true, data }));
 			assert.ok(calls.every((call) => call.idleTimeout === (call.args.includes("override") ? "42" : null)), "native idle selection is consistent across caller-owned helpers and main calls");
 			assert.ok(calls.filter(call => call.args.includes("override")).some(call => call.args.includes("url")), "explicit policy call reaches its live page helper");
 			assert.ok(calls.every(call => call.actionPolicy === (call.args.includes("override") ? "policy.json" : null) && call.confirmActions === (call.args.includes("override") ? "navigate" : null)), "last explicit policy values reach every helper without leaking into later calls");
-			assert.ok(calls.every(call => call.debug === (call.args.includes("override") ? "0" : "1") && call.noAutoDialog === (call.args.includes("override") ? "1" : "0")), "explicit last-wins booleans reach helpers; later calls keep inherited values");
+			assert.ok(calls.every(call => call.debug === (call.args.includes("override") ? null : "1") && call.noAutoDialog === (call.args.includes("override") ? "1" : "0")), "explicit last-wins booleans reach helpers; later calls keep inherited values");
 			assert.ok(calls.every((call) => !call.args.includes("close")), "Pi quit leaves shared caller-owned browser alone");
 		});
 	} finally { await rm(root, { recursive: true, force: true }); }
@@ -78,16 +78,16 @@ console.log(JSON.stringify({ success: true, data: { title: "Fixture", url: "abou
 	} finally { await rm(root, { recursive: true, force: true }); }
 });
 
-for (const enabled of [true, false]) {
-	test(`real native helper booleans preserve the page and daemon: ${enabled}`, { skip: process.env.PI_AGENT_BROWSER_REAL_UPSTREAM !== "1", timeout: 120_000 }, async () => {
+for (const [enabled, oppositeDefaults] of [[true, true], [false, true], [false, false]]) {
+	test(`real native helper booleans preserve the page and daemon: ${enabled} (${oppositeDefaults ? "opposite defaults" : "clean"})`, { skip: process.env.PI_AGENT_BROWSER_REAL_UPSTREAM !== "1", timeout: 120_000 }, async () => {
 		const root = await mkdtemp(join(process.platform === "win32" ? tmpdir() : "/tmp", "pbs-bool-"));
 		const fixture = await startAgentBrowserContractFixtureServer();
 		const socketDir = join(root, "s");
 		const config = join(root, "native.json");
-		await writeFile(config, JSON.stringify({ debug: !enabled, noAutoDialog: !enabled }));
+		await writeFile(config, JSON.stringify({ debug: oppositeDefaults && !enabled, noAutoDialog: oppositeDefaults && !enabled }));
 		const flags = ["--config", config, "--session", "booleans", "--debug", String(enabled), "--no-auto-dialog", String(enabled)];
 		try {
-			await withPatchedEnv({ ...clearedBrowserEnv, HOME: root, USERPROFILE: root, AGENT_BROWSER_SOCKET_DIR: socketDir, AGENT_BROWSER_DEBUG: enabled ? "0" : "1", AGENT_BROWSER_NO_AUTO_DIALOG: enabled ? "0" : "1" }, async () => {
+			await withPatchedEnv({ ...clearedBrowserEnv, HOME: root, USERPROFILE: root, AGENT_BROWSER_SOCKET_DIR: socketDir, AGENT_BROWSER_DEBUG: oppositeDefaults ? enabled ? "0" : "1" : undefined, AGENT_BROWSER_NO_AUTO_DIALOG: oppositeDefaults ? enabled ? "0" : "1" : undefined }, async () => {
 				const harness = createExtensionHarness({ cwd: root });
 				try {
 					const opened = await executeRegisteredTool(harness.tool, harness.ctx, { args: [...flags, "open", fixture.baseUrl] });
@@ -99,12 +99,14 @@ for (const enabled of [true, false]) {
 					assert.match(JSON.stringify(snapshot.details?.data), /Mark ready|Name input/);
 					assert.equal((snapshot.details?.data as { origin?: string }).origin, fixture.baseUrl + "/");
 					assert.equal(await readFile(pidPath, "utf8"), pid, "helper calls retain the exact CLI fingerprint even over opposite config/environment booleans");
+					assert.equal(await stat(join(socketDir, "booleans.log")).then(() => true, error => { if (error.code === "ENOENT") return false; throw error; }), enabled, "explicit false disables native debug logging even when env/config defaults enable it");
 					const inherited = ["--config", config, "--session", "inherited"];
 					assert.equal((await executeRegisteredTool(harness.tool, harness.ctx, { args: [...inherited, "open", fixture.baseUrl] })).isError, false);
 					const inheritedPid = await readFile(join(socketDir, "inherited.pid"), "utf8");
 					const inheritedSnapshot = await executeRegisteredTool(harness.tool, harness.ctx, { args: [...inherited, "snapshot", "-i"] });
 					assert.match(JSON.stringify(inheritedSnapshot.details?.data), /Mark ready|Name input/);
 					assert.equal(await readFile(join(socketDir, "inherited.pid"), "utf8"), inheritedPid, "later calls retain native env/config inheritance without leaked CLI overrides");
+					assert.equal(await stat(join(socketDir, "inherited.log")).then(() => true, error => { if (error.code === "ENOENT") return false; throw error; }), oppositeDefaults, "later logging follows native variable-presence semantics, without leaked overrides");
 				} finally {
 					await executeRegisteredTool(harness.tool, harness.ctx, { args: [...flags, "close"] });
 					await executeRegisteredTool(harness.tool, harness.ctx, { args: ["--config", config, "--session", "inherited", "close"] });

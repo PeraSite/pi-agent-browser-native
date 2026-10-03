@@ -123,7 +123,7 @@ export async function withNativeSessionDefaults(input: ResolvedAgentBrowserValid
 		...(idleTimeout !== undefined ? { AGENT_BROWSER_IDLE_TIMEOUT_MS: idleTimeout } : {}),
 		...(actionPolicy !== undefined ? { AGENT_BROWSER_ACTION_POLICY: actionPolicy } : {}),
 		...(confirmActions !== undefined ? { AGENT_BROWSER_CONFIRM_ACTIONS: confirmActions } : {}),
-		...(debug !== undefined ? { AGENT_BROWSER_DEBUG: debug ? "1" : "0" } : {}),
+		...(debug !== undefined ? { AGENT_BROWSER_DEBUG: debug ? "1" : undefined } : {}),
 		...(noAutoDialog !== undefined ? { AGENT_BROWSER_NO_AUTO_DIALOG: noAutoDialog ? "1" : "0" } : {}),
 		...(configPath !== undefined ? { AGENT_BROWSER_CONFIG: resolve(cwd, configPath) } : {}),
 		...(session !== undefined ? { AGENT_BROWSER_SESSION: session } : {}),

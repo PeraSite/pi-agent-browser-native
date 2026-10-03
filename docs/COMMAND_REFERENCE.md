@@ -761,7 +761,7 @@ These calls return plain text and stay stateless: the extension does not inject 
 
 `cookies set --curl <file>` selects native file-import mode even when `--curl` follows other set operands. Ordinary import paths remain visible in invocation echoes and failed batch diagnostics; inline cookie values, sensitive flags, and secret-bearing path text still redact. File contents are not echoed by this exception.
 
-With explicit `--json false`, cookie `name=value` and storage `key: value` output use command-aware redaction before presentation and export; benign preferences remain visible. All-entry/raw-batch text has unescaped multiline values and no row provenance, so use structured JSON for unambiguous sensitive storage. See [the output contract](TOOL_CONTRACT.md#wrapper-json).
+With explicit `--json false`, cookie `name=value` (including empty names) and storage `key: value` output use command-aware redaction before presentation and export; benign preferences remain visible. Standalone `storage local|session get <key>` and shorthand `storage local|session <key>` redact the whole sensitive value, including embedded newlines. All-entry/raw-batch text has unescaped multiline values and no row provenance, so use structured JSON for unambiguous sensitive storage. See [the output contract](TOOL_CONTRACT.md#wrapper-json).
 
 Privacy note: `cookies get` can expose real profile cookies. Do not run it against `--profile Default` or other authenticated profiles unless the user explicitly needs cookie inspection; prefer task-specific page actions and storage checks.
 
@@ -1060,7 +1060,7 @@ On Android/Termux, follow the README setup to install the packaged Linux-musl ar
 - `--model <name>`: AI model for `chat`. Environment: `AI_GATEWAY_MODEL`.
 - `-v, --verbose`: show tool commands and raw output.
 - `-q, --quiet`: show only AI text responses.
-- `--debug`: debug output. Environment: `AGENT_BROWSER_DEBUG`. Explicit `true`/`false` reaches all helpers in that call, including overriding true config defaults; inherited env/config behavior is unchanged.
+- `--debug`: debug output. Environment: `AGENT_BROWSER_DEBUG`. Explicit `true`/`false` reaches all helpers in that call, including overriding true config defaults; `false` removes the debug variable so native presence checks cannot enable logging. Inherited env/config behavior is unchanged.
 - `AGENT_BROWSER_PLUGINS`: JSON plugin registry override for the upstream `plugin` commands.
 - `--version`, `-V`: show version.
 
