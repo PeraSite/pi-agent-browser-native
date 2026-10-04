@@ -1,5 +1,6 @@
 import { isRecord } from "../../parsing.js";
 import type { ImageObservation, ScreenshotSample } from "../../results/contracts.js";
+import { LIGHTPANDA_IMAGE_REASON } from "../../results/presentation/common.js";
 import { getScreenshotPathTokenIndex, getScreenshotPositionalIndices } from "./artifact-paths.js";
 import { runSessionCommandData } from "./session-state.js";
 
@@ -36,7 +37,8 @@ export async function collectScreenshotSample(options: {
 				element = { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
 			}
 		} catch {}
-		return { url: location.href, frame: window === window.top ? "main" : "child", childFrameCount: window.frames.length,
+		const textRendered = navigator.userAgentData?.brands?.some(b => b.brand === "Lightpanda") || /\\bLightpanda\\//i.test(navigator.userAgent);
+		return { ...(textRendered ? { rendering: "text" } : {}), url: location.href, frame: window === window.top ? "main" : "child", childFrameCount: window.frames.length,
 			viewport: { width: innerWidth, height: innerHeight },
 			document: { width: Math.max(root.scrollWidth, body?.scrollWidth || 0, innerWidth), height: Math.max(root.scrollHeight, body?.scrollHeight || 0, innerHeight) },
 			scroll: { x: scrollX, y: scrollY }, dpr: devicePixelRatio,
@@ -45,7 +47,7 @@ export async function collectScreenshotSample(options: {
 	try {
 		const data = await runSessionCommandData({ ...options, args: ["eval", "--stdin"], stdin: script, timeoutMs: 2_000 });
 		const sample = isRecord(data) ? data.result : undefined;
-		if (!isRecord(sample) || typeof sample.url !== "string" || !["main", "child"].includes(String(sample.frame))
+		if (!isRecord(sample) || (sample.rendering !== undefined && sample.rendering !== "text") || typeof sample.url !== "string" || !["main", "child"].includes(String(sample.frame))
 			|| !finiteRecord(sample.viewport, ["width", "height"]) || !finiteRecord(sample.document, ["width", "height"])
 			|| !finiteRecord(sample.scroll, ["x", "y"]) || !finiteRecord(sample.visualViewport, ["x", "y", "scale"])
 			|| typeof sample.childFrameCount !== "number" || !Number.isInteger(sample.childFrameCount) || sample.childFrameCount < 0
@@ -56,6 +58,7 @@ export async function collectScreenshotSample(options: {
 }
 
 export function buildScreenshotGeometry(options: {
+	rendering?: ImageObservation["rendering"];
 	capture: ImageObservation["capture"];
 	pixels: ImageObservation["pixels"];
 	before?: ScreenshotSample;
@@ -63,6 +66,7 @@ export function buildScreenshotGeometry(options: {
 }): ImageObservation["geometry"] {
 	const { before, after, capture, pixels } = options;
 	const unknown = (reason: string): ImageObservation["geometry"] => ({ status: "unknown", reason, before, after });
+	if (options.rendering === "text" || before?.rendering === "text" || after?.rendering === "text") return unknown(LIGHTPANDA_IMAGE_REASON);
 	if (!before || !after) return unknown("Capture was not bracketed by browser geometry samples; coordinates are unknown.");
 	if (JSON.stringify(before) !== JSON.stringify(after)) return unknown("Browser geometry changed across capture; no coordinate mapping is asserted.");
 	if (before.frame !== "main") return unknown("Probe observed a child frame; its relation to the captured page is unknown.");

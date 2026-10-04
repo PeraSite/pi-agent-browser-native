@@ -192,6 +192,7 @@ export interface AgentBrowserWindow {
 }
 
 export interface ScreenshotSample {
+	rendering?: "text";
 	url: string;
 	frame: "main" | "child";
 	childFrameCount: number;
@@ -204,6 +205,7 @@ export interface ScreenshotSample {
 }
 
 export interface ImageObservation {
+	rendering?: "text";
 	id?: string;
 	path: string;
 	mimeType: string;

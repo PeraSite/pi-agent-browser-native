@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+## 0.9.2 - 2026-10-04
+
+### Fixed
+
+- Treat `--engine` as launch-scoped so switching an active managed browser uses the existing fresh-session recovery instead of replacing its page in place.
+- Label positively identified Lightpanda images as text-rendered in direct, native batch and selected browser-code output; retain image bytes while refusing CSS/mouse-coordinate geometry even when synthetic dimensions match.
+- Omit wrapper-supplied Chrome profile/executable bootstrap defaults when CLI, environment or native config selects Lightpanda, without changing caller-selected launch settings.
+
+### Documentation
+
+- Keep Chrome default and Lightpanda opt-in. Document separate installation, single-target/visual/authentication limits, native unsupported commands, CORS and telemetry; add no driver, browser bundle or automatic fallback.
+
 ## 0.9.1 - 2026-10-02
 
 ### Removed
