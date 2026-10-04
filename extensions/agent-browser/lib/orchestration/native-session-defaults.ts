@@ -94,11 +94,12 @@ export async function withNativeSessionDefaults(input: ResolvedAgentBrowserValid
 	const configuredSession = env.AGENT_BROWSER_SESSION ?? identity.session;
 	const launchArgs = scanUpstreamGlobalFlagOccurrences(input.toolArgs, "--args").at(-1)?.value ?? env.AGENT_BROWSER_ARGS ?? identity.args;
 	const engine = scanUpstreamGlobalFlagOccurrences(input.toolArgs, "--engine").at(-1)?.value ?? env.AGENT_BROWSER_ENGINE ?? identity.engine;
+	const chromeEngine = engine === undefined || engine === "chrome";
 	const provider = scanUpstreamGlobalFlagOccurrences(input.toolArgs, "--provider").at(-1)?.value ?? scanUpstreamGlobalFlagOccurrences(input.toolArgs, "-p").at(-1)?.value ?? env.AGENT_BROWSER_PROVIDER ?? identity.provider;
 	const tokens = parseArgvDescriptor(input.toolArgs).upstreamCommandTokens;
 	const batchAttaches = requestsConnection(tokens, input.toolStdin);
 	const localChrome = browserCommand && !attachment && !batchAttaches && provider === undefined
-		&& (engine === undefined || engine === "chrome");
+		&& chromeEngine;
 	const chromeStartupArgs = localChrome ? ["--no-startup-window", ...(typeof launchArgs === "string" ? [launchArgs] : [])].join(",") : undefined;
 	const persistentChromeArgs = hasLocalLaunchDefaults(identity, env) ? chromeStartupArgs : undefined;
 	const configuredChromeLaunch = persistentChromeArgs !== undefined || [...LOCAL_VALUE_DEFAULTS, ...LOCAL_BOOLEAN_DEFAULTS, ...LOCAL_ARRAY_DEFAULTS, "hideScrollbars", "clearCaCert"].some(key => {
@@ -137,9 +138,9 @@ export async function withNativeSessionDefaults(input: ResolvedAgentBrowserValid
 		if (restoreEligible && daemon.status === "active") restore = daemon.restoreKey ?? undefined;
 		if (restoreEligible && bootstrap) restore = rootDefault;
 		const profile = scanUpstreamGlobalFlagOccurrences(args, "--profile").at(-1)?.value
-			?? (bootstrap && restoreEligible && identity.profile === undefined && env.AGENT_BROWSER_PROFILE === undefined ? root?.profile : undefined);
+			?? (bootstrap && chromeEngine && restoreEligible && identity.profile === undefined && env.AGENT_BROWSER_PROFILE === undefined ? root?.profile : undefined);
 		const executablePath = scanUpstreamGlobalFlagOccurrences(args, "--executable-path").at(-1)?.value
-			?? (bootstrap && identity.executablePath === undefined && env.AGENT_BROWSER_EXECUTABLE_PATH === undefined ? root?.executablePath : undefined);
+			?? (bootstrap && chromeEngine && identity.executablePath === undefined && env.AGENT_BROWSER_EXECUTABLE_PATH === undefined ? root?.executablePath : undefined);
 		return withAgentBrowserProcessEnvironment({
 			...(restore !== undefined ? { AGENT_BROWSER_RESTORE: restore } : {}),
 			...(profile !== undefined ? { AGENT_BROWSER_PROFILE: profile } : {}),

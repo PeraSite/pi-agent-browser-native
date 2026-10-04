@@ -4,6 +4,7 @@ import type { AgentBrowserLifecycle } from "../contracts.js";
 import { stringifyUnknown, truncateText } from "../text.js";
 
 const UNTITLED_PAGE_SUMMARY = "(untitled page)";
+export const LIGHTPANDA_IMAGE_REASON = "Lightpanda screenshot is a text-rendered page representation, not a graphical capture; CSS/mouse coordinate mapping is unknown.";
 
 export function stringifyModelFacing(value: unknown): string {
 	return stringifyUnknown(redactSensitiveValue(value));
