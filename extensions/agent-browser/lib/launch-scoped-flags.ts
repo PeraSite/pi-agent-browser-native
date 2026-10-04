@@ -36,6 +36,10 @@ export const LAUNCH_SCOPED_FLAG_DEFINITIONS = [
 		reason: "selects built-in page init scripts before the upstream browser session is launched",
 	},
 	{
+		flag: "--engine",
+		reason: "selects the browser engine used for the upstream launch",
+	},
+	{
 		flag: "--executable-path",
 		reason: "selects the browser executable used for the upstream launch",
 	},
