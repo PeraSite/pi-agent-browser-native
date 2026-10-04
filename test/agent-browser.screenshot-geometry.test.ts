@@ -1,11 +1,67 @@
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import type { ImageObservation } from "../extensions/agent-browser/lib/results/contracts.js";
-import { createExtensionHarness, executeRegisteredTool, runExtensionEvent, withPatchedEnv } from "./helpers/agent-browser-harness.js";
+import { createExtensionHarness, executeRegisteredTool, runExtensionEvent, withPatchedEnv, writeFakeAgentBrowserBinary } from "./helpers/agent-browser-harness.js";
+
+test("Lightpanda captures stay attached as text-rendered images without coordinate claims across direct, batch and code output", async () => {
+	const dir = await mkdtemp(join(tmpdir(), "piab-text-image-"));
+	const path = join(dir, "image.png");
+	const imageBytes = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==", "base64");
+	await writeFile(path, imageBytes);
+	await writeFakeAgentBrowserBinary(dir, `
+const args = process.argv.slice(2);
+const engine = process.env.PIAB_FIXTURE_ENGINE ?? 'lightpanda';
+const lifecycle = { effectiveLaunch: { browserLaunched: true, ...(engine === 'absent' ? {} : {engine}) } };
+const sample = { ...(process.env.PIAB_FIXTURE_RENDERING === 'text' ? {rendering:'text'} : {}), url:'https://fixture.test/', frame:'main', childFrameCount:0, viewport:{width:1,height:1}, document:{width:1,height:1}, scroll:{x:0,y:0}, dpr:1, visualViewport:{x:0,y:0,scale:1} };
+const capture = {path:${JSON.stringify(path)},lifecycle};
+const data = args.includes('batch') ? [{command:['screenshot',${JSON.stringify(path)}],success:true,result:capture}]
+  : args.includes('screenshot') ? capture : args.includes('eval') ? {result:sample}
+  : {url:'https://fixture.test/',title:'Fixture',lifecycle};
+console.log(JSON.stringify({success:true,data}));`);
+	try {
+		await withPatchedEnv({ PATH: `${dir}:${process.env.PATH}`, PI_AGENT_BROWSER_MANAGED_SESSION_RESTORE: "0" }, async () => {
+			const h = createExtensionHarness({ cwd: dir });
+			const call = async (args: string[], extra = {}) => {
+				const result = await executeRegisteredTool(h.tool, h.ctx, { args, ...extra });
+				assert.equal(result.isError, false, result.content[0]?.text);
+				return result;
+			};
+			const checkImage = (result: Awaited<ReturnType<typeof call>>) => {
+				const observed = (result.details?.imageObservations as ImageObservation[])[0];
+				assert.equal(observed.rendering, "text");
+				assert.equal(observed.geometry.status, "unknown");
+				assert.match(observed.geometry.reason, /Lightpanda.*text-rendered/i);
+				assert.equal(observed.geometry.crop, undefined);
+				assert.equal(observed.geometry.pixelsPerCssPixel, undefined);
+				const image = result.content.find(part => part.type === "image") as { data: string } | undefined;
+				assert.ok(image);
+				assert.deepEqual(Buffer.from(image.data, "base64"), imageBytes);
+			};
+			try {
+				await call(["--engine", "lightpanda", "open", "https://fixture.test/"], { sessionMode: "fresh" });
+				const direct = await call(["--json", "screenshot", path]);
+				checkImage(direct);
+				assert.deepEqual(JSON.parse(direct.content[0].text!).imageObservations, direct.details?.imageObservations);
+				const batch = await call(["batch", "--bail"], { stdin: JSON.stringify([["screenshot", path]]) });
+				checkImage(batch);
+				assert.match(batch.content[0].text!, /Lightpanda.*text-rendered/i);
+				const code = await executeRegisteredTool(h.getTool("agent_browser_code")!, h.ctx, { code: `const r = await browser({args:["screenshot",${JSON.stringify(path)}]}); emitImage(r.imageObservations[0]);` });
+				assert.equal(code.isError, false, code.content[0]?.text);
+				checkImage(code);
+				for (const engine of ["chrome", "absent"]) {
+					await withPatchedEnv({ PIAB_FIXTURE_ENGINE: engine, PIAB_FIXTURE_RENDERING: "text" }, async () => {
+						checkImage(await call(["screenshot", path]));
+					});
+				}
+				assert.deepEqual(await readFile(path), imageBytes);
+			} finally { await call(["close"]); }
+		});
+	} finally { await rm(dir, { recursive: true, force: true }); }
+});
 
 // Based on recon geometry-probe.mjs: CSS1200x800/DPR2, target box(100,160,100,60).
 test("native screenshots expose DPR, viewport/full/element crop and honest unknowns", { skip: process.env.PI_AGENT_BROWSER_REAL_UPSTREAM !== "1", timeout: 90_000 }, async t => {

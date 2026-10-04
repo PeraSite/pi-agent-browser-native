@@ -166,6 +166,57 @@ console.log(JSON.stringify({ success: true, data: { title: "Fixture", url: "http
 	} finally { await rm(root, { recursive: true, force: true }); }
 });
 
+test("root Chrome bootstrap defaults follow effective engine without replacing native launch settings", async t => {
+	const root = await mkdtemp(join(process.platform === "win32" ? tmpdir() : "/tmp", "pbs-engine-"));
+	const log = join(root, "calls.jsonl");
+	const packageConfig = join(root, "package-config.json");
+	const nativeConfig = join(root, "agent-browser.json");
+	await writeFile(packageConfig, JSON.stringify({ browser: { defaultProfile: { name: "Default", policy: "always" }, executablePath: "/wrapper/chrome" } }));
+	await writeFakeAgentBrowserBinary(root, `
+const args = process.argv.slice(2);
+require("node:fs").appendFileSync(${JSON.stringify(log)}, JSON.stringify({ args, profile: process.env.AGENT_BROWSER_PROFILE ?? null, executablePath: process.env.AGENT_BROWSER_EXECUTABLE_PATH ?? null, engine: process.env.AGENT_BROWSER_ENGINE ?? null, config: JSON.parse(require("node:fs").readFileSync(${JSON.stringify(nativeConfig)}, "utf8")) }) + "\\n");
+console.log(JSON.stringify({ success: true, data: { session: "default", title: "Fixture", url: "https://fixture.test/" } }));
+`);
+	try {
+		await withPatchedEnv({ ...clearedBrowserEnv, HOME: root, USERPROFILE: root, PI_AGENT_BROWSER_SOCKET_DIR: join(root, "s"), PATH: `${root}${delimiter}${process.env.PATH}`, PI_AGENT_BROWSER_CONFIG: packageConfig, PI_SUBAGENT_CHILD: undefined, PI_SUBAGENT_ROOT_SESSION_ID: undefined }, async () => {
+			for (const scenario of [
+				{ name: "default Chrome", args: [], config: {}, env: {}, defaults: true },
+				{ name: "CLI Lightpanda", args: ["--engine", "lightpanda"], config: {}, env: {} },
+				{ name: "environment Lightpanda", args: [], config: {}, env: { AGENT_BROWSER_ENGINE: "lightpanda" } },
+				{ name: "native config Lightpanda", args: [], config: { engine: "lightpanda" }, env: {} },
+				{ name: "CLI Chrome beats environment Lightpanda", args: ["--engine", "chrome"], config: {}, env: { AGENT_BROWSER_ENGINE: "lightpanda" }, defaults: true },
+				{ name: "environment Chrome beats config Lightpanda", args: [], config: { engine: "lightpanda" }, env: { AGENT_BROWSER_ENGINE: "chrome" }, defaults: true },
+				{ name: "CLI Lightpanda beats environment Chrome", args: ["--engine", "lightpanda"], config: {}, env: { AGENT_BROWSER_ENGINE: "chrome" } },
+				{ name: "last CLI engine wins", args: ["--engine", "chrome", "--engine", "lightpanda"], config: {}, env: {} },
+				{ name: "caller CLI settings", args: ["--engine", "lightpanda", "--profile", "Caller", "--executable-path", "/caller/browser"], config: {}, env: {}, caller: true },
+				{ name: "caller environment settings", args: [], config: {}, env: { AGENT_BROWSER_ENGINE: "lightpanda", AGENT_BROWSER_PROFILE: "Caller", AGENT_BROWSER_EXECUTABLE_PATH: "/caller/browser" }, caller: true },
+				{ name: "caller native config settings", args: [], config: { engine: "lightpanda", profile: "Caller", executablePath: "/caller/browser" }, env: {} },
+				{ name: "unrelated explicit Chrome session", args: ["--session", "unrelated"], config: {}, env: {} },
+			]) {
+				await t.test(scenario.name, async () => {
+					await writeFile(nativeConfig, JSON.stringify(scenario.config));
+					await writeFile(log, "");
+					await withPatchedEnv({ AGENT_BROWSER_ENGINE: undefined, AGENT_BROWSER_PROFILE: undefined, AGENT_BROWSER_EXECUTABLE_PATH: undefined, ...scenario.env }, async () => {
+						const harness = createExtensionHarness({ cwd: root, sessionId: scenario.name });
+						const result = await executeRegisteredTool(harness.tool, harness.ctx, { args: [...scenario.args, "open", "https://fixture.test/"] });
+						assert.equal(result.isError, false, result.content[0]?.text);
+						const calls = await readInvocationLog(log) as Array<{ args: string[]; profile: string | null; executablePath: string | null; engine: string | null; config: unknown }>;
+						const main = calls.find(call => call.args.includes("open"));
+						assert.ok(main, "the requested browser call reached upstream");
+						assert.equal(main.profile, scenario.defaults ? "Default" : scenario.caller ? "Caller" : null);
+						assert.equal(main.executablePath, scenario.defaults ? "/wrapper/chrome" : scenario.caller ? "/caller/browser" : null);
+						assert.equal(main.engine, scenario.env.AGENT_BROWSER_ENGINE ?? null, "caller engine environment is unchanged");
+						assert.deepEqual(main.config, scenario.config, "native configuration remains unchanged");
+						assert.deepEqual(main.args.slice(-scenario.args.length - 2), [...scenario.args, "open", "https://fixture.test/"], "caller argv remains unchanged");
+						if (!scenario.defaults && !scenario.caller) assert.ok(calls.every(call => call.profile === null && call.executablePath === null), "helpers do not receive wrapper Chrome defaults either");
+						await runExtensionEvent(harness.handlers, "session_shutdown", { reason: "quit" }, harness.ctx);
+					});
+				});
+			}
+		});
+	} finally { await rm(root, { recursive: true, force: true }); }
+});
+
 test("real root group retains explicit profile across child helpers and persistent-profile restart", { skip: process.env.PI_AGENT_BROWSER_REAL_UPSTREAM !== "1", timeout: 120_000 }, async () => {
 	const root = await mkdtemp(join(process.platform === "win32" ? tmpdir() : "/tmp", "pbr-"));
 	const fixture = await startAgentBrowserContractFixtureServer();

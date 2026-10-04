@@ -14,6 +14,7 @@ import {
 	mergeSessionArtifactManifest,
 } from "../artifact-manifest.js";
 import { classifyAgentBrowserSuccessCategory } from "../categories.js";
+import { LIGHTPANDA_IMAGE_REASON } from "./common.js";
 import { formatRecordingReceipt, getRecordingReceipt, type RecordingReceipt } from "../recording.js";
 import type {
 	ArtifactVerificationEntry,
@@ -654,10 +655,14 @@ export async function attachInlineImage(presentation: ToolPresentation, imagePat
 		if (!mimeType) return presentation;
 		const dimensions = getImageDimensions(header.toString("base64"), mimeType);
 		presentation.imagePath = imagePath;
+		const lifecycle = isRecord(presentation.data) && isRecord(presentation.data.lifecycle) ? presentation.data.lifecycle : undefined;
+		const textRendered = isRecord(lifecycle?.effectiveLaunch) && lifecycle.effectiveLaunch.engine === "lightpanda";
 		presentation.imageObservations = [{ path: imagePath, mimeType,
+			...(textRendered ? { rendering: "text" as const } : {}),
 			pixels: dimensions ? { width: dimensions.widthPx, height: dimensions.heightPx } : undefined,
-			capture: "unknown", geometry: { status: "unknown", reason: dimensions ? "Capture geometry was not observed." : "Image dimensions could not be read from the bounded header." } }];
+			capture: "unknown", geometry: { status: "unknown", reason: textRendered ? LIGHTPANDA_IMAGE_REASON : dimensions ? "Capture geometry was not observed." : "Image dimensions could not be read from the bounded header." } }];
 		if (!modelVisible) return presentation;
+		if (textRendered) appendPresentationNotice(presentation, LIGHTPANDA_IMAGE_REASON);
 		const inlineImageMaxBytes = getInlineImageMaxBytes();
 		if (fileStats.size > inlineImageMaxBytes) {
 			appendPresentationNotice(

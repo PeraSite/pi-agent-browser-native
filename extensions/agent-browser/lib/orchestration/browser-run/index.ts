@@ -110,9 +110,10 @@ async function runAgentBrowserToolInContext(options: BrowserRunOptions): Promise
 			const output = await processBrowserOutput({ ...options, artifactRunStartedAtMs, prepared, processResult });
 			applyBrowserRunStatePatch(options.state, output.statePatch);
 			if (isRecord(output.result.details) && Array.isArray(output.result.details.imageObservations) && prepared.commandTokens[0] === "screenshot") {
-				output.result.details.imageObservations = redactSensitiveValue((output.result.details.imageObservations as ImageObservation[]).map(image => ({
-					...image, geometry: buildScreenshotGeometry({ capture: image.capture, pixels: image.pixels, before, after }),
-				})));
+				output.result.details.imageObservations = redactSensitiveValue((output.result.details.imageObservations as ImageObservation[]).map(image => {
+					const rendering = image.rendering ?? before?.rendering ?? after?.rendering;
+					return { ...image, ...(rendering ? { rendering } : {}), geometry: buildScreenshotGeometry({ rendering, capture: image.capture, pixels: image.pixels, before, after }) };
+				}));
 			}
 			return output.result;
 		} finally {

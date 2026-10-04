@@ -321,7 +321,7 @@ npm exec --yes --package pi-agent-browser-native@latest -- pi-agent-browser-conf
 npm exec --yes --package pi-agent-browser-native@latest -- pi-agent-browser-config browser executable set "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser"
 ```
 
-Profile hints with `authenticated-only` remain advisory. Global/override profile names with `policy: "always"` and executable defaults bootstrap inactive automatic root browsers; active roots and unrelated explicit sessions retain their native settings. Configure profile/executable guidance globally, in trusted project config, or through `PI_AGENT_BROWSER_CONFIG`. Ask the agent to run `agent_browser` with `args: ["profiles"]` and `args: ["doctor"]` when profile resolution fails. The upstream `profiles` command lists Chrome profiles from Chrome's user data directory; `Default` is not canonical on every machine. Use the displayed profile directory name, a full profile/user-data directory path when upstream accepts one, or a configured `browser.executablePath` plus `sessionMode: "fresh"` for a different Chromium-compatible browser.
+Profile hints with `authenticated-only` remain advisory. Global/override profile names with `policy: "always"` and executable defaults bootstrap inactive automatic root browsers only when the effective engine is Chrome; active roots and unrelated explicit sessions retain their native settings. Configure profile/executable guidance globally, in trusted project config, or through `PI_AGENT_BROWSER_CONFIG`. Ask the agent to run `agent_browser` with `args: ["profiles"]` and `args: ["doctor"]` when profile resolution fails. The upstream `profiles` command lists Chrome profiles from Chrome's user data directory; `Default` is not canonical on every machine. Use the displayed profile directory name, a full profile/user-data directory path when upstream accepts one, or a configured `browser.executablePath` plus `sessionMode: "fresh"` for a different Chromium-compatible browser.
 
 ## Common agent calls
 
@@ -337,6 +337,21 @@ Open a page and inspect it (first-call recipe: open → snapshot -i → interact
 Chromium launch switches belong in the value of `--args`, for example `{ "args": ["--args", "--no-sandbox", "open", "https://example.com"], "sessionMode": "fresh" }` when that switch is needed. A bare `--no-sandbox` in the command slot is an unknown command; in an `open` / `goto` / `navigate` option position, upstream ignores it. The wrapper diagnoses those forms without rejecting literal text, select values or paths in other commands. For batches, put `--args` in top-level `args` before `batch`, not inside a row.
 
 Local Chrome startup uses the stock binary's `--args --no-startup-window` capability to suppress Chrome's extra startup window. Headless remains the default. Caller launch arguments keep native CLI → environment → config precedence and follow this default; browsers started before this change with custom arguments may restart once when their native launch configuration changes. Ordinary follow-ups do not resend bootstrap settings. CDP, providers, Electron, and Lightpanda remain native-owned; no tabs are deleted or profiles edited by this behavior.
+
+### Opt-in Lightpanda
+
+Chrome remains the default. Install [Lightpanda](https://github.com/lightpanda-io/browser/releases/tag/1.0.0) separately on supported macOS/Linux hosts, put `lightpanda` on `PATH`, then select it explicitly:
+
+```json
+{ "args": ["--engine", "lightpanda", "open", "https://example.com"], "sessionMode": "fresh" }
+{ "args": ["snapshot", "-i"] }
+```
+
+`--engine` is launch-scoped; changing an active managed browser uses the existing fresh-session recovery. `AGENT_BROWSER_ENGINE` and native config also select the engine. Wrapper-supplied Chrome profile/executable defaults are omitted for Lightpanda; caller arguments, environment, and native config remain unchanged.
+
+Lightpanda screenshots render page text, not graphical layout. Positively identified captures carry `imageObservations[].rendering: "text"` and unknown coordinate geometry; keep using refs, not image-derived mouse coordinates. Lightpanda is not Chrome-parity visual QA, profile login, multi-tab, or WebMCP support, and this wrapper never falls back automatically. See [capabilities and limits](docs/COMMAND_REFERENCE.md#lightpanda-engine).
+
+### Native navigation and interaction
 
 `open` without a URL uses native `get url`: it launches when needed and otherwise preserves the current page. This also applies to effective batch rows and code calls. `details.args` preserves the request, while `effectiveArgs`, command, URL data, and lifecycle describe the actual native operation. Use `open about:blank` only when you intend to navigate there. Help/version requests remain unchanged.
 
@@ -507,7 +522,7 @@ Use the exact returned recovery payload after errors. Timeout partial progress r
 
 Both JSON and prose results expose a bounded canonical observation with recovery actions and artifact receipts. Oversized observations name an `observationPath` for the complete redacted result; audit-only `details` is not the model's sole recovery channel. Inner code calls avoid full model rendering, spills, and image encoding until output is selected.
 
-Screenshots expose measured image dimensions and capture geometry when supported by matching before/after samples. A full-page or element image is not a viewport screenshot. Native mouse coordinates are viewport CSS pixels; use the [geometry contract](docs/TOOL_CONTRACT.md#image-observations) and current scroll/frame state before converting image pixels. Unknown geometry stays unknown, including ambiguous or scrolled element captures and unmeasured batch captures. Pi image-resize notes only map sent pixels to original image pixels.
+Screenshots expose measured image dimensions and capture geometry when supported by matching before/after samples. A full-page or element image is not a viewport screenshot. Native mouse coordinates are viewport CSS pixels; use the [geometry contract](docs/TOOL_CONTRACT.md#image-observations) and current scroll/frame state before converting image pixels. Unknown geometry stays unknown, including ambiguous or scrolled element captures, unmeasured batch captures, and Lightpanda text-rendered images (`rendering: "text"`). Pi image-resize notes only map sent pixels to original image pixels.
 
 Save artifacts to the user's exact paths and check `artifactVerification` before claiming they exist or are fresh. Conditional `changed: false` screenshots produce no new attachment. `outputPath` is a separate result-data destination and must not alias a screenshot, download, or recording. Close ends the browser session; explicit files remain host-owned. Recording starts remain pending until stop and receipt/file verification.
 
