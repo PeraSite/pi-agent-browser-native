@@ -1581,6 +1581,8 @@ test("launch-scoped flag metadata is reflected in playbook and command reference
 test("buildExecutionPlan blocks startup-scoped flags from silently reusing an active implicit session", () => {
 	for (const { args, flag } of [
 		{ args: ["--profile", "Default", "open", "https://example.com"], flag: "--profile" },
+		{ args: ["--engine", "chrome", "open", "https://example.com"], flag: "--engine" },
+		{ args: ["--engine", "lightpanda", "open", "https://example.com"], flag: "--engine" },
 		{ args: ["--allowed-domains", "example.com", "open", "https://example.com"], flag: "--allowed-domains" },
 		{ args: ["--executable-path", "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser", "open", "https://example.com"], flag: "--executable-path" },
 		{ args: ["--namespace", "review", "open", "https://example.com"], flag: "--namespace" },
@@ -1622,6 +1624,24 @@ test("buildExecutionPlan blocks startup-scoped flags from silently reusing an ac
 		assert.equal(plan.usedImplicitSession, false);
 		assert.equal(plan.recoveryHint?.recommendedSessionMode, "fresh");
 		assert.deepEqual(plan.recoveryHint?.exampleParams, { args: [...args], sessionMode: "fresh" });
+	}
+});
+
+test("buildExecutionPlan preserves engine selection for new, fresh and caller-owned sessions", () => {
+	for (const engine of ["chrome", "lightpanda"]) {
+		for (const mode of ["new", "fresh", "caller"] as const) {
+			const args = [...(mode === "caller" ? ["--session", "caller"] : []), "--engine", engine, "open", "https://example.com"];
+			const plan = buildExecutionPlan(args, {
+				freshSessionName: "piab-fresh",
+				managedSessionActive: mode !== "new",
+				managedSessionName: "piab-current",
+				sessionMode: mode === "fresh" ? "fresh" : "auto",
+			});
+			assert.equal(plan.validationError, undefined, `${engine} ${mode}`);
+			assert.equal(plan.sessionName, mode === "caller" ? "caller" : mode === "fresh" ? "piab-fresh" : "piab-current");
+			assert.deepEqual(plan.effectiveArgs.slice(-4), ["--engine", engine, "open", "https://example.com"]);
+			assert.equal(plan.usedImplicitSession, mode === "new");
+		}
 	}
 });
 
