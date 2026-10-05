@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.9.3 - 2026-10-05
+
 ### Fixed
 
 - Avoid repeated JSON parsing exceptions for the exact redaction marker and ordinary text that cannot begin JSON, and skip redacting a discarded ref copy in browser-code results. Preserve native grammar validation, secret masking, complete output/spill content, retained snapshot/replay state and direct failure receipts.
