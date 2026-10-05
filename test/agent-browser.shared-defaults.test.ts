@@ -529,3 +529,41 @@ test("real native config shares a persistent fixture profile with fresh code con
 		await rm(root, { recursive: true, force: true });
 	}
 });
+
+test("resolved semantic click and unique select retain automatic root identity", async () => {
+	const root = await mkdtemp(join(process.platform === "win32" ? tmpdir() : "/tmp", "pbs-semantic-"));
+	const log = join(root, "calls.jsonl");
+	await writeFakeAgentBrowserBinary(root, `
+const args = process.argv.slice(2);
+require("node:fs").appendFileSync(${JSON.stringify(log)}, JSON.stringify({ args }) + "\\n");
+const data = args.includes("snapshot") ? {
+  snapshot: '- button "Save" [ref=e1]\\n- combobox "Flavor" [ref=e2]',
+  refs: { e1: { role: "button", name: "Save" }, e2: { role: "combobox", name: "Flavor" } },
+  url: "https://fixture.test/"
+} : { title: "Fixture", url: "https://fixture.test/", result: "https://fixture.test/" };
+console.log(JSON.stringify({ success: true, data }));
+`);
+	try {
+		await withPatchedEnv({ ...clearedBrowserEnv, HOME: root, USERPROFILE: root, PI_AGENT_BROWSER_SOCKET_DIR: join(root, "s"), PATH: `${root}${delimiter}${process.env.PATH}`, PI_SUBAGENT_CHILD: undefined, PI_SUBAGENT_ROOT_SESSION_ID: undefined }, async () => {
+			const harness = createExtensionHarness({ cwd: root, sessionId: "semantic-root" });
+			const opened = await executeRegisteredTool(harness.tool, harness.ctx, { args: ["open", "https://fixture.test/"] });
+			assert.equal(opened.isError, false, opened.content[0]?.text);
+			const session = String(opened.details?.sessionName);
+			assert.match(session, /^pi-root-/);
+			for (const action of [
+				{ action: "click", locator: "role", value: "button", name: "Save" },
+				{ action: "select", locator: "label", value: "Flavor", values: ["vanilla"] },
+			]) {
+				await writeFile(log, "");
+				const result = await executeRegisteredTool(harness.getTool("agent_browser_action")!, harness.ctx, action);
+				assert.equal(result.isError, false, result.content[0]?.text);
+				assert.equal(result.details?.sessionName, session);
+				assert.equal(result.details?.usedImplicitSession, false);
+				const calls = await readInvocationLog(log) as Array<{ args: string[] }>;
+				assert.ok(calls.some(call => call.args.includes("snapshot")), "resolving snapshot ran");
+				assert.ok(calls.some(call => call.args.includes(action.action) && call.args.includes(action.action === "click" ? "@e1" : "@e2")), "resolved mutation ran");
+				assert.ok(calls.every(call => call.args[call.args.indexOf("--session") + 1] === session), "helpers and mutation use the same root identity");
+			}
+		});
+	} finally { await rm(root, { recursive: true, force: true }); }
+});
