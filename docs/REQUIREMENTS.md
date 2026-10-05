@@ -1,6 +1,7 @@
 # Requirements
 
 Related docs:
+
 - [`../README.md`](../README.md)
 - [`ARCHITECTURE.md`](ARCHITECTURE.md)
 - [`TOOL_CONTRACT.md`](TOOL_CONTRACT.md)

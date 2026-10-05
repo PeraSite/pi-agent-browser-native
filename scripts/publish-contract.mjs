@@ -39,7 +39,10 @@ const ALWAYS_INCLUDED_PACKED_FILES = Object.freeze(["package.json"]);
 const NPM_IGNORED_METADATA_FILES = new Set([".DS_Store"]);
 
 function toPackagePath(path) {
-	return path.split(/[\\/]+/).filter(Boolean).join("/");
+	return path
+		.split(/[\\/]+/)
+		.filter(Boolean)
+		.join("/");
 }
 
 async function readPackageJson(cwd) {
@@ -58,8 +61,12 @@ async function expandDeclaredPackageFile(cwd, declaredPath) {
 			`package.json files entry "${normalizedPath}" does not exist or cannot be read: ${error instanceof Error ? error.message : String(error)}`,
 		);
 	}
-	if (pathStat.isFile()) return [normalizedPath];
-	if (!pathStat.isDirectory()) return [];
+	if (pathStat.isFile()) {
+		return [normalizedPath];
+	}
+	if (!pathStat.isDirectory()) {
+		return [];
+	}
 
 	const entries = await readdir(absolutePath, { withFileTypes: true });
 	const expandedPaths = [];
@@ -77,7 +84,9 @@ async function expandDeclaredPackageFile(cwd, declaredPath) {
 export async function loadPublishContract(options = {}) {
 	const cwd = options.cwd ?? process.cwd();
 	const packageJson = await readPackageJson(cwd);
-	const declaredPackageFiles = Array.isArray(packageJson.files) ? packageJson.files.map(toPackagePath) : [];
+	const declaredPackageFiles = Array.isArray(packageJson.files)
+		? packageJson.files.map(toPackagePath)
+		: [];
 	const requiredPackedFiles = new Set(ALWAYS_INCLUDED_PACKED_FILES);
 
 	for (const declaredPath of declaredPackageFiles) {

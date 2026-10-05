@@ -1,10 +1,10 @@
 import { isRecord } from "../parsing.js";
 import type { PersistentSessionArtifactStore } from "../temp.js";
-import type {
-	SessionArtifactManifest,
-	ToolPresentation,
-} from "./contracts.js";
-import { isHighValueControlEntry, selectHighValueControlEntries } from "./snapshot-high-value-controls.js";
+import type { SessionArtifactManifest, ToolPresentation } from "./contracts.js";
+import {
+	isHighValueControlEntry,
+	selectHighValueControlEntries,
+} from "./snapshot-high-value-controls.js";
 import {
 	buildFallbackSnapshotOutline,
 	buildRefLineOrderMap,
@@ -19,7 +19,11 @@ import {
 	isNoiseName,
 	parseSnapshotLines,
 } from "./snapshot-segments.js";
-import { applySnapshotArtifactManifest, writeSnapshotSpillFile, type SnapshotSpillWriteResult } from "./snapshot-spill.js";
+import {
+	applySnapshotArtifactManifest,
+	writeSnapshotSpillFile,
+	type SnapshotSpillWriteResult,
+} from "./snapshot-spill.js";
 import {
 	enrichSnapshotRefEntries,
 	getFullSnapshotData,
@@ -40,7 +44,11 @@ const SNAPSHOT_ROLE_COUNT_MAX_ENTRIES = 4;
 const SNAPSHOT_NAME_MAX_CHARS = 96;
 function getSnapshotText(data: Record<string, unknown>): string | undefined {
 	const full = getFullSnapshotData(data);
-	return typeof full?.snapshot === "string" ? full.snapshot : isRecord(data.snapshot) ? JSON.stringify(data.snapshot) : undefined;
+	return typeof full?.snapshot === "string"
+		? full.snapshot
+		: isRecord(data.snapshot)
+			? JSON.stringify(data.snapshot)
+			: undefined;
 }
 
 function getSnapshotOrigin(data: Record<string, unknown>): string {
@@ -57,13 +65,19 @@ function getSnapshotRoleCounts(refEntries: SnapshotRefEntry[]): Record<string, n
 
 function formatRoleCounts(roleCounts: Record<string, number>): string | undefined {
 	const entries = Object.entries(roleCounts);
-	if (entries.length === 0) return undefined;
+	if (entries.length === 0) {
+		return undefined;
+	}
 
 	const ordered = entries.sort((left, right) => {
-		if (right[1] !== left[1]) return right[1] - left[1];
+		if (right[1] !== left[1]) {
+			return right[1] - left[1];
+		}
 		return getSnapshotRolePriority(left[0]) - getSnapshotRolePriority(right[0]);
 	});
-	const visibleEntries = ordered.slice(0, SNAPSHOT_ROLE_COUNT_MAX_ENTRIES).map(([role, count]) => `${role} ${count}`);
+	const visibleEntries = ordered
+		.slice(0, SNAPSHOT_ROLE_COUNT_MAX_ENTRIES)
+		.map(([role, count]) => `${role} ${count}`);
 	const omittedEntries = Math.max(0, ordered.length - visibleEntries.length);
 	if (omittedEntries > 0) {
 		visibleEntries.push(`+${omittedEntries} more`);
@@ -80,25 +94,34 @@ function rankRefEntries(
 	return [...refEntries].sort((left, right) => {
 		const leftBucket = previewRefIds.has(left.id) ? 0 : focusRefIds.has(left.id) ? 1 : 2;
 		const rightBucket = previewRefIds.has(right.id) ? 0 : focusRefIds.has(right.id) ? 1 : 2;
-		if (leftBucket !== rightBucket) return leftBucket - rightBucket;
+		if (leftBucket !== rightBucket) {
+			return leftBucket - rightBucket;
+		}
 
 		const rolePriority = getSnapshotRolePriority(left.role) - getSnapshotRolePriority(right.role);
-		if (rolePriority !== 0) return rolePriority;
+		if (rolePriority !== 0) {
+			return rolePriority;
+		}
 
 		const leftHasName = left.name.length > 0 ? 0 : 1;
 		const rightHasName = right.name.length > 0 ? 0 : 1;
-		if (leftHasName !== rightHasName) return leftHasName - rightHasName;
+		if (leftHasName !== rightHasName) {
+			return leftHasName - rightHasName;
+		}
 
 		const leftLineOrder = lineOrderByRef.get(left.id) ?? Number.MAX_SAFE_INTEGER;
 		const rightLineOrder = lineOrderByRef.get(right.id) ?? Number.MAX_SAFE_INTEGER;
-		if (leftLineOrder !== rightLineOrder) return leftLineOrder - rightLineOrder;
+		if (leftLineOrder !== rightLineOrder) {
+			return leftLineOrder - rightLineOrder;
+		}
 
 		return compareRefIds(left.id, right.id);
 	});
 }
 
 function formatCompactRef(entry: SnapshotRefEntry): string {
-	const suffix = entry.name.length > 0 ? ` "${truncateText(entry.name, SNAPSHOT_NAME_MAX_CHARS)}"` : "";
+	const suffix =
+		entry.name.length > 0 ? ` "${truncateText(entry.name, SNAPSHOT_NAME_MAX_CHARS)}"` : "";
 	return `- ${entry.id} ${entry.role}${suffix}`;
 }
 
@@ -114,7 +137,9 @@ function shouldCompactSnapshot(rawText: string, data: Record<string, unknown>): 
 
 export function formatSnapshotSummary(data: Record<string, unknown>): string {
 	const origin = typeof data.origin === "string" ? data.origin : "page";
-	if (isRecord(data.snapshot) && data.snapshot.kind !== "full") return `Snapshot ${data.snapshot.kind}: revision ${data.snapshot.revision} on ${origin}`;
+	if (isRecord(data.snapshot) && data.snapshot.kind !== "full") {
+		return `Snapshot ${data.snapshot.kind}: revision ${data.snapshot.revision} on ${origin}`;
+	}
 	const refs = getSnapshotRefEntries(data).length;
 	return `Snapshot: ${refs} refs on ${origin}`;
 }
@@ -123,7 +148,9 @@ export function formatRawSnapshotText(data: Record<string, unknown>): string {
 	const origin = getSnapshotOrigin(data);
 	const refs = getSnapshotRefEntries(data).length;
 	const snapshot = getSnapshotText(data);
-	if (isRecord(data.snapshot) && data.snapshot.kind !== "full") return `Origin: ${origin}\n${formatSnapshotSummary(data)}\n\n${snapshot}`;
+	if (isRecord(data.snapshot) && data.snapshot.kind !== "full") {
+		return `Origin: ${origin}\n${formatSnapshotSummary(data)}\n\n${snapshot}`;
+	}
 	if (!snapshot) {
 		return `Origin: ${origin}\nRefs: ${refs}\n\n(no interactive elements)`;
 	}
@@ -139,7 +166,10 @@ export async function buildSnapshotPresentation(
 	const rawText = formatRawSnapshotText(data);
 	// Native partials are already compact patches, not accessibility trees.
 	// The ordinary large-output presenter handles truly oversized patches.
-	if ((isRecord(data.snapshot) && data.snapshot.kind !== "full") || !shouldCompactSnapshot(rawText, data)) {
+	if (
+		(isRecord(data.snapshot) && data.snapshot.kind !== "full") ||
+		!shouldCompactSnapshot(rawText, data)
+	) {
 		return {
 			content: [{ type: "text", text: rawText }],
 			data,
@@ -165,10 +195,18 @@ export async function buildSnapshotPresentation(
 	const useStructuredPreview = canUseStructuredSnapshotPreview(snapshotLines, refEntries);
 	const snapshotSegments = useStructuredPreview ? buildSnapshotSegments(snapshotLines) : [];
 	const primarySegment = useStructuredPreview ? choosePrimarySegment(snapshotSegments) : undefined;
-	const additionalSegments = useStructuredPreview ? chooseAdditionalSegments(snapshotSegments, primarySegment) : [];
-	const additionalSegmentCount = useStructuredPreview && primarySegment ? Math.max(0, snapshotSegments.length - 1) : 0;
-	const omittedAdditionalSectionCount = Math.max(0, additionalSegmentCount - additionalSegments.length);
-	const primaryPreview = primarySegment ? buildSegmentPreview(primarySegment, SNAPSHOT_PRIMARY_PREVIEW_LINES) : undefined;
+	const additionalSegments = useStructuredPreview
+		? chooseAdditionalSegments(snapshotSegments, primarySegment)
+		: [];
+	const additionalSegmentCount =
+		useStructuredPreview && primarySegment ? Math.max(0, snapshotSegments.length - 1) : 0;
+	const omittedAdditionalSectionCount = Math.max(
+		0,
+		additionalSegmentCount - additionalSegments.length,
+	);
+	const primaryPreview = primarySegment
+		? buildSegmentPreview(primarySegment, SNAPSHOT_PRIMARY_PREVIEW_LINES)
+		: undefined;
 	const additionalPreviews = additionalSegments
 		.map((segment) => ({
 			preview: buildSegmentPreview(segment, SNAPSHOT_SECTION_PREVIEW_LINES),
@@ -176,7 +214,9 @@ export async function buildSnapshotPresentation(
 		}))
 		.filter(({ preview }) => preview.lines.length > 0);
 	const fallbackPreview =
-		!useStructuredPreview || !primaryPreview || primaryPreview.lines.length === 0 ? buildFallbackSnapshotOutline(snapshotLines) : undefined;
+		!useStructuredPreview || !primaryPreview || primaryPreview.lines.length === 0
+			? buildFallbackSnapshotOutline(snapshotLines)
+			: undefined;
 
 	const previewRefIds = new Set<string>([
 		...(primaryPreview?.refIds ?? []),
@@ -188,28 +228,51 @@ export async function buildSnapshotPresentation(
 			? getMeaningfulSegmentLines(primarySegment).flatMap((line) => (line.ref ? [line.ref] : []))
 			: []),
 		...(useStructuredPreview
-			? additionalSegments.flatMap((segment) => getMeaningfulSegmentLines(segment).flatMap((line) => (line.ref ? [line.ref] : [])))
+			? additionalSegments.flatMap((segment) =>
+					getMeaningfulSegmentLines(segment).flatMap((line) => (line.ref ? [line.ref] : [])),
+				)
 			: []),
 		...(fallbackPreview?.refIds ?? []),
 	]);
-	const lineOrderByRef = useStructuredPreview ? buildRefLineOrderMap(snapshotLines) : new Map<string, number>();
+	const lineOrderByRef = useStructuredPreview
+		? buildRefLineOrderMap(snapshotLines)
+		: new Map<string, number>();
 	const rankedRefEntries = rankRefEntries(refEntries, previewRefIds, focusRefIds, lineOrderByRef);
 	const visibleRankedRefEntries = rankedRefEntries.filter(
-		(entry) => !isNoiseName(entry.name) && !isChromeSectionName(entry.name) && !(entry.role === "heading" && entry.name.length <= 2),
+		(entry) =>
+			!isNoiseName(entry.name) &&
+			!isChromeSectionName(entry.name) &&
+			!(entry.role === "heading" && entry.name.length <= 2),
 	);
 	const keyRefEntries = visibleRankedRefEntries.slice(0, SNAPSHOT_KEY_REF_MAX_LINES);
 	const keyRefIdSet = new Set(keyRefEntries.map((entry) => entry.id));
 	const otherRefEntries = visibleRankedRefEntries
 		.filter((entry) => !keyRefIdSet.has(entry.id))
 		.slice(0, SNAPSHOT_OTHER_REF_MAX_LINES);
-	const displayedRefIdSet = new Set([...keyRefEntries, ...otherRefEntries].map((entry) => entry.id));
-	const omittedRefEntries = visibleRankedRefEntries.filter((entry) => !displayedRefIdSet.has(entry.id));
-	const highValueControlEntries = omittedRefEntries.filter(
-		(entry) => isHighValueControlEntry(entry) && !isNoiseName(entry.name) && !isChromeSectionName(entry.name),
+	const displayedRefIdSet = new Set(
+		[...keyRefEntries, ...otherRefEntries].map((entry) => entry.id),
 	);
-	const visibleHighValueControlEntries = selectHighValueControlEntries(highValueControlEntries, SNAPSHOT_HIGH_VALUE_REF_MAX_LINES);
-	const omittedHighValueControls = Math.max(0, highValueControlEntries.length - visibleHighValueControlEntries.length);
-	const omittedNonHighlightedRefs = Math.max(0, omittedRefEntries.length - highValueControlEntries.length);
+	const omittedRefEntries = visibleRankedRefEntries.filter(
+		(entry) => !displayedRefIdSet.has(entry.id),
+	);
+	const highValueControlEntries = omittedRefEntries.filter(
+		(entry) =>
+			isHighValueControlEntry(entry) &&
+			!isNoiseName(entry.name) &&
+			!isChromeSectionName(entry.name),
+	);
+	const visibleHighValueControlEntries = selectHighValueControlEntries(
+		highValueControlEntries,
+		SNAPSHOT_HIGH_VALUE_REF_MAX_LINES,
+	);
+	const omittedHighValueControls = Math.max(
+		0,
+		highValueControlEntries.length - visibleHighValueControlEntries.length,
+	);
+	const omittedNonHighlightedRefs = Math.max(
+		0,
+		omittedRefEntries.length - highValueControlEntries.length,
+	);
 	const origin = getSnapshotOrigin(data);
 
 	const lines: string[] = [
@@ -241,7 +304,9 @@ export async function buildSnapshotPresentation(
 		if (additionalPreviews.length > 0) {
 			lines.push("", "Additional sections:");
 			additionalPreviews.forEach(({ preview }, index) => {
-				if (index > 0) lines.push("");
+				if (index > 0) {
+					lines.push("");
+				}
 				lines.push(...preview.lines);
 				if (preview.omittedCount > 0) {
 					lines.push(`- ... (${preview.omittedCount} more lines in this section)`);
@@ -253,7 +318,11 @@ export async function buildSnapshotPresentation(
 		}
 	}
 
-	lines.push("", "Key refs:", ...(keyRefEntries.length > 0 ? keyRefEntries.map(formatCompactRef) : ["(no refs)"]));
+	lines.push(
+		"",
+		"Key refs:",
+		...(keyRefEntries.length > 0 ? keyRefEntries.map(formatCompactRef) : ["(no refs)"]),
+	);
 	if (otherRefEntries.length > 0) {
 		lines.push("", "Other refs:", ...otherRefEntries.map(formatCompactRef));
 	}
@@ -261,7 +330,11 @@ export async function buildSnapshotPresentation(
 		lines.push(`- ... (${omittedNonHighlightedRefs} additional refs omitted)`);
 	}
 	if (visibleHighValueControlEntries.length > 0) {
-		lines.push("", "Omitted high-value controls:", ...visibleHighValueControlEntries.map(formatCompactRef));
+		lines.push(
+			"",
+			"Omitted high-value controls:",
+			...visibleHighValueControlEntries.map(formatCompactRef),
+		);
 		if (omittedHighValueControls > 0) {
 			lines.push(`- ... (${omittedHighValueControls} additional high-value controls omitted)`);
 		}
@@ -300,13 +373,13 @@ export async function buildSnapshotPresentation(
 			previewSections: [
 				...(primarySegment
 					? [
-						{
-							linesShown: primaryPreview?.lines.length ?? 0,
-							omittedLines: primaryPreview?.omittedCount ?? 0,
-							role: primarySegment.root.role,
-							title: primarySegment.root.name,
-						},
-					  ]
+							{
+								linesShown: primaryPreview?.lines.length ?? 0,
+								omittedLines: primaryPreview?.omittedCount ?? 0,
+								role: primarySegment.root.role,
+								title: primarySegment.root.name,
+							},
+						]
 					: []),
 				...additionalPreviews.map(({ preview, segment }) => ({
 					linesShown: preview.lines.length,

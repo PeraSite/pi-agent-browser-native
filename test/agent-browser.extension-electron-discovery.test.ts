@@ -28,8 +28,18 @@ test("electron discovery finds macOS Electron app bundles with query filtering",
 	try {
 		const applicationsDir = join(tempDir, "Applications");
 		await mkdir(applicationsDir, { recursive: true });
-		const alpha = await writeFakeMacElectronApp({ applicationsDir, bundleId: "com.example.Alpha", executableName: "AlphaBin", name: "Alpha App" });
-		await writeFakeMacElectronApp({ applicationsDir, bundleId: "com.example.Beta", executableName: "BetaBin", name: "Beta App" });
+		const alpha = await writeFakeMacElectronApp({
+			applicationsDir,
+			bundleId: "com.example.Alpha",
+			executableName: "AlphaBin",
+			name: "Alpha App",
+		});
+		await writeFakeMacElectronApp({
+			applicationsDir,
+			bundleId: "com.example.Beta",
+			executableName: "BetaBin",
+			name: "Beta App",
+		});
 		const nonElectronPath = join(applicationsDir, "Plain App.app");
 		await mkdir(join(nonElectronPath, "Contents", "Resources"), { recursive: true });
 		await writeFile(join(nonElectronPath, "Contents", "Resources", "app.asar"), "asar", "utf8");
@@ -42,8 +52,14 @@ test("electron discovery finds macOS Electron app bundles with query filtering",
 		assert.equal(all.omittedCount, 0);
 		assert.equal(all.apps.find((app) => app.name === "Alpha App")?.bundleId, "com.example.Alpha");
 		assert.equal(all.apps.find((app) => app.name === "Alpha App")?.appPath, alpha.appPath);
-		assert.equal(all.apps.find((app) => app.name === "Alpha App")?.executablePath, alpha.executablePath);
-		assert.equal(all.apps.every((app) => app.platform === "darwin"), true);
+		assert.equal(
+			all.apps.find((app) => app.name === "Alpha App")?.executablePath,
+			alpha.executablePath,
+		);
+		assert.equal(
+			all.apps.every((app) => app.platform === "darwin"),
+			true,
+		);
 
 		const byName = await discoverElectronApps({
 			locations: { darwinApplicationDirectories: [applicationsDir] },
@@ -67,10 +83,30 @@ test("electron discovery annotates likely sensitive apps without blocking discov
 	try {
 		const applicationsDir = join(tempDir, "Applications");
 		await mkdir(applicationsDir, { recursive: true });
-		await writeFakeMacElectronApp({ applicationsDir, bundleId: "md.obsidian", executableName: "Obsidian", name: "Obsidian" });
-		await writeFakeMacElectronApp({ applicationsDir, bundleId: "com.tinyspeck.slackmacgap", executableName: "Slack", name: "Slack" });
-		await writeFakeMacElectronApp({ applicationsDir, bundleId: "com.microsoft.VSCode", executableName: "Code", name: "Visual Studio Code" });
-		await writeFakeMacElectronApp({ applicationsDir, bundleId: "com.example.Plain", executableName: "Plain", name: "Plain Electron" });
+		await writeFakeMacElectronApp({
+			applicationsDir,
+			bundleId: "md.obsidian",
+			executableName: "Obsidian",
+			name: "Obsidian",
+		});
+		await writeFakeMacElectronApp({
+			applicationsDir,
+			bundleId: "com.tinyspeck.slackmacgap",
+			executableName: "Slack",
+			name: "Slack",
+		});
+		await writeFakeMacElectronApp({
+			applicationsDir,
+			bundleId: "com.microsoft.VSCode",
+			executableName: "Code",
+			name: "Visual Studio Code",
+		});
+		await writeFakeMacElectronApp({
+			applicationsDir,
+			bundleId: "com.example.Plain",
+			executableName: "Plain",
+			name: "Plain Electron",
+		});
 
 		const result = await discoverElectronApps({
 			locations: { darwinApplicationDirectories: [applicationsDir] },
@@ -82,10 +118,13 @@ test("electron discovery annotates likely sensitive apps without blocking discov
 		assert.deepEqual(byName.get("Obsidian")?.sensitivity, {
 			categories: ["notes"],
 			level: "likely-sensitive",
-			reason: "App name, bundle id, desktop id, or path matched common private-data app patterns; discovery still does not enforce policy.",
+			reason:
+				"App name, bundle id, desktop id, or path matched common private-data app patterns; discovery still does not enforce policy.",
 		});
 		assert.deepEqual(byName.get("Slack")?.sensitivity?.categories, ["chat"]);
-		assert.deepEqual(byName.get("Visual Studio Code")?.sensitivity?.categories, ["developer-workspace"]);
+		assert.deepEqual(byName.get("Visual Studio Code")?.sensitivity?.categories, [
+			"developer-workspace",
+		]);
 		assert.equal(byName.get("Plain Electron")?.sensitivity, undefined);
 	} finally {
 		await rm(tempDir, { force: true, recursive: true });
@@ -112,35 +151,55 @@ test("electron discovery scans Linux desktop files and applies Electron evidence
 		await writeFile(plainExecutable, "#!/bin/sh\n", "utf8");
 		await chmod(plainExecutable, 0o755);
 
-		await writeFile(join(desktopDir, "demo.desktop"), `[Desktop Entry]
+		await writeFile(
+			join(desktopDir, "demo.desktop"),
+			`[Desktop Entry]
 Type=Application
 Name=Demo Electron
 Comment=Demo comment
 Exec=${quoteDesktopExecPath(electronExecutable)} %U --ignored-field-code %F
 Icon=demo-icon
-`, "utf8");
-		await writeFile(join(desktopDir, "plain.desktop"), `[Desktop Entry]
+`,
+			"utf8",
+		);
+		await writeFile(
+			join(desktopDir, "plain.desktop"),
+			`[Desktop Entry]
 Type=Application
 Name=Plain Binary
 Exec=${quoteDesktopExecPath(plainExecutable)} %U
-`, "utf8");
-		await writeFile(join(desktopDir, "hidden.desktop"), `[Desktop Entry]
+`,
+			"utf8",
+		);
+		await writeFile(
+			join(desktopDir, "hidden.desktop"),
+			`[Desktop Entry]
 Type=Application
 Name=Hidden Electron
 Hidden=true
 Exec=${quoteDesktopExecPath(electronExecutable)}
-`, "utf8");
-		await writeFile(join(desktopDir, "nodisplay.desktop"), `[Desktop Entry]
+`,
+			"utf8",
+		);
+		await writeFile(
+			join(desktopDir, "nodisplay.desktop"),
+			`[Desktop Entry]
 Type=Application
 Name=No Display Electron
 NoDisplay=true
 Exec=${quoteDesktopExecPath(electronExecutable)}
-`, "utf8");
-		await writeFile(join(desktopDir, "link.desktop"), `[Desktop Entry]
+`,
+			"utf8",
+		);
+		await writeFile(
+			join(desktopDir, "link.desktop"),
+			`[Desktop Entry]
 Type=Link
 Name=Link Electron
 Exec=${quoteDesktopExecPath(electronExecutable)}
-`, "utf8");
+`,
+			"utf8",
+		);
 
 		const result = await discoverElectronApps({
 			locations: { linuxDesktopDirectories: [desktopDir], pathEnv: "" },
@@ -159,11 +218,15 @@ Exec=${quoteDesktopExecPath(electronExecutable)}
 		await mkdir(binDir, { recursive: true });
 		const symlinkPath = join(binDir, "demo-link");
 		await symlink(electronExecutable, symlinkPath);
-		await writeFile(join(desktopDir, "symlink.desktop"), `[Desktop Entry]
+		await writeFile(
+			join(desktopDir, "symlink.desktop"),
+			`[Desktop Entry]
 Type=Application
 Name=Symlink Electron
 Exec=${quoteDesktopExecPath(symlinkPath)}
-`, "utf8");
+`,
+			"utf8",
+		);
 		const symlinkResult = await discoverElectronApps({
 			locations: { linuxDesktopDirectories: [desktopDir], pathEnv: "" },
 			platform: "linux",
@@ -173,13 +236,20 @@ Exec=${quoteDesktopExecPath(symlinkPath)}
 		assert.equal(symlinkResult.apps[0]?.executablePath, realElectronExecutable);
 
 		const flatpakUserAppDirectory = join(tempDir, "flatpak", "app");
-		const flatpakExecutable = await writeFakeLinuxElectronBinary(join(flatpakUserAppDirectory, "com.example.Flat", "current", "active", "files"), "flat-electron");
+		const flatpakExecutable = await writeFakeLinuxElectronBinary(
+			join(flatpakUserAppDirectory, "com.example.Flat", "current", "active", "files"),
+			"flat-electron",
+		);
 		const realFlatpakExecutable = await realpath(flatpakExecutable);
-		await writeFile(join(desktopDir, "com.example.Flat.desktop"), `[Desktop Entry]
+		await writeFile(
+			join(desktopDir, "com.example.Flat.desktop"),
+			`[Desktop Entry]
 Type=Application
 Name=Flatpak Electron
 Exec=/usr/bin/flatpak run com.example.Flat
-`, "utf8");
+`,
+			"utf8",
+		);
 		const flatpakResult = await discoverElectronApps({
 			locations: { flatpakUserAppDirectory, linuxDesktopDirectories: [desktopDir], pathEnv: "" },
 			platform: "linux",
@@ -200,7 +270,12 @@ test("electron discovery caps results, clamps maxResults, and reports omittedCou
 		await mkdir(applicationsDir, { recursive: true });
 		for (let index = 0; index < ELECTRON_DISCOVERY_MAX_RESULTS + 2; index += 1) {
 			const suffix = String(index).padStart(3, "0");
-			await writeFakeMacElectronApp({ applicationsDir, bundleId: `com.example.Cap${suffix}`, executableName: `Cap${suffix}`, name: `Cap App ${suffix}` });
+			await writeFakeMacElectronApp({
+				applicationsDir,
+				bundleId: `com.example.Cap${suffix}`,
+				executableName: `Cap${suffix}`,
+				name: `Cap App ${suffix}`,
+			});
 		}
 
 		const clamped = await discoverElectronApps({

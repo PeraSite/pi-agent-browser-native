@@ -172,12 +172,20 @@ export function hostToolPath(pathValue = process.env.PATH ?? "") {
 }
 
 function localToolStep(command, args, env) {
-	if (command === "tsc" && process.platform === "android") return { command: "tsgo", args, env };
-	return { command: join(process.cwd(), "node_modules", ".bin", `${command}${binSuffix}`), args, env };
+	if (command === "tsc" && process.platform === "android") {
+		return { command: "tsgo", args, env };
+	}
+	return {
+		command: join(process.cwd(), "node_modules", ".bin", `${command}${binSuffix}`),
+		args,
+		env,
+	};
 }
 
 export function parseDocsArgs(argv) {
-	if (argv.includes("-h") || argv.includes("--help")) return { showHelp: true };
+	if (argv.includes("-h") || argv.includes("--help")) {
+		return { showHelp: true };
+	}
 
 	let target = "all";
 	let mode = "check";
@@ -209,7 +217,9 @@ export function docsSteps(options) {
 }
 
 export function parseVerifyArgs(argv) {
-	if (argv.includes("-h") || argv.includes("--help")) return { mode: "default", passthrough: [], showHelp: true };
+	if (argv.includes("-h") || argv.includes("--help")) {
+		return { mode: "default", passthrough: [], showHelp: true };
+	}
 	const [rawMode, ...rest] = argv;
 	const mode = rawMode ?? "default";
 	const supportedModes = new Set([
@@ -241,14 +251,18 @@ function validatePlatformSmokePassthrough(passthrough) {
 		const arg = passthrough[index];
 		if (allowedCommands.has(arg)) {
 			commandCount += 1;
-			if (commandCount > 1) throw new UsageError("platform-smoke accepts one command: doctor or run.");
+			if (commandCount > 1) {
+				throw new UsageError("platform-smoke accepts one command: doctor or run.");
+			}
 			continue;
 		}
 		if (!allowedFlags.has(arg)) {
 			throw new UsageError(`Option ${arg} is not supported for verify mode platform-smoke.`);
 		}
 		const value = passthrough[index + 1];
-		if (!value || value.startsWith("-")) throw new UsageError(`${arg} requires a value.`);
+		if (!value || value.startsWith("-")) {
+			throw new UsageError(`${arg} requires a value.`);
+		}
 		index += 1;
 	}
 }
@@ -280,22 +294,30 @@ function validatePassthrough(mode, passthrough) {
 		}
 		if (arg === "--model") {
 			const value = passthrough[index + 1];
-			if (!value || value.startsWith("-")) throw new UsageError("--model requires a value.");
+			if (!value || value.startsWith("-")) {
+				throw new UsageError("--model requires a value.");
+			}
 			index += 1;
 		}
 		if (mode === "lifecycle" && arg === "--timeout-ms") {
 			const value = passthrough[index + 1];
-			if (!value) throw new UsageError("--timeout-ms requires a value.");
+			if (!value) {
+				throw new UsageError("--timeout-ms requires a value.");
+			}
 			index += 1;
 		}
 		if (arg === "--artifact-dir") {
 			const value = passthrough[index + 1];
-			if (!value || value.startsWith("-")) throw new UsageError("--artifact-dir requires a path.");
+			if (!value || value.startsWith("-")) {
+				throw new UsageError("--artifact-dir requires a path.");
+			}
 			index += 1;
 		}
 		if (mode === "startup-profile" && arg === "--samples") {
 			const value = passthrough[index + 1];
-			if (!value || value.startsWith("-")) throw new UsageError("--samples requires a value.");
+			if (!value || value.startsWith("-")) {
+				throw new UsageError("--samples requires a value.");
+			}
 			index += 1;
 		}
 	}
@@ -336,18 +358,49 @@ export function verifySteps(options) {
 			return [scriptStep(["./scripts/profile-startup.mjs", ...options.passthrough])];
 		case "real-upstream":
 			return [
-				localToolStep("tsx", ["--test", "--test-force-exit", "--test-name-pattern", "plugin list stays sessionless", "test/agent-browser.real-upstream-contract.test.ts"], { PI_AGENT_BROWSER_REAL_UPSTREAM: "1" }),
-				localToolStep("tsx", ["--test", "--test-force-exit", "--test-name-pattern", "contract suite matches", "test/agent-browser.real-upstream-contract.test.ts"], { PI_AGENT_BROWSER_REAL_UPSTREAM: "1" }),
-				localToolStep("tsx", ["--test", "--test-force-exit", "test/agent-browser.batch-fidelity.test.ts"], { PI_AGENT_BROWSER_REAL_UPSTREAM: "1" }),
+				localToolStep(
+					"tsx",
+					[
+						"--test",
+						"--test-force-exit",
+						"--test-name-pattern",
+						"plugin list stays sessionless",
+						"test/agent-browser.real-upstream-contract.test.ts",
+					],
+					{ PI_AGENT_BROWSER_REAL_UPSTREAM: "1" },
+				),
+				localToolStep(
+					"tsx",
+					[
+						"--test",
+						"--test-force-exit",
+						"--test-name-pattern",
+						"contract suite matches",
+						"test/agent-browser.real-upstream-contract.test.ts",
+					],
+					{ PI_AGENT_BROWSER_REAL_UPSTREAM: "1" },
+				),
+				localToolStep(
+					"tsx",
+					["--test", "--test-force-exit", "test/agent-browser.batch-fidelity.test.ts"],
+					{ PI_AGENT_BROWSER_REAL_UPSTREAM: "1" },
+				),
 			];
 		case "dogfood":
-			return [buildStep(), localToolStep("tsx", ["./scripts/verify-agent-browser-dogfood.ts", ...options.passthrough])];
+			return [
+				buildStep(),
+				localToolStep("tsx", ["./scripts/verify-agent-browser-dogfood.ts", ...options.passthrough]),
+			];
 		case "package":
 			return [scriptStep(["./scripts/verify-package.mjs", ...options.passthrough])];
 		case "package-pi":
 			return [scriptStep(["./scripts/verify-package.mjs", "--smoke-pi", ...options.passthrough])];
 		case "lifecycle":
-			return [scriptStep(["./scripts/verify-lifecycle.mjs", ...options.passthrough], { PATH: hostToolPath() })];
+			return [
+				scriptStep(["./scripts/verify-lifecycle.mjs", ...options.passthrough], {
+					PATH: hostToolPath(),
+				}),
+			];
 		case "platform-target":
 			return [
 				...docsSteps({ mode: "check", target: "all" }),
@@ -371,7 +424,12 @@ export function verifySteps(options) {
 				...verifySteps({ mode: "lifecycle", passthrough: [], showHelp: false }),
 				...verifySteps({ mode: "package-pi", passthrough: [], showHelp: false }),
 				scriptStep(["./scripts/platform-smoke.mjs", "doctor"]),
-				scriptStep(["./scripts/platform-smoke.mjs", "run", "--target", "macos,ubuntu,windows-native"]),
+				scriptStep([
+					"./scripts/platform-smoke.mjs",
+					"run",
+					"--target",
+					"macos,ubuntu,windows-native",
+				]),
 			];
 	}
 }

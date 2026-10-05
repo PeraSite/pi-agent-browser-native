@@ -1,7 +1,13 @@
 export function stringifyUnknown(value: unknown): string {
-	if (typeof value === "string") return value;
-	if (typeof value === "number" || typeof value === "boolean") return String(value);
-	if (value === null || value === undefined) return "";
+	if (typeof value === "string") {
+		return value;
+	}
+	if (typeof value === "number" || typeof value === "boolean") {
+		return String(value);
+	}
+	if (value === null || value === undefined) {
+		return "";
+	}
 	try {
 		return JSON.stringify(value, null, 2);
 	} catch {
@@ -18,7 +24,9 @@ export function normalizeWhitespace(text: string): string {
 }
 
 export function truncateText(text: string, maxChars: number): string {
-	if (text.length <= maxChars) return text;
+	if (text.length <= maxChars) {
+		return text;
+	}
 	return `${text.slice(0, Math.max(1, maxChars - 1))}…`;
 }
 

@@ -16,10 +16,18 @@ import { promisify } from "node:util";
 const execFile = promisify(execFileCallback);
 const binSuffix = process.platform === "win32" ? ".cmd" : "";
 // TypeScript's npm binaries do not support Android; Termux supplies native tsgo.
-const tscPath = process.platform === "android" ? "tsgo" : join(process.cwd(), "node_modules", ".bin", `tsc${binSuffix}`);
+const tscPath =
+	process.platform === "android"
+		? "tsgo"
+		: join(process.cwd(), "node_modules", ".bin", `tsc${binSuffix}`);
 
 async function main() {
-	await rm(join(process.cwd(), "dist"), { force: true, maxRetries: 5, recursive: true, retryDelay: 100 });
+	await rm(join(process.cwd(), "dist"), {
+		force: true,
+		maxRetries: 5,
+		recursive: true,
+		retryDelay: 100,
+	});
 	const options = process.platform === "win32" ? { shell: true } : {};
 	try {
 		const { stderr, stdout } = await execFile(tscPath, ["-p", "tsconfig.build.json"], {
@@ -27,11 +35,19 @@ async function main() {
 			cwd: process.cwd(),
 			maxBuffer: 10 * 1024 * 1024,
 		});
-		if (stdout) process.stdout.write(stdout);
-		if (stderr) process.stderr.write(stderr);
+		if (stdout) {
+			process.stdout.write(stdout);
+		}
+		if (stderr) {
+			process.stderr.write(stderr);
+		}
 	} catch (error) {
-		if (error?.stdout) process.stdout.write(error.stdout);
-		if (error?.stderr) process.stderr.write(error.stderr);
+		if (error?.stdout) {
+			process.stdout.write(error.stdout);
+		}
+		if (error?.stderr) {
+			process.stderr.write(error.stderr);
+		}
 		throw error;
 	}
 }

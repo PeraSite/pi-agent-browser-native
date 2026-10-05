@@ -16,7 +16,12 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
 import { CAPABILITY_BASELINE_SOURCE } from "./agent-browser-capability-baseline.mjs";
-import { MINIMUM_AGENT_BROWSER_VERSION, TARGET_AGENT_BROWSER_SOURCE, TARGET_AGENT_BROWSER_VERSION, isSupportedAgentBrowserVersion } from "./agent-browser-target.mjs";
+import {
+	MINIMUM_AGENT_BROWSER_VERSION,
+	TARGET_AGENT_BROWSER_SOURCE,
+	TARGET_AGENT_BROWSER_VERSION,
+	isSupportedAgentBrowserVersion,
+} from "./agent-browser-target.mjs";
 
 const execFile = promisify(execFileCallback);
 const PACKAGE_NAME = "pi-agent-browser-native";
@@ -31,26 +36,38 @@ const DEFAULT_AGENT_DIR = resolve(homedir(), ".pi/agent");
 const THIS_PACKAGE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 export function normalizeAgentBrowserVersion(output) {
-	return String(output ?? "").trim().replace(/^agent-browser\s+/, "");
+	return String(output ?? "")
+		.trim()
+		.replace(/^agent-browser\s+/, "");
 }
 
 export function normalizePiVersion(output) {
-	return String(output ?? "").trim().replace(/^pi\s+/, "");
+	return String(output ?? "")
+		.trim()
+		.replace(/^pi\s+/, "");
 }
 
 function parseVersionParts(version) {
 	const match = String(version ?? "").match(/^(\d+)\.(\d+)\.(\d+)(?:\b|[-+])/);
-	if (!match) return undefined;
+	if (!match) {
+		return undefined;
+	}
 	return match.slice(1).map((part) => Number.parseInt(part, 10));
 }
 
 export function versionAtLeast(actual, minimum) {
 	const actualParts = parseVersionParts(actual);
 	const minimumParts = parseVersionParts(minimum);
-	if (!actualParts || !minimumParts) return undefined;
+	if (!actualParts || !minimumParts) {
+		return undefined;
+	}
 	for (let index = 0; index < minimumParts.length; index += 1) {
-		if (actualParts[index] > minimumParts[index]) return true;
-		if (actualParts[index] < minimumParts[index]) return false;
+		if (actualParts[index] > minimumParts[index]) {
+			return true;
+		}
+		if (actualParts[index] < minimumParts[index]) {
+			return false;
+		}
 	}
 	return true;
 }
@@ -112,9 +129,15 @@ export function parseCliArgs(argv = process.argv.slice(2)) {
 				throw new Error(`${arg} requires a value. Run with --help for usage.`);
 			}
 			index += 1;
-			if (arg === "--cwd") parsed.cwd = value;
-			if (arg === "--agent-dir") parsed.agentDir = value;
-			if (arg === "--settings") parsed.settingsPaths.push(value);
+			if (arg === "--cwd") {
+				parsed.cwd = value;
+			}
+			if (arg === "--agent-dir") {
+				parsed.agentDir = value;
+			}
+			if (arg === "--settings") {
+				parsed.settingsPaths.push(value);
+			}
 			continue;
 		}
 		throw new Error(`Unknown option: ${arg}. Run with --help for usage.`);
@@ -124,12 +147,18 @@ export function parseCliArgs(argv = process.argv.slice(2)) {
 }
 
 async function defaultRunAgentBrowser(args) {
-	const { stdout, stderr } = await execFile("agent-browser", args, { maxBuffer: 1024 * 1024, ...buildNpmShimExecOptions(process.platform) });
+	const { stdout, stderr } = await execFile("agent-browser", args, {
+		maxBuffer: 1024 * 1024,
+		...buildNpmShimExecOptions(process.platform),
+	});
 	return `${stdout}${stderr}`;
 }
 
 async function defaultRunPi(args) {
-	const { stdout, stderr } = await execFile("pi", args, { maxBuffer: 1024 * 1024, ...buildNpmShimExecOptions(process.platform) });
+	const { stdout, stderr } = await execFile("pi", args, {
+		maxBuffer: 1024 * 1024,
+		...buildNpmShimExecOptions(process.platform),
+	});
 	return `${stdout}${stderr}`;
 }
 
@@ -157,31 +186,56 @@ function isInsidePath(childPath, parentPath) {
 }
 
 function expandUserPath(path) {
-	if (path === "~") return homedir();
-	if (path.startsWith("~/")) return resolve(homedir(), path.slice(2));
+	if (path === "~") {
+		return homedir();
+	}
+	if (path.startsWith("~/")) {
+		return resolve(homedir(), path.slice(2));
+	}
 	return path;
 }
 
 function isPathLikeSource(source) {
-	return isAbsolute(source) || source.startsWith("./") || source.startsWith("../") || source.startsWith("~");
+	return (
+		isAbsolute(source) ||
+		source.startsWith("./") ||
+		source.startsWith("../") ||
+		source.startsWith("~")
+	);
 }
 
 function sourceLooksLikeThisPackage(source, cwd, sourceBaseDir = cwd) {
 	const text = String(source ?? "").trim();
-	if (text.length === 0) return false;
-	if (/^npm:pi-agent-browser-native(?:@|$)/.test(text)) return true;
-	if (text === PACKAGE_NAME) return true;
-	if (text.includes(REPO_URL_FRAGMENT)) return true;
+	if (text.length === 0) {
+		return false;
+	}
+	if (/^npm:pi-agent-browser-native(?:@|$)/.test(text)) {
+		return true;
+	}
+	if (text === PACKAGE_NAME) {
+		return true;
+	}
+	if (text.includes(REPO_URL_FRAGMENT)) {
+		return true;
+	}
 
-	if (!isPathLikeSource(text)) return false;
+	if (!isPathLikeSource(text)) {
+		return false;
+	}
 	const resolvedSource = resolve(sourceBaseDir, expandUserPath(text));
 	const cwdEntrypoints = EXTENSION_ENTRYPOINTS.map((entrypoint) => resolve(cwd, entrypoint));
-	const packageEntrypoints = EXTENSION_ENTRYPOINTS.map((entrypoint) => resolve(THIS_PACKAGE_ROOT, entrypoint));
+	const packageEntrypoints = EXTENSION_ENTRYPOINTS.map((entrypoint) =>
+		resolve(THIS_PACKAGE_ROOT, entrypoint),
+	);
 	return (
 		resolvedSource === cwd ||
 		resolvedSource === THIS_PACKAGE_ROOT ||
-		cwdEntrypoints.some((entrypoint) => resolvedSource === entrypoint || isInsidePath(entrypoint, resolvedSource)) ||
-		packageEntrypoints.some((entrypoint) => resolvedSource === entrypoint || isInsidePath(entrypoint, resolvedSource))
+		cwdEntrypoints.some(
+			(entrypoint) => resolvedSource === entrypoint || isInsidePath(entrypoint, resolvedSource),
+		) ||
+		packageEntrypoints.some(
+			(entrypoint) => resolvedSource === entrypoint || isInsidePath(entrypoint, resolvedSource),
+		)
 	);
 }
 
@@ -256,8 +310,12 @@ function arrayEntries(value) {
 }
 
 function entrySource(entry) {
-	if (typeof entry === "string") return entry;
-	if (entry && typeof entry === "object") return entry.source ?? entry.path ?? entry.package;
+	if (typeof entry === "string") {
+		return entry;
+	}
+	if (entry && typeof entry === "object") {
+		return entry.source ?? entry.path ?? entry.package;
+	}
 	return undefined;
 }
 
@@ -267,13 +325,21 @@ function collectSettingsSources(settings, settingsPath, cwd) {
 	for (const [index, entry] of arrayEntries(settings?.packages)) {
 		const source = entrySource(entry);
 		if (sourceLooksLikeThisPackage(source, cwd, sourceBaseDir)) {
-			sources.push({ kind: "package", source: String(source), location: `${settingsPath} packages[${index}]` });
+			sources.push({
+				kind: "package",
+				source: String(source),
+				location: `${settingsPath} packages[${index}]`,
+			});
 		}
 	}
 	for (const [index, entry] of arrayEntries(settings?.extensions)) {
 		const source = entrySource(entry);
 		if (sourceLooksLikeThisPackage(source, cwd, sourceBaseDir)) {
-			sources.push({ kind: "extension", source: String(source), location: `${settingsPath} extensions[${index}]` });
+			sources.push({
+				kind: "extension",
+				source: String(source),
+				location: `${settingsPath} extensions[${index}]`,
+			});
 		}
 	}
 	return sources;
@@ -286,23 +352,34 @@ function dedupe(paths) {
 async function inspectSettingsPath({ path, cwd, readText }) {
 	try {
 		const text = await readText(path);
-		if (text === undefined) return { sources: [], warnings: [] };
+		if (text === undefined) {
+			return { sources: [], warnings: [] };
+		}
 		const settings = parseSettingsText(text, path);
 		return { sources: collectSettingsSources(settings, path, cwd), warnings: [] };
 	} catch (error) {
 		return {
 			sources: [],
-			warnings: [`Could not inspect Pi settings ${path}: ${error instanceof Error ? error.message : String(error)}`],
+			warnings: [
+				`Could not inspect Pi settings ${path}: ${error instanceof Error ? error.message : String(error)}`,
+			],
 		};
 	}
 }
 
 async function collectRepoLocalSources({ cwd, pathExists }) {
-	const candidates = [resolve(cwd, ".pi/extensions/agent-browser.ts"), resolve(cwd, ".pi/extensions/agent-browser/index.ts")];
+	const candidates = [
+		resolve(cwd, ".pi/extensions/agent-browser.ts"),
+		resolve(cwd, ".pi/extensions/agent-browser/index.ts"),
+	];
 	const sources = [];
 	for (const candidate of candidates) {
 		if (await pathExists(candidate)) {
-			sources.push({ kind: "repo-local", source: candidate, location: `${candidate} repo-local autoload` });
+			sources.push({
+				kind: "repo-local",
+				source: candidate,
+				location: `${candidate} repo-local autoload`,
+			});
 		}
 	}
 	return sources;
@@ -327,10 +404,16 @@ async function checkPiVersion({ runPi }) {
 			return {
 				status: "warn",
 				title: `Could not parse pi --version output: ${version || "<empty>"}.`,
-				lines: [`Pi ${MINIMUM_PI_VERSION} or newer is required for this release; run this doctor from the same shell that launches Pi so the setup gate can verify the host runtime.`],
+				lines: [
+					`Pi ${MINIMUM_PI_VERSION} or newer is required for this release; run this doctor from the same shell that launches Pi so the setup gate can verify the host runtime.`,
+				],
 			};
 		}
-		return { status: "pass", title: `Pi version satisfies the minimum runtime floor: ${version}`, lines: [] };
+		return {
+			status: "pass",
+			title: `Pi version satisfies the minimum runtime floor: ${version}`,
+			lines: [],
+		};
 	} catch (error) {
 		const code = error && typeof error === "object" ? error.code : undefined;
 		return {
@@ -361,9 +444,10 @@ async function checkAgentBrowserVersion({ runAgentBrowser }) {
 		}
 		return {
 			status: "pass",
-			title: version === RECOMMENDED_VERSION
-				? `agent-browser version matches recommended baseline: ${version}`
-				: `agent-browser version meets supported floor: ${version} (recommended ${RECOMMENDED_VERSION})`,
+			title:
+				version === RECOMMENDED_VERSION
+					? `agent-browser version matches recommended baseline: ${version}`
+					: `agent-browser version meets supported floor: ${version} (recommended ${RECOMMENDED_VERSION})`,
 			lines: [],
 		};
 	} catch (error) {
@@ -384,7 +468,10 @@ async function checkAgentBrowserVersion({ runAgentBrowser }) {
 }
 
 async function checkPiSources({ cwd, agentDir, settingsPaths, readText, pathExists }) {
-	const defaultSettingsPaths = [resolve(agentDir, "settings.json"), resolve(cwd, ".pi/settings.json")];
+	const defaultSettingsPaths = [
+		resolve(agentDir, "settings.json"),
+		resolve(cwd, ".pi/settings.json"),
+	];
 	const allSettingsPaths = dedupe([...defaultSettingsPaths, ...settingsPaths]);
 	const sources = [];
 	const warnings = [];
@@ -446,16 +533,28 @@ export async function evaluateDoctor(options = {}) {
 
 	const versionCheck = await checkAgentBrowserVersion({ runAgentBrowser });
 	checks.push(versionCheck);
-	if (versionCheck.status === "fail") failures.push(versionCheck);
+	if (versionCheck.status === "fail") {
+		failures.push(versionCheck);
+	}
 
 	const piVersionCheck = await checkPiVersion({ runPi });
 	checks.push(piVersionCheck);
-	if (piVersionCheck.status === "fail") failures.push(piVersionCheck);
+	if (piVersionCheck.status === "fail") {
+		failures.push(piVersionCheck);
+	}
 
 	if (!options.skipSourceCheck) {
-		const sourceCheck = await checkPiSources({ cwd, agentDir, settingsPaths, readText, pathExists });
+		const sourceCheck = await checkPiSources({
+			cwd,
+			agentDir,
+			settingsPaths,
+			readText,
+			pathExists,
+		});
 		checks.push(sourceCheck);
-		if (sourceCheck.status === "fail") failures.push(sourceCheck);
+		if (sourceCheck.status === "fail") {
+			failures.push(sourceCheck);
+		}
 		warnings.push(...(sourceCheck.warnings ?? []));
 	}
 
@@ -475,7 +574,9 @@ export function formatDoctorReport(report) {
 	for (const warning of report.warnings ?? []) {
 		lines.push(`! ${warning}`);
 	}
-	if ((report.warnings ?? []).length > 0) lines.push("");
+	if ((report.warnings ?? []).length > 0) {
+		lines.push("");
+	}
 	lines.push(report.failures.length > 0 ? "Doctor found setup failures." : "Doctor passed.");
 	return lines.join("\n");
 }
@@ -503,7 +604,9 @@ export async function main(argv = process.argv.slice(2)) {
 }
 
 export function isDirectRun(metaUrl, argv1 = process.argv[1], resolveRealPath = realpathSync) {
-	if (!argv1) return false;
+	if (!argv1) {
+		return false;
+	}
 	try {
 		return resolveRealPath(argv1) === fileURLToPath(metaUrl);
 	} catch {

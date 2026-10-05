@@ -7,7 +7,9 @@ import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 if (process.argv.includes("--help") || process.argv.includes("-h")) {
-	console.log("Usage: ci-host-compat.mjs official|fork full|smoke|install AUTOMATION_PATH [VERSION|FORK_PACKAGES]\nOfficial defaults to latest stable; CI passes its once-resolved version. Fork requires packed artifacts.\nExample: node scripts/ci-host-compat.mjs official full ../automation latest\nExit codes: 0 passed/help, 1 invalid input or verification failure.");
+	console.log(
+		"Usage: ci-host-compat.mjs official|fork full|smoke|install AUTOMATION_PATH [VERSION|FORK_PACKAGES]\nOfficial defaults to latest stable; CI passes its once-resolved version. Fork requires packed artifacts.\nExample: node scripts/ci-host-compat.mjs official full ../automation latest\nExit codes: 0 passed/help, 1 invalid input or verification failure.",
+	);
 	process.exit(0);
 }
 const [flavor, mode, automationPath, target] = process.argv.slice(2);
@@ -18,8 +20,12 @@ assert.ok(flavor !== "fork" || target, "Fork requires the built package director
 
 const source = process.cwd();
 const automation = resolve(automationPath);
-const { isolatedEnvironment, writeJson } = await import(pathToFileURL(join(automation, "scripts/common.mjs")));
-const { prepareHost, selectDevelopmentHost } = await import(pathToFileURL(join(automation, "scripts/hosts.mjs")));
+const { isolatedEnvironment, writeJson } = await import(
+	pathToFileURL(join(automation, "scripts/common.mjs"))
+);
+const { prepareHost, selectDevelopmentHost } = await import(
+	pathToFileURL(join(automation, "scripts/hosts.mjs"))
+);
 // Nested test sockets need the same short temporary root as the pinned qualifier.
 const root = mkdtempSync("/tmp/pc-");
 const env = isolatedEnvironment(root);
@@ -27,14 +33,24 @@ const env = isolatedEnvironment(root);
 function execute(command, args) {
 	console.log(`$ ${command} ${args.join(" ")}`);
 	const result = spawnSync(command, args, { cwd: source, env, stdio: "inherit" });
-	if (result.error) throw result.error;
-	assert.equal(result.status, 0, `${command} ${args.join(" ")} exited ${result.status ?? result.signal}`);
+	if (result.error) {
+		throw result.error;
+	}
+	assert.equal(
+		result.status,
+		0,
+		`${command} ${args.join(" ")} exited ${result.status ?? result.signal}`,
+	);
 }
 
 try {
 	execute("npm", ["ci", "--ignore-scripts"]);
-	const host = await prepareHost(join(root, "host"), flavor,
-		flavor === "fork" ? resolve(target) : target || "latest", env);
+	const host = await prepareHost(
+		join(root, "host"),
+		flavor,
+		flavor === "fork" ? resolve(target) : target || "latest",
+		env,
+	);
 	const selected = selectDevelopmentHost(source, host, env);
 	const receipt = { flavor, provenance: host.provenance, ...selected };
 	console.log(JSON.stringify(receipt));

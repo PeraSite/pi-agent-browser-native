@@ -11,11 +11,16 @@ import { pathToFileURL } from "node:url";
 import { spawn } from "cross-spawn";
 
 const CONFIG_SCRIPT = join(process.cwd(), "scripts", "config.mjs");
-const DOCUMENTED_CONFIG_HELPER_PREFIX = "npm exec --yes --package pi-agent-browser-native@latest -- pi-agent-browser-config";
+const DOCUMENTED_CONFIG_HELPER_PREFIX =
+	"npm exec --yes --package pi-agent-browser-native@latest -- pi-agent-browser-config";
 const LOCAL_PACKAGE_SPEC = process.cwd();
 const NPM_COMMAND = process.platform === "win32" ? "npm.cmd" : "npm";
 
-async function runProcess(command: string, args: string[], options: { cwd?: string; env?: NodeJS.ProcessEnv; input?: string; label?: string } = {}) {
+async function runProcess(
+	command: string,
+	args: string[],
+	options: { cwd?: string; env?: NodeJS.ProcessEnv; input?: string; label?: string } = {},
+) {
 	return await new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
 		const child = spawn(command, args, {
 			cwd: options.cwd ?? process.cwd(),
@@ -37,15 +42,27 @@ async function runProcess(command: string, args: string[], options: { cwd?: stri
 			if (code === 0) {
 				resolve({ stdout, stderr });
 			} else {
-				reject(Object.assign(new Error(`${options.label ?? command} exited with ${code ?? "unknown"}`), { code, stdout, stderr }));
+				reject(
+					Object.assign(new Error(`${options.label ?? command} exited with ${code ?? "unknown"}`), {
+						code,
+						stdout,
+						stderr,
+					}),
+				);
 			}
 		});
 		child.stdin.end(options.input ?? "");
 	});
 }
 
-async function runConfig(args: string[], options: { cwd?: string; env?: NodeJS.ProcessEnv; input?: string } = {}) {
-	return await runProcess(process.execPath, [CONFIG_SCRIPT, ...args], { ...options, label: "config CLI" });
+async function runConfig(
+	args: string[],
+	options: { cwd?: string; env?: NodeJS.ProcessEnv; input?: string } = {},
+) {
+	return await runProcess(process.execPath, [CONFIG_SCRIPT, ...args], {
+		...options,
+		label: "config CLI",
+	});
 }
 
 async function createFixture() {
@@ -55,7 +72,9 @@ async function createFixture() {
 	const npmCache = join(root, "npm-cache");
 	await mkdir(cwd, { recursive: true });
 	await mkdir(npmCache, { recursive: true });
-	const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.toLowerCase().startsWith("npm_")));
+	const env = Object.fromEntries(
+		Object.entries(process.env).filter(([key]) => !key.toLowerCase().startsWith("npm_")),
+	);
 	return {
 		cwd,
 		env: {
@@ -80,7 +99,7 @@ async function collectMarkdownFiles(root: string): Promise<string[]> {
 	for (const entry of entries) {
 		const path = join(root, entry.name);
 		if (entry.isDirectory()) {
-			files.push(...await collectMarkdownFiles(path));
+			files.push(...(await collectMarkdownFiles(path)));
 		} else if (entry.isFile() && entry.name.endsWith(".md")) {
 			files.push(path);
 		}
@@ -95,8 +114,11 @@ function tokenizeDocumentedCommand(command: string): string[] {
 	for (let index = 0; index < command.length; index += 1) {
 		const char = command[index];
 		if (quote) {
-			if (char === quote) quote = undefined;
-			else current += char;
+			if (char === quote) {
+				quote = undefined;
+			} else {
+				current += char;
+			}
 			continue;
 		}
 		if (char === "'" || char === '"') {
@@ -112,8 +134,12 @@ function tokenizeDocumentedCommand(command: string): string[] {
 		}
 		current += char;
 	}
-	if (quote) throw new Error(`Unclosed quote in documented command: ${command}`);
-	if (current) tokens.push(current);
+	if (quote) {
+		throw new Error(`Unclosed quote in documented command: ${command}`);
+	}
+	if (current) {
+		tokens.push(current);
+	}
 	return tokens;
 }
 
@@ -129,7 +155,11 @@ function documentedNpmExecArgs(command: string): { args: string[]; input?: strin
 	assert.equal(tokens[0], "npm", `documented command must start with npm exec: ${command}`);
 	const packageIndex = tokens.indexOf("--package");
 	assert.notEqual(packageIndex, -1, `documented command must use --package: ${command}`);
-	assert.equal(tokens[packageIndex + 1], "pi-agent-browser-native@latest", `documented command must use the published package spec: ${command}`);
+	assert.equal(
+		tokens[packageIndex + 1],
+		"pi-agent-browser-native@latest",
+		`documented command must use the published package spec: ${command}`,
+	);
 	tokens[packageIndex + 1] = LOCAL_PACKAGE_SPEC;
 	return { args: tokens.slice(1), input };
 }
@@ -140,7 +170,10 @@ test("config CLI prints Pi-scoped paths and pass-through setup help", async () =
 	assert.ok(stdout.includes(fixture.globalPath), stdout);
 	assert.ok(stdout.includes(fixture.projectPath), stdout);
 	const { stdout: help } = await runConfig(["--help"], { cwd: fixture.cwd, env: fixture.env });
-	assert.match(help, /Loaded config may use plaintext, environment interpolation, or !command credential sources/);
+	assert.match(
+		help,
+		/Loaded config may use plaintext, environment interpolation, or !command credential sources/,
+	);
 	assert.match(help, /displayed status redacts resolved keys/);
 	assert.doesNotMatch(help, /^  pi-agent-browser-config/m);
 });
@@ -153,33 +186,50 @@ test("config CLI executes from paths requiring file URL encoding", async () => {
 	await mkdir(dirname(script), { recursive: true });
 	await mkdir(dirname(policy), { recursive: true });
 	await copyFile(CONFIG_SCRIPT, script);
-	await copyFile(join(process.cwd(), "extensions", "agent-browser", "lib", "config-policy.js"), policy);
+	await copyFile(
+		join(process.cwd(), "extensions", "agent-browser", "lib", "config-policy.js"),
+		policy,
+	);
 	await writeFile(join(packageRoot, "package.json"), JSON.stringify({ type: "module" }));
-	const { stdout } = await runProcess(process.execPath, [script, "paths"], { cwd: fixture.cwd, env: fixture.env });
+	const { stdout } = await runProcess(process.execPath, [script, "paths"], {
+		cwd: fixture.cwd,
+		env: fixture.env,
+	});
 	assert.ok(stdout.includes(fixture.globalPath), stdout);
 	assert.ok(stdout.includes(fixture.projectPath), stdout);
-	await assert.rejects(runProcess(process.execPath, [script, "not-a-command"], { cwd: fixture.cwd, env: fixture.env }), { code: 2 });
+	await assert.rejects(
+		runProcess(process.execPath, [script, "not-a-command"], { cwd: fixture.cwd, env: fixture.env }),
+		{ code: 2 },
+	);
 });
 
 test("config module imports without invoking the CLI or inspecting the caller operand", async () => {
 	const fixture = await createFixture();
 	const moduleUrl = JSON.stringify(pathToFileURL(CONFIG_SCRIPT).href);
-	const { stdout, stderr } = await runProcess(process.execPath, [
-		"--input-type=module", "-e",
-		`const { main } = await import(${moduleUrl}); if (typeof main !== "function") throw new Error("missing main export");`,
-		join(fixture.root, "nonexistent-caller"),
-	], { cwd: fixture.cwd, env: fixture.env });
+	const { stdout, stderr } = await runProcess(
+		process.execPath,
+		[
+			"--input-type=module",
+			"-e",
+			`const { main } = await import(${moduleUrl}); if (typeof main !== "function") throw new Error("missing main export");`,
+			join(fixture.root, "nonexistent-caller"),
+		],
+		{ cwd: fixture.cwd, env: fixture.env },
+	);
 	assert.equal(stdout, "");
 	assert.equal(stderr, "");
 });
 
 test("published package config docs only use npm-exec helper examples", async () => {
-	const markdownFiles = ["README.md", "CHANGELOG.md", ...await collectMarkdownFiles("docs")];
+	const markdownFiles = ["README.md", "CHANGELOG.md", ...(await collectMarkdownFiles("docs"))];
 	const violations: string[] = [];
 	for (const path of markdownFiles) {
 		const text = await readFile(path, "utf8");
 		for (const [lineIndex, line] of text.split("\n").entries()) {
-			if (line.includes("pi-agent-browser-config") && !line.includes(DOCUMENTED_CONFIG_HELPER_PREFIX)) {
+			if (
+				line.includes("pi-agent-browser-config") &&
+				!line.includes(DOCUMENTED_CONFIG_HELPER_PREFIX)
+			) {
 				violations.push(`${path}:${lineIndex + 1}: ${line.trim()}`);
 			}
 		}
@@ -231,11 +281,12 @@ test("config CLI writes and redacts global plaintext Brave key", async () => {
 test("config CLI requires providers for ambiguous credential writes", async () => {
 	const fixture = await createFixture();
 	await assert.rejects(
-		() => runConfig(["web-search", "set-key", "--stdin"], {
-			cwd: fixture.cwd,
-			env: fixture.env,
-			input: "real-secret-value\n",
-		}),
+		() =>
+			runConfig(["web-search", "set-key", "--stdin"], {
+				cwd: fixture.cwd,
+				env: fixture.env,
+				input: "real-secret-value\n",
+			}),
 		(error: { code?: number; stderr?: string }) => {
 			assert.equal(error.code, 2);
 			assert.match(error.stderr ?? "", /--provider is required and must be exa or brave/);
@@ -265,10 +316,20 @@ test("config CLI writes project-local Brave key sources and redacts status", asy
 	assert.match(stdout, /configured as plaintext project value \[redacted\]/);
 	assert.doesNotMatch(stdout, /real-secret-value/);
 
-	await runConfig(["web-search", "set-command", "op read op://vault/item/key", "--provider", "brave", "--project"], {
-		cwd: fixture.cwd,
-		env: fixture.env,
-	});
+	await runConfig(
+		[
+			"web-search",
+			"set-command",
+			"op read op://vault/item/key",
+			"--provider",
+			"brave",
+			"--project",
+		],
+		{
+			cwd: fixture.cwd,
+			env: fixture.env,
+		},
+	);
 	raw = await readFile(fixture.projectPath, "utf8");
 	assert.match(raw, /!op read op:\/\/vault\/item\/key/);
 	({ stdout } = await runConfig(["show"], { cwd: fixture.cwd, env: fixture.env }));
@@ -277,47 +338,107 @@ test("config CLI writes project-local Brave key sources and redacts status", asy
 
 test("config CLI writes project env source, project profile, and project executable path", async () => {
 	const fixture = await createFixture();
-	await runConfig(["web-search", "set-env", "BRAVE_API_KEY", "--project"], { cwd: fixture.cwd, env: fixture.env });
-	await runConfig(["web-search", "set-env", "EXA_API_KEY", "--project"], { cwd: fixture.cwd, env: fixture.env });
-	await runConfig(["web-search", "prefer", "exa", "--project"], { cwd: fixture.cwd, env: fixture.env });
+	await runConfig(["web-search", "set-env", "BRAVE_API_KEY", "--project"], {
+		cwd: fixture.cwd,
+		env: fixture.env,
+	});
+	await runConfig(["web-search", "set-env", "EXA_API_KEY", "--project"], {
+		cwd: fixture.cwd,
+		env: fixture.env,
+	});
+	await runConfig(["web-search", "prefer", "exa", "--project"], {
+		cwd: fixture.cwd,
+		env: fixture.env,
+	});
 	await runConfig(["web-search", "disable", "--project"], { cwd: fixture.cwd, env: fixture.env });
-	await runConfig(["browser", "profile", "set", "Profile 1", "--policy", "authenticated-only", "--project"], { cwd: fixture.cwd, env: fixture.env });
-	await runConfig(["browser", "executable", "set", "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser", "--project"], { cwd: fixture.cwd, env: fixture.env });
+	await runConfig(
+		["browser", "profile", "set", "Profile 1", "--policy", "authenticated-only", "--project"],
+		{ cwd: fixture.cwd, env: fixture.env },
+	);
+	await runConfig(
+		[
+			"browser",
+			"executable",
+			"set",
+			"/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",
+			"--project",
+		],
+		{ cwd: fixture.cwd, env: fixture.env },
+	);
 	const projectPath = join(fixture.cwd, ".pi", "config", "pi-agent-browser-native", "config.json");
 	const config = JSON.parse(await readFile(projectPath, "utf8")) as {
-		webSearch?: { braveApiKey?: string; enabled?: boolean; exaApiKey?: string; preferredProvider?: string };
+		webSearch?: {
+			braveApiKey?: string;
+			enabled?: boolean;
+			exaApiKey?: string;
+			preferredProvider?: string;
+		};
 		browser?: { defaultProfile?: { name?: string; policy?: string }; executablePath?: string };
 	};
 	assert.equal(config.webSearch?.braveApiKey, "$BRAVE_API_KEY");
 	assert.equal(config.webSearch?.exaApiKey, "$EXA_API_KEY");
 	assert.equal(config.webSearch?.preferredProvider, "exa");
 	assert.equal(config.webSearch?.enabled, false);
-	assert.deepEqual(config.browser?.defaultProfile, { name: "Profile 1", policy: "authenticated-only" });
-	assert.equal(config.browser?.executablePath, "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser");
+	assert.deepEqual(config.browser?.defaultProfile, {
+		name: "Profile 1",
+		policy: "authenticated-only",
+	});
+	assert.equal(
+		config.browser?.executablePath,
+		"/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",
+	);
 	const { stdout } = await runConfig(["show"], { cwd: fixture.cwd, env: fixture.env });
 	assert.match(stdout, /webSearch\.enabled: false/);
 	assert.match(stdout, /webSearch\.exaApiKey: configured via environment interpolation/);
-	assert.match(stdout, /browser\.defaultProfile: Profile 1 \(policy: authenticated-only; project\)/);
-	assert.match(stdout, /browser\.executablePath: \/Applications\/Brave Browser\.app\/Contents\/MacOS\/Brave Browser \(project\)/);
+	assert.match(
+		stdout,
+		/browser\.defaultProfile: Profile 1 \(policy: authenticated-only; project\)/,
+	);
+	assert.match(
+		stdout,
+		/browser\.executablePath: \/Applications\/Brave Browser\.app\/Contents\/MacOS\/Brave Browser \(project\)/,
+	);
 });
 
 test("config CLI status accepts project-local custom web-search env aliases", async () => {
 	const fixture = await createFixture();
 	await mkdir(dirname(fixture.projectPath), { recursive: true });
-	await writeFile(fixture.projectPath, JSON.stringify({ version: 1, webSearch: { braveApiKey: "$MY_BRAVE_ALIAS", defaultSearchType: "deep-lite" } }, null, 2));
-	const { stdout } = await runConfig(["show"], { cwd: fixture.cwd, env: { ...fixture.env, MY_BRAVE_ALIAS: "alias-secret" } });
+	await writeFile(
+		fixture.projectPath,
+		JSON.stringify(
+			{ version: 1, webSearch: { braveApiKey: "$MY_BRAVE_ALIAS", defaultSearchType: "deep-lite" } },
+			null,
+			2,
+		),
+	);
+	const { stdout } = await runConfig(["show"], {
+		cwd: fixture.cwd,
+		env: { ...fixture.env, MY_BRAVE_ALIAS: "alias-secret" },
+	});
 	assert.doesNotMatch(stdout, /Validation errors:/);
 	assert.match(stdout, /webSearch\.defaultSearchType: deep-lite/);
-	assert.match(stdout, /webSearch\.braveApiKey: configured via environment interpolation \(project\)/);
+	assert.match(
+		stdout,
+		/webSearch\.braveApiKey: configured via environment interpolation \(project\)/,
+	);
 	assert.doesNotMatch(stdout, /alias-secret/);
 });
 
 test("config CLI writes project-local custom web-search env aliases", async () => {
 	const fixture = await createFixture();
-	await runConfig(["web-search", "set-env", "AWS_SECRET_ACCESS_KEY", "--provider", "exa", "--project"], { cwd: fixture.cwd, env: fixture.env });
+	await runConfig(
+		["web-search", "set-env", "AWS_SECRET_ACCESS_KEY", "--provider", "exa", "--project"],
+		{ cwd: fixture.cwd, env: fixture.env },
+	);
 	const raw = await readFile(fixture.projectPath, "utf8");
 	assert.match(raw, /AWS_SECRET_ACCESS_KEY/);
-	const { stdout } = await runConfig(["show"], { cwd: fixture.cwd, env: { ...fixture.env, AWS_SECRET_ACCESS_KEY: "aws-secret" } });
-	assert.match(stdout, /webSearch\.exaApiKey: configured via environment interpolation \(project\)/);
+	const { stdout } = await runConfig(["show"], {
+		cwd: fixture.cwd,
+		env: { ...fixture.env, AWS_SECRET_ACCESS_KEY: "aws-secret" },
+	});
+	assert.match(
+		stdout,
+		/webSearch\.exaApiKey: configured via environment interpolation \(project\)/,
+	);
 	assert.doesNotMatch(stdout, /aws-secret/);
 });

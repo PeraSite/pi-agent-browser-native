@@ -20,7 +20,12 @@ export interface AgentBrowserBatchResult {
 
 export type AgentBrowserResultCategory = "failure" | "success";
 
-export type AgentBrowserSuccessCategory = "artifact-pending" | "artifact-saved" | "artifact-unverified" | "completed" | "inspection";
+export type AgentBrowserSuccessCategory =
+	| "artifact-pending"
+	| "artifact-saved"
+	| "artifact-unverified"
+	| "completed"
+	| "inspection";
 
 export type AgentBrowserFailureCategory =
 	| "aborted"
@@ -76,9 +81,25 @@ export interface AgentBrowserPageChangeSummary {
 	url?: string;
 }
 
-export type FileArtifactKind = "download" | "file" | "har" | "image" | "pdf" | "profile" | "trace" | "video";
+export type FileArtifactKind =
+	| "download"
+	| "file"
+	| "har"
+	| "image"
+	| "pdf"
+	| "profile"
+	| "trace"
+	| "video";
 
-export type FileArtifactStatus = "failed" | "missing" | "pending" | "repaired-from-temp" | "saved" | "stale" | "unverified" | "upstream-temp-only";
+export type FileArtifactStatus =
+	| "failed"
+	| "missing"
+	| "pending"
+	| "repaired-from-temp"
+	| "saved"
+	| "stale"
+	| "unverified"
+	| "upstream-temp-only";
 
 export interface FileArtifactMetadata {
 	absolutePath: string;
@@ -264,7 +285,9 @@ export interface ToolPresentation {
 	artifacts?: FileArtifactMetadata[];
 	batchFailure?: BatchFailurePresentationDetails;
 	batchSteps?: BatchStepPresentationDetails[];
-	content: Array<{ text: string; type: "text" } | { data: string; mimeType: string; type: "image" }>;
+	content: Array<
+		{ text: string; type: "text" } | { data: string; mimeType: string; type: "image" }
+	>;
 	data?: unknown;
 	failureCategory?: AgentBrowserFailureCategory;
 	fullOutputPath?: string;

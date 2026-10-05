@@ -21,8 +21,12 @@ export interface SnapshotLineRefInfo {
 
 /** Project native delta full responses onto the ordinary snapshot shape for local readers. */
 export function getFullSnapshotData(data: unknown): Record<string, unknown> | undefined {
-	if (!isRecord(data)) return undefined;
-	if (!isRecord(data.snapshot)) return data;
+	if (!isRecord(data)) {
+		return undefined;
+	}
+	if (!isRecord(data.snapshot)) {
+		return data;
+	}
 	return data.snapshot.kind === "full"
 		? { ...data, snapshot: data.snapshot.tree, refs: data.snapshot.refs }
 		: undefined;
@@ -39,7 +43,9 @@ export function getSnapshotLineTextByRef(data: unknown): Map<string, string> {
 	const lineByRef = new Map<string, string>();
 	for (const line of snapshot.split("\n")) {
 		const ref = line.match(/\bref=([^,\]\s]+)/)?.[1];
-		if (!ref || lineByRef.has(ref)) continue;
+		if (!ref || lineByRef.has(ref)) {
+			continue;
+		}
 		lineByRef.set(ref, line);
 	}
 	return lineByRef;
@@ -47,7 +53,9 @@ export function getSnapshotLineTextByRef(data: unknown): Map<string, string> {
 
 export function getSnapshotRefEntries(data: Record<string, unknown>): SnapshotRefEntry[] {
 	const refs = getSnapshotRefRecord(data);
-	if (!refs) return [];
+	if (!refs) {
+		return [];
+	}
 
 	return Object.entries(refs)
 		.map(([id, value]) => {
@@ -64,11 +72,18 @@ export function getSnapshotRefEntries(data: Record<string, unknown>): SnapshotRe
 
 function isEditableSnapshotLine(line: SnapshotLineRefInfo): boolean | undefined {
 	const editableEvidence = getEditableRefEvidence({ text: line.raw });
-	if (editableEvidence !== undefined) return editableEvidence;
-	return line.role === "searchbox" || line.role === "textbox" || line.role === "combobox" ? true : undefined;
+	if (editableEvidence !== undefined) {
+		return editableEvidence;
+	}
+	return line.role === "searchbox" || line.role === "textbox" || line.role === "combobox"
+		? true
+		: undefined;
 }
 
-export function getSnapshotRefRole(entry: { role?: unknown }, editableEvidence: boolean | undefined): string {
+export function getSnapshotRefRole(
+	entry: { role?: unknown },
+	editableEvidence: boolean | undefined,
+): string {
 	const rawRole = typeof entry.role === "string" && entry.role.length > 0 ? entry.role : "unknown";
 	const normalizedRole = rawRole.toLowerCase();
 	if ((normalizedRole === "generic" || normalizedRole === "unknown") && editableEvidence === true) {
@@ -77,10 +92,15 @@ export function getSnapshotRefRole(entry: { role?: unknown }, editableEvidence: 
 	return rawRole;
 }
 
-export function enrichSnapshotRefEntries(refEntries: SnapshotRefEntry[], snapshotLines: SnapshotLineRefInfo[]): SnapshotRefEntry[] {
+export function enrichSnapshotRefEntries(
+	refEntries: SnapshotRefEntry[],
+	snapshotLines: SnapshotLineRefInfo[],
+): SnapshotRefEntry[] {
 	const lineByRef = new Map<string, SnapshotLineRefInfo>();
 	for (const line of snapshotLines) {
-		if (!line.ref || lineByRef.has(line.ref)) continue;
+		if (!line.ref || lineByRef.has(line.ref)) {
+			continue;
+		}
 		lineByRef.set(line.ref, line);
 	}
 
@@ -88,9 +108,12 @@ export function enrichSnapshotRefEntries(refEntries: SnapshotRefEntry[], snapsho
 		const line = lineByRef.get(entry.id);
 		const lineRole = line && line.role !== "unknown" ? line.role : undefined;
 		const editableEvidence = getEditableRefEvidence({ ref: entry.refData, text: line?.raw });
-		const hasEditableRole = line ? isEditableSnapshotLine(line) === true && !["unknown", "generic"].includes(line.role) : false;
+		const hasEditableRole = line
+			? isEditableSnapshotLine(line) === true && !["unknown", "generic"].includes(line.role)
+			: false;
 		const isEditable = editableEvidence === true || (editableEvidence !== false && hasEditableRole);
-		const roleFromRefOrLine = entry.role !== "unknown" && entry.role !== "generic" ? entry.role : lineRole ?? entry.role;
+		const roleFromRefOrLine =
+			entry.role !== "unknown" && entry.role !== "generic" ? entry.role : (lineRole ?? entry.role);
 		const role = getSnapshotRefRole({ role: roleFromRefOrLine }, isEditable);
 		return {
 			...entry,

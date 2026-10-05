@@ -1,6 +1,14 @@
-import { buildNextToolAction, type AgentBrowserNextAction, withOptionalSessionArgs } from "./next-actions.js";
+import {
+	buildNextToolAction,
+	type AgentBrowserNextAction,
+	withOptionalSessionArgs,
+} from "./next-actions.js";
 
-export type AgentBrowserRecoveryKind = "about-blank" | "connected-session" | "no-active-page" | "tab-drift";
+export type AgentBrowserRecoveryKind =
+	| "about-blank"
+	| "connected-session"
+	| "no-active-page"
+	| "tab-drift";
 
 export interface AgentBrowserRecoveryContext {
 	kind: AgentBrowserRecoveryKind;
@@ -29,14 +37,23 @@ export const AGENT_BROWSER_RICH_INPUT_RECOVERY_NEXT_ACTION_IDS = {
 	focus: "focus-current-editable-ref",
 } as const;
 
-export type AgentBrowserRichInputRecoveryNextActionKind = keyof typeof AGENT_BROWSER_RICH_INPUT_RECOVERY_NEXT_ACTION_IDS;
+export type AgentBrowserRichInputRecoveryNextActionKind =
+	keyof typeof AGENT_BROWSER_RICH_INPUT_RECOVERY_NEXT_ACTION_IDS;
 
 function getNumberedAgentBrowserNextActionId(baseId: string, index: number, total: number): string {
 	return total > 1 ? `${baseId}-${index + 1}` : baseId;
 }
 
-export function getAgentBrowserRichInputRecoveryNextActionId(kind: AgentBrowserRichInputRecoveryNextActionKind, index: number, candidateCount: number): string {
-	return getNumberedAgentBrowserNextActionId(AGENT_BROWSER_RICH_INPUT_RECOVERY_NEXT_ACTION_IDS[kind], index, candidateCount);
+export function getAgentBrowserRichInputRecoveryNextActionId(
+	kind: AgentBrowserRichInputRecoveryNextActionKind,
+	index: number,
+	candidateCount: number,
+): string {
+	return getNumberedAgentBrowserNextActionId(
+		AGENT_BROWSER_RICH_INPUT_RECOVERY_NEXT_ACTION_IDS[kind],
+		index,
+		candidateCount,
+	);
 }
 
 export function getAgentBrowserRichInputRecoveryNextActionIds(candidateCount: number): string[] {
@@ -51,7 +68,9 @@ export function getAgentBrowserRichInputRecoveryNextActionIds(candidateCount: nu
 }
 
 function getRecoveryTargetDescription(recovery: AgentBrowserRecoveryContext): string {
-	const target = [recovery.targetTitle, recovery.targetUrl].filter((item): item is string => item !== undefined && item.length > 0).join(" at ");
+	const target = [recovery.targetTitle, recovery.targetUrl]
+		.filter((item): item is string => item !== undefined && item.length > 0)
+		.join(" at ");
 	return target.length > 0 ? target : "the intended tab";
 }
 
@@ -80,11 +99,17 @@ function buildTabSnapshotRecoveryAction(options: {
 		id: options.id,
 		reason: `${options.reason} The batch selects and verifies the stable tab before snapshotting.`,
 		safety: `${options.safety} A failed tab selection or URL check stops before the snapshot.`,
-		stdin: JSON.stringify([["tab", options.tabId], ["get", "url"], ["snapshot", "-i"]]),
+		stdin: JSON.stringify([
+			["tab", options.tabId],
+			["get", "url"],
+			["snapshot", "-i"],
+		]),
 	});
 }
 
-export function buildRecoveryNextActions(recovery: AgentBrowserRecoveryContext): AgentBrowserNextAction[] {
+export function buildRecoveryNextActions(
+	recovery: AgentBrowserRecoveryContext,
+): AgentBrowserNextAction[] {
 	const sessionArgs = (args: string[]) => withOptionalSessionArgs(recovery.sessionName, args);
 	if (recovery.kind === "connected-session") {
 		return [
@@ -92,13 +117,16 @@ export function buildRecoveryNextActions(recovery: AgentBrowserRecoveryContext):
 				args: sessionArgs(["get", "url"]),
 				id: AGENT_BROWSER_RECOVERY_NEXT_ACTION_IDS.connectedSessionGetUrl,
 				reason: "Verify the attached page URL before any page-content inspection.",
-				safety: "Read-only URL lookup. The wrapper keeps page inspection blocked if the active target URL cannot be verified.",
+				safety:
+					"Read-only URL lookup. The wrapper keeps page inspection blocked if the active target URL cannot be verified.",
 			}),
 			buildNextToolAction({
 				args: sessionArgs(["tab", "list"]),
 				id: AGENT_BROWSER_RECOVERY_NEXT_ACTION_IDS.connectedSessionListTabs,
-				reason: "Inspect tabs exposed by the connected CDP endpoint before assuming the app surface is active.",
-				safety: "Read-only. Raw connect can succeed before the desktop app has an active rendered page.",
+				reason:
+					"Inspect tabs exposed by the connected CDP endpoint before assuming the app surface is active.",
+				safety:
+					"Read-only. Raw connect can succeed before the desktop app has an active rendered page.",
 			}),
 		];
 	}
@@ -115,18 +143,24 @@ export function buildRecoveryNextActions(recovery: AgentBrowserRecoveryContext):
 	const targetDescription = getRecoveryTargetDescription(recovery);
 	const listAction = buildNextToolAction({
 		args: sessionArgs(["tab", "list"]),
-		id: recovery.kind === "about-blank" ? AGENT_BROWSER_RECOVERY_NEXT_ACTION_IDS.aboutBlankListTabs : AGENT_BROWSER_RECOVERY_NEXT_ACTION_IDS.tabDriftListTabs,
+		id:
+			recovery.kind === "about-blank"
+				? AGENT_BROWSER_RECOVERY_NEXT_ACTION_IDS.aboutBlankListTabs
+				: AGENT_BROWSER_RECOVERY_NEXT_ACTION_IDS.tabDriftListTabs,
 		reason: `Inspect tabs for ${targetDescription} before continuing after tab drift.`,
 		safety: "Read-only tab listing; prefer stable tN tab ids over positional tab guesses.",
 	});
-	if (!isStableTabId(recovery.selectedTab)) return [listAction];
+	if (!isStableTabId(recovery.selectedTab)) {
+		return [listAction];
+	}
 	return [
 		listAction,
 		buildNextToolAction({
 			args: sessionArgs(["tab", recovery.selectedTab]),
 			id: AGENT_BROWSER_RECOVERY_NEXT_ACTION_IDS.selectIntendedTabAfterDrift,
 			reason: `Re-select ${targetDescription} with the stable tab id already observed by the wrapper.`,
-			safety: "Switches only the active tab in this browser session; it does not mutate page content.",
+			safety:
+				"Switches only the active tab in this browser session; it does not mutate page content.",
 		}),
 		buildTabSnapshotRecoveryAction({
 			id: AGENT_BROWSER_RECOVERY_NEXT_ACTION_IDS.snapshotAfterTabRecovery,

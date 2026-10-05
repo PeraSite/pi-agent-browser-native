@@ -1,33 +1,64 @@
 import { isRecord, parseRefId } from "../../parsing.js";
 import { redactSensitiveText } from "../../runtime.js";
-import { withOptionalSessionArgs, type AgentBrowserNextAction } from "../../results/next-actions.js";
+import {
+	withOptionalSessionArgs,
+	type AgentBrowserNextAction,
+} from "../../results/next-actions.js";
 import type { SessionRefSnapshot } from "../../session-page-state.js";
 import { runSessionCommandData } from "./session-state.js";
 import { getAgentBrowserProcessTimeoutMs } from "../../process.js";
 import { getAgentBrowserProcessEnvironment } from "../../process-environment.js";
-import type { ClickDispatchDiagnostic, ClickDispatchProbe, ClickDispatchProbeTarget } from "./types.js";
+import type {
+	ClickDispatchDiagnostic,
+	ClickDispatchProbe,
+	ClickDispatchProbeTarget,
+} from "./types.js";
 
 const CLICK_DISPATCH_MARKER_PREFIX = "__piAgentBrowserClickDispatchProbe_";
 const CLICK_DISPATCH_CLEANUP_TIMEOUT_MS = 2_000;
-const ACCESSIBLE_REF_CLICK_DISPATCH_ROLES = new Set(["button", "checkbox", "menuitem", "radio", "switch", "tab"]);
+const ACCESSIBLE_REF_CLICK_DISPATCH_ROLES = new Set([
+	"button",
+	"checkbox",
+	"menuitem",
+	"radio",
+	"switch",
+	"tab",
+]);
 
 function normalizeAccessibleName(name: string): string {
 	return name.replace(/\s+/g, " ").trim().toLowerCase();
 }
 
-function getClickDispatchProbeTarget(commandTokens: string[], refSnapshot?: SessionRefSnapshot): ClickDispatchProbeTarget | undefined {
-	if (commandTokens[0] !== "click" || commandTokens.includes("--new-tab")) return undefined;
+function getClickDispatchProbeTarget(
+	commandTokens: string[],
+	refSnapshot?: SessionRefSnapshot,
+): ClickDispatchProbeTarget | undefined {
+	if (commandTokens[0] !== "click" || commandTokens.includes("--new-tab")) {
+		return undefined;
+	}
 	const selector = commandTokens.slice(1).find((token) => token !== "--human");
-	if (!selector || selector.startsWith("-")) return undefined;
+	if (!selector || selector.startsWith("-")) {
+		return undefined;
+	}
 	const refId = parseRefId(selector);
 	if (refId) {
 		const ref = refSnapshot?.refs?.[refId];
-		if (!ref || !ACCESSIBLE_REF_CLICK_DISPATCH_ROLES.has(ref.role)) return undefined;
-		const matchingRefs = Object.values(refSnapshot?.refs ?? {}).filter((candidate) => candidate.role.toLowerCase() === ref.role.toLowerCase() && normalizeAccessibleName(candidate.name) === normalizeAccessibleName(ref.name));
-		if (matchingRefs.length !== 1) return undefined;
+		if (!ref || !ACCESSIBLE_REF_CLICK_DISPATCH_ROLES.has(ref.role)) {
+			return undefined;
+		}
+		const matchingRefs = Object.values(refSnapshot?.refs ?? {}).filter(
+			(candidate) =>
+				candidate.role.toLowerCase() === ref.role.toLowerCase() &&
+				normalizeAccessibleName(candidate.name) === normalizeAccessibleName(ref.name),
+		);
+		if (matchingRefs.length !== 1) {
+			return undefined;
+		}
 		return { kind: "accessible", name: ref.name, refId, role: ref.role };
 	}
-	if (selector.startsWith("xpath=")) return { kind: "xpath", selector: selector.slice("xpath=".length) };
+	if (selector.startsWith("xpath=")) {
+		return { kind: "xpath", selector: selector.slice("xpath=".length) };
+	}
 	return undefined;
 }
 
@@ -39,13 +70,17 @@ function getClickDispatchIdentityAttribute(probe: ClickDispatchProbe): string {
 	return `data-pi-click-dispatch-${probe.marker.toLowerCase()}`;
 }
 
-function buildClickDispatchProbeInstallScript(probe: ClickDispatchProbe, timeoutMs: number): string {
+function buildClickDispatchProbeInstallScript(
+	probe: ClickDispatchProbe,
+	timeoutMs: number,
+): string {
 	const target = probe.target;
-	const resolveTarget = target.kind === "selector"
-		? `(() => { try { return document.querySelector(${JSON.stringify(target.selector)}); } catch { return null; } })()`
-		: target.kind === "xpath"
-			? `(() => { try { return document.evaluate(${JSON.stringify(target.selector)}, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue; } catch { return null; } })()`
-			: `(() => {
+	const resolveTarget =
+		target.kind === "selector"
+			? `(() => { try { return document.querySelector(${JSON.stringify(target.selector)}); } catch { return null; } })()`
+			: target.kind === "xpath"
+				? `(() => { try { return document.evaluate(${JSON.stringify(target.selector)}, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue; } catch { return null; } })()`
+				: `(() => {
   const normalize = (value) => String(value ?? "").replace(/\\s+/g, " ").trim();
   const expectedRole = ${JSON.stringify(target.role)};
   const expectedName = normalize(${JSON.stringify(target.name)});
@@ -186,92 +221,207 @@ export function formatClickDispatchDiagnosticText(diagnostic: ClickDispatchDiagn
 	return `Click dispatch diagnostic: ${diagnostic.summary}`;
 }
 
-export function buildClickDispatchNextActions(options: { commandTokens: string[]; diagnostic?: ClickDispatchDiagnostic; sessionName?: string }): AgentBrowserNextAction[] {
-	const retryArgs = options.commandTokens[0] === "click" || options.commandTokens[0] === "find" ? options.commandTokens : ["click", ...options.commandTokens];
+export function buildClickDispatchNextActions(options: {
+	commandTokens: string[];
+	diagnostic?: ClickDispatchDiagnostic;
+	sessionName?: string;
+}): AgentBrowserNextAction[] {
+	const retryArgs =
+		options.commandTokens[0] === "click" || options.commandTokens[0] === "find"
+			? options.commandTokens
+			: ["click", ...options.commandTokens];
 	const actions: AgentBrowserNextAction[] = [
 		{
 			id: "inspect-click-dispatch-miss",
 			params: { args: withOptionalSessionArgs(options.sessionName, ["snapshot", "-i"]) },
-			reason: "Refresh interactive refs and verify the intended click target before retrying upstream click.",
-			safety: "Read-only snapshot; the wrapper does not replay clicks in-page when upstream reports success without DOM events.",
+			reason:
+				"Refresh interactive refs and verify the intended click target before retrying upstream click.",
+			safety:
+				"Read-only snapshot; the wrapper does not replay clicks in-page when upstream reports success without DOM events.",
 			tool: "agent_browser",
 		},
 	];
 	if (options.diagnostic?.scrollContainer) {
 		actions.push({
 			id: "scroll-target-into-view-after-dispatch-miss",
-			params: { args: withOptionalSessionArgs(options.sessionName, ["scrollintoview", retryArgs[1]].filter((item): item is string => typeof item === "string")) },
+			params: {
+				args: withOptionalSessionArgs(
+					options.sessionName,
+					["scrollintoview", retryArgs[1]].filter(
+						(item): item is string => typeof item === "string",
+					),
+				),
+			},
 			reason: options.diagnostic.scrollContainer.selector
 				? `The target may be outside nested scroll container ${options.diagnostic.scrollContainer.selector}; scroll the target into view before retrying the click.`
 				: "The target may be inside an offscreen nested scroll container; scroll the target into view before retrying the click.",
-			safety: "Use only for the same current page and target; run snapshot -i again if the page rerendered.",
+			safety:
+				"Use only for the same current page and target; run snapshot -i again if the page rerendered.",
 			tool: "agent_browser",
 		});
 	}
 	actions.push({
 		id: "retry-click-after-dispatch-miss",
 		params: { args: withOptionalSessionArgs(options.sessionName, retryArgs) },
-		reason: "Retry the same upstream click after confirming the target is visible; do not assume the prior success mutated the page.",
-		safety: "Only retry when the target is still intended; use page-change evidence or a fresh snapshot before continuing the workflow.",
+		reason:
+			"Retry the same upstream click after confirming the target is visible; do not assume the prior success mutated the page.",
+		safety:
+			"Only retry when the target is still intended; use page-change evidence or a fresh snapshot before continuing the workflow.",
 		tool: "agent_browser",
 	});
 	return actions;
 }
 
-export async function prepareClickDispatchProbe(options: { commandTokens: string[]; cwd: string; namespace?: string; refSnapshot?: SessionRefSnapshot; sessionName?: string; signal?: AbortSignal; timeoutMs?: number }): Promise<ClickDispatchProbe | undefined> {
-	if (!options.sessionName || options.commandTokens[0] !== "click" || options.commandTokens.includes("--new-tab")) return undefined;
+export async function prepareClickDispatchProbe(options: {
+	commandTokens: string[];
+	cwd: string;
+	namespace?: string;
+	refSnapshot?: SessionRefSnapshot;
+	sessionName?: string;
+	signal?: AbortSignal;
+	timeoutMs?: number;
+}): Promise<ClickDispatchProbe | undefined> {
+	if (
+		!options.sessionName ||
+		options.commandTokens[0] !== "click" ||
+		options.commandTokens.includes("--new-tab")
+	) {
+		return undefined;
+	}
 	// This optional diagnostic must not require approving a fresh eval on every click retry.
-	if (getAgentBrowserProcessEnvironment().AGENT_BROWSER_CONFIRM_ACTIONS?.split(",").some(action => action.trim().toLowerCase() === "evaluate")) return undefined;
+	if (
+		getAgentBrowserProcessEnvironment()
+			.AGENT_BROWSER_CONFIRM_ACTIONS?.split(",")
+			.some((action) => action.trim().toLowerCase() === "evaluate")
+	) {
+		return undefined;
+	}
 	const target = getClickDispatchProbeTarget(options.commandTokens, options.refSnapshot);
-	if (!target) return undefined;
-	const probe: ClickDispatchProbe = { marker: `${CLICK_DISPATCH_MARKER_PREFIX}${Date.now().toString(36)}_${Math.random().toString(36).slice(2)}`, target };
+	if (!target) {
+		return undefined;
+	}
+	const probe: ClickDispatchProbe = {
+		marker: `${CLICK_DISPATCH_MARKER_PREFIX}${Date.now().toString(36)}_${Math.random().toString(36).slice(2)}`,
+		target,
+	};
 	let prepared = false;
 	try {
-		const installData = await runSessionCommandData({ args: ["eval", "--stdin"], cwd: options.cwd, namespace: options.namespace, sessionName: options.sessionName, signal: options.signal, stdin: buildClickDispatchProbeInstallScript(probe, options.timeoutMs ?? getAgentBrowserProcessTimeoutMs()) });
-		if (getEvalResultRecord(installData)?.status !== "installed") return undefined;
+		const installData = await runSessionCommandData({
+			args: ["eval", "--stdin"],
+			cwd: options.cwd,
+			namespace: options.namespace,
+			sessionName: options.sessionName,
+			signal: options.signal,
+			stdin: buildClickDispatchProbeInstallScript(
+				probe,
+				options.timeoutMs ?? getAgentBrowserProcessTimeoutMs(),
+			),
+		});
+		if (getEvalResultRecord(installData)?.status !== "installed") {
+			return undefined;
+		}
 		// Name matching and in-page XPath only find candidates. Native resolution
 		// must prove identity, including frame scope, before missing events mean failure.
-		const selector = target.kind === "accessible" ? `@${target.refId}` : target.kind === "xpath" ? `xpath=${target.selector}` : target.selector;
-		const identity = await runSessionCommandData({ args: ["get", "attr", selector, getClickDispatchIdentityAttribute(probe)], cwd: options.cwd, namespace: options.namespace, sessionName: options.sessionName, signal: options.signal });
-		if (!isRecord(identity) || identity.value !== probe.marker) return undefined;
-		const removed = await runSessionCommandData({ args: ["eval", "--stdin"], cwd: options.cwd, namespace: options.namespace, sessionName: options.sessionName, signal: options.signal, stdin: `(() => {
+		const selector =
+			target.kind === "accessible"
+				? `@${target.refId}`
+				: target.kind === "xpath"
+					? `xpath=${target.selector}`
+					: target.selector;
+		const identity = await runSessionCommandData({
+			args: ["get", "attr", selector, getClickDispatchIdentityAttribute(probe)],
+			cwd: options.cwd,
+			namespace: options.namespace,
+			sessionName: options.sessionName,
+			signal: options.signal,
+		});
+		if (!isRecord(identity) || identity.value !== probe.marker) {
+			return undefined;
+		}
+		const removed = await runSessionCommandData({
+			args: ["eval", "--stdin"],
+			cwd: options.cwd,
+			namespace: options.namespace,
+			sessionName: options.sessionName,
+			signal: options.signal,
+			stdin: `(() => {
 const state = window[${JSON.stringify(probe.marker)}];
 if (!state || typeof state.removeIdentityMarker !== "function") return { status: "probe-missing" };
 state.removeIdentityMarker();
 return { status: "identity-marker-removed" };
-})()` });
-		if (getEvalResultRecord(removed)?.status !== "identity-marker-removed") return undefined;
+})()`,
+		});
+		if (getEvalResultRecord(removed)?.status !== "identity-marker-removed") {
+			return undefined;
+		}
 		prepared = !options.signal?.aborted;
 		return prepared ? probe : undefined;
 	} finally {
 		// Even a lost/aborted install response may have left listeners in-page.
-		if (!prepared) await cleanupClickDispatchProbe({ ...options, probe });
+		if (!prepared) {
+			await cleanupClickDispatchProbe({ ...options, probe });
+		}
 	}
 }
 
-function getClickDispatchScrollContainerDiagnostic(result: Record<string, unknown>): ClickDispatchDiagnostic["scrollContainer"] {
+function getClickDispatchScrollContainerDiagnostic(
+	result: Record<string, unknown>,
+): ClickDispatchDiagnostic["scrollContainer"] {
 	const target = isRecord(result.target) ? result.target : undefined;
-	const scrollContainer = isRecord(target?.nearestScrollContainer) ? target.nearestScrollContainer : undefined;
-	const targetOutsideViewport = typeof target?.targetOutsideViewport === "boolean" ? target.targetOutsideViewport : undefined;
-	const targetOutsideContainer = typeof scrollContainer?.targetOutsideContainer === "boolean" ? scrollContainer.targetOutsideContainer : undefined;
-	if (!scrollContainer && !targetOutsideViewport) return undefined;
-	if (targetOutsideContainer !== true && targetOutsideViewport !== true) return undefined;
-	const selector = typeof scrollContainer?.selector === "string" ? redactSensitiveText(scrollContainer.selector) : undefined;
+	const scrollContainer = isRecord(target?.nearestScrollContainer)
+		? target.nearestScrollContainer
+		: undefined;
+	const targetOutsideViewport =
+		typeof target?.targetOutsideViewport === "boolean" ? target.targetOutsideViewport : undefined;
+	const targetOutsideContainer =
+		typeof scrollContainer?.targetOutsideContainer === "boolean"
+			? scrollContainer.targetOutsideContainer
+			: undefined;
+	if (!scrollContainer && !targetOutsideViewport) {
+		return undefined;
+	}
+	if (targetOutsideContainer !== true && targetOutsideViewport !== true) {
+		return undefined;
+	}
+	const selector =
+		typeof scrollContainer?.selector === "string"
+			? redactSensitiveText(scrollContainer.selector)
+			: undefined;
 	const summary = selector
 		? `Target appears outside nested scroll container ${selector}; use scrollintoview on the target or scroll that container before retrying.`
 		: "Target appears outside the viewport or a nested scroll container; use scrollintoview on the target before retrying.";
 	return { selector, summary, targetOutsideContainer, targetOutsideViewport };
 }
 
-export async function collectClickDispatchDiagnostic(options: { cwd: string; namespace?: string; probe?: ClickDispatchProbe; sessionName?: string; signal?: AbortSignal }): Promise<ClickDispatchDiagnostic | undefined> {
-	if (!options.probe || !options.sessionName) return undefined;
-	const data = await runSessionCommandData({ args: ["eval", "--stdin"], cwd: options.cwd, namespace: options.namespace, sessionName: options.sessionName, signal: options.signal, stdin: buildClickDispatchProbeCheckScript(options.probe) });
+export async function collectClickDispatchDiagnostic(options: {
+	cwd: string;
+	namespace?: string;
+	probe?: ClickDispatchProbe;
+	sessionName?: string;
+	signal?: AbortSignal;
+}): Promise<ClickDispatchDiagnostic | undefined> {
+	if (!options.probe || !options.sessionName) {
+		return undefined;
+	}
+	const data = await runSessionCommandData({
+		args: ["eval", "--stdin"],
+		cwd: options.cwd,
+		namespace: options.namespace,
+		sessionName: options.sessionName,
+		signal: options.signal,
+		stdin: buildClickDispatchProbeCheckScript(options.probe),
+	});
 	const result = getEvalResultRecord(data);
-	if (!result) return undefined;
+	if (!result) {
+		return undefined;
+	}
 	options.probe.cleaned = true;
 	const status = typeof result.status === "string" ? result.status : undefined;
-	if (status !== "no-native-event-observed") return undefined;
-	const nativeEventCount = typeof result.nativeEventCount === "number" ? result.nativeEventCount : 0;
+	if (status !== "no-native-event-observed") {
+		return undefined;
+	}
+	const nativeEventCount =
+		typeof result.nativeEventCount === "number" ? result.nativeEventCount : 0;
 	const scrollContainer = getClickDispatchScrollContainerDiagnostic(result);
 	const targetLabel = "no trusted DOM event reached the selected element";
 	const summary = scrollContainer
@@ -287,8 +437,15 @@ export async function collectClickDispatchDiagnostic(options: { cwd: string; nam
 	};
 }
 
-export async function cleanupClickDispatchProbe(options: { cwd: string; namespace?: string; probe?: ClickDispatchProbe; sessionName?: string }): Promise<void> {
-	if (!options.probe || options.probe.cleaned || !options.sessionName) return;
+export async function cleanupClickDispatchProbe(options: {
+	cwd: string;
+	namespace?: string;
+	probe?: ClickDispatchProbe;
+	sessionName?: string;
+}): Promise<void> {
+	if (!options.probe || options.probe.cleaned || !options.sessionName) {
+		return;
+	}
 	await runSessionCommandData({
 		args: ["eval", "--stdin"],
 		cwd: options.cwd,

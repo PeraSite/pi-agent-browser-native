@@ -1,4 +1,9 @@
-import { GLOBAL_BOOLEAN_FLAGS_WITH_OPTIONAL_VALUES, VALUE_FLAGS, optionalGlobalValueFlagConsumesNext, stripUpstreamGlobalFlags } from "./argv-grammar.js";
+import {
+	GLOBAL_BOOLEAN_FLAGS_WITH_OPTIONAL_VALUES,
+	VALUE_FLAGS,
+	optionalGlobalValueFlagConsumesNext,
+	stripUpstreamGlobalFlags,
+} from "./argv-grammar.js";
 import { isOpenNavigationCommand } from "./command-taxonomy.js";
 
 export interface CommandInfo {
@@ -27,7 +32,11 @@ function isBooleanLiteral(token: string | undefined): boolean {
 export function findCommandStartIndex(args: string[]): number | undefined {
 	for (let index = 0; index < args.length; index += 1) {
 		const token = args[index];
-		if (token.startsWith("--session=") || token.startsWith("--namespace=") || token.startsWith("--restore=")) {
+		if (
+			token.startsWith("--session=") ||
+			token.startsWith("--namespace=") ||
+			token.startsWith("--restore=")
+		) {
 			continue;
 		}
 		if (token.startsWith("-")) {
@@ -60,20 +69,34 @@ export function extractUpstreamCommandTokens(args: string[]): string[] {
 }
 
 export function parseWaitCommandTokens(commandTokens: string[]): WaitCommandShape {
-	if (commandTokens[0] !== "wait") return {};
+	if (commandTokens[0] !== "wait") {
+		return {};
+	}
 	const considered = commandTokens.slice(1).map((token, offset) => ({ index: offset + 1, token }));
 	const timeoutIndex = considered.findIndex((entry) => entry.token === "--timeout");
-	if (timeoutIndex >= 0) considered.splice(timeoutIndex, Math.min(2, considered.length - timeoutIndex));
-	for (const flags of [["--url", "-u"], ["--load", "-l"], ["--fn", "-f"], ["--text", "-t"]] as const) {
-		const match = considered.find((entry) => (flags as readonly string[]).includes(entry.token));
-		if (match) return { subcommand: match.token };
+	if (timeoutIndex >= 0) {
+		considered.splice(timeoutIndex, Math.min(2, considered.length - timeoutIndex));
 	}
-	const downloadIndex = considered.findIndex((entry) => entry.token === "--download" || entry.token === "-d");
+	for (const flags of [
+		["--url", "-u"],
+		["--load", "-l"],
+		["--fn", "-f"],
+		["--text", "-t"],
+	] as const) {
+		const match = considered.find((entry) => (flags as readonly string[]).includes(entry.token));
+		if (match) {
+			return { subcommand: match.token };
+		}
+	}
+	const downloadIndex = considered.findIndex(
+		(entry) => entry.token === "--download" || entry.token === "-d",
+	);
 	if (downloadIndex >= 0) {
 		const candidate = considered[downloadIndex + 1];
 		return {
 			downloadPath: candidate && !candidate.token.startsWith("--") ? candidate.token : undefined,
-			downloadPathIndex: candidate && !candidate.token.startsWith("--") ? candidate.index : undefined,
+			downloadPathIndex:
+				candidate && !candidate.token.startsWith("--") ? candidate.index : undefined,
 			subcommand: considered[downloadIndex].token,
 		};
 	}
@@ -105,7 +128,9 @@ function parseCommandInfoFromTokens(commandTokens: string[]): CommandInfo {
 		command,
 		subcommand: isOpenNavigationCommand(command)
 			? getOpenCommandTarget(upstreamCommandTokens)
-			: command === "wait" ? parseWaitCommandTokens(upstreamCommandTokens).subcommand : upstreamCommandTokens[1],
+			: command === "wait"
+				? parseWaitCommandTokens(upstreamCommandTokens).subcommand
+				: upstreamCommandTokens[1],
 	};
 }
 

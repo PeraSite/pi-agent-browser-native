@@ -29,7 +29,14 @@ const SNAPSHOT_SIGNAL_ROLES = new Set([
 	"textbox",
 ]);
 
-const SNAPSHOT_SEGMENT_ROOT_ROLES = new Set(["article", "dialog", "heading", "main", "menu", "region"]);
+const SNAPSHOT_SEGMENT_ROOT_ROLES = new Set([
+	"article",
+	"dialog",
+	"heading",
+	"main",
+	"menu",
+	"region",
+]);
 
 const SNAPSHOT_ROLE_PRIORITY: Record<string, number> = {
 	article: 0,
@@ -136,14 +143,20 @@ export function isChromeSectionName(name: string): boolean {
 }
 
 function isNoiseSnapshotLine(line: SnapshotLine): boolean {
-	if (line.name.length > 0 && isNoiseName(line.name)) return true;
+	if (line.name.length > 0 && isNoiseName(line.name)) {
+		return true;
+	}
 	const loweredRaw = line.raw.toLowerCase();
 	return loweredRaw.includes("promoted") || loweredRaw.includes("sponsored");
 }
 
 function isPotentialSegmentRootLine(line: SnapshotLine): boolean {
-	if (!SNAPSHOT_SEGMENT_ROOT_ROLES.has(line.role)) return false;
-	if (isNoiseSnapshotLine(line)) return false;
+	if (!SNAPSHOT_SEGMENT_ROOT_ROLES.has(line.role)) {
+		return false;
+	}
+	if (isNoiseSnapshotLine(line)) {
+		return false;
+	}
 	if (line.role === "heading") {
 		return line.name.length > 0 && (line.headingLevel ?? 99) <= 3;
 	}
@@ -165,14 +178,26 @@ function scoreSegment(segment: SnapshotSegment): number {
 	score -= root.depth * 6;
 
 	if (root.role === "heading") {
-		if (root.headingLevel === 1) score += 40;
-		else if (root.headingLevel === 2) score += 22;
-		else if (root.headingLevel === 3) score += 12;
+		if (root.headingLevel === 1) {
+			score += 40;
+		} else if (root.headingLevel === 2) {
+			score += 22;
+		} else if (root.headingLevel === 3) {
+			score += 12;
+		}
 	}
-	if (root.name.length > 0) score += 10;
-	if (root.name.length <= 2) score -= 18;
-	if (isChromeSectionName(root.name)) score -= 45;
-	if (isNoiseName(root.name)) score -= 1000;
+	if (root.name.length > 0) {
+		score += 10;
+	}
+	if (root.name.length <= 2) {
+		score -= 18;
+	}
+	if (isChromeSectionName(root.name)) {
+		score -= 45;
+	}
+	if (isNoiseName(root.name)) {
+		score -= 1000;
+	}
 	return score;
 }
 
@@ -226,17 +251,28 @@ export function buildSnapshotSegments(snapshotLines: SnapshotLine[]): SnapshotSe
 }
 
 export function choosePrimarySegment(segments: SnapshotSegment[]): SnapshotSegment | undefined {
-	if (segments.length === 0) return undefined;
+	if (segments.length === 0) {
+		return undefined;
+	}
 	return (
 		segments.find((segment) => segment.root.role === "main" || segment.root.role === "article") ??
-		segments.find((segment) => segment.root.role === "heading" && segment.root.headingLevel === 1) ??
+		segments.find(
+			(segment) => segment.root.role === "heading" && segment.root.headingLevel === 1,
+		) ??
 		segments.find((segment) => segment.score >= 90) ??
-		[...segments].sort((left, right) => right.score - left.score || left.startIndex - right.startIndex)[0]
+		[...segments].sort(
+			(left, right) => right.score - left.score || left.startIndex - right.startIndex,
+		)[0]
 	);
 }
 
-export function chooseAdditionalSegments(segments: SnapshotSegment[], primary: SnapshotSegment | undefined): SnapshotSegment[] {
-	if (!primary) return [];
+export function chooseAdditionalSegments(
+	segments: SnapshotSegment[],
+	primary: SnapshotSegment | undefined,
+): SnapshotSegment[] {
+	if (!primary) {
+		return [];
+	}
 
 	const seenNames = new Set<string>([normalizeWhitespace(primary.root.name.toLowerCase())]);
 	const rankedCandidates = segments
@@ -244,20 +280,34 @@ export function chooseAdditionalSegments(segments: SnapshotSegment[], primary: S
 		.sort((left, right) => {
 			const leftDistance = Math.abs(left.startIndex - primary.startIndex);
 			const rightDistance = Math.abs(right.startIndex - primary.startIndex);
-			if (leftDistance !== rightDistance) return leftDistance - rightDistance;
-			if (right.score !== left.score) return right.score - left.score;
+			if (leftDistance !== rightDistance) {
+				return leftDistance - rightDistance;
+			}
+			if (right.score !== left.score) {
+				return right.score - left.score;
+			}
 			return left.startIndex - right.startIndex;
 		});
 
 	const chosen: SnapshotSegment[] = [];
 	for (const segment of rankedCandidates) {
-		if (chosen.length >= SNAPSHOT_MAX_ADDITIONAL_SECTIONS) break;
-		if (isChromeSectionName(segment.root.name)) continue;
-		if (segment.root.role === "heading" && segment.root.name.length <= 2) continue;
+		if (chosen.length >= SNAPSHOT_MAX_ADDITIONAL_SECTIONS) {
+			break;
+		}
+		if (isChromeSectionName(segment.root.name)) {
+			continue;
+		}
+		if (segment.root.role === "heading" && segment.root.name.length <= 2) {
+			continue;
+		}
 		const nameKey = normalizeWhitespace(segment.root.name.toLowerCase());
-		if (nameKey && seenNames.has(nameKey)) continue;
+		if (nameKey && seenNames.has(nameKey)) {
+			continue;
+		}
 		chosen.push(segment);
-		if (nameKey) seenNames.add(nameKey);
+		if (nameKey) {
+			seenNames.add(nameKey);
+		}
 	}
 
 	return chosen.sort((left, right) => left.startIndex - right.startIndex);
@@ -265,9 +315,15 @@ export function chooseAdditionalSegments(segments: SnapshotSegment[], primary: S
 
 export function getMeaningfulSegmentLines(segment: SnapshotSegment): SnapshotLine[] {
 	return segment.lines.filter((line) => {
-		if (isNoiseSnapshotLine(line)) return false;
-		if (line.role === "generic" && !line.ref && line.name.length === 0) return false;
-		if (line.role === "link" && line.name.length === 0) return false;
+		if (isNoiseSnapshotLine(line)) {
+			return false;
+		}
+		if (line.role === "generic" && !line.ref && line.name.length === 0) {
+			return false;
+		}
+		if (line.role === "link" && line.name.length === 0) {
+			return false;
+		}
 		return true;
 	});
 }
@@ -290,20 +346,32 @@ export function buildSegmentPreview(segment: SnapshotSegment, maxLines: number):
 	const rootDepth = segment.root.depth;
 
 	for (const line of meaningfulLines) {
-		if (previewLines.length >= maxLines) break;
+		if (previewLines.length >= maxLines) {
+			break;
+		}
 		if (line !== segment.root) {
 			const relativeDepth = line.depth - rootDepth;
-			if (segment.root.role !== "heading" && relativeDepth > 2) continue;
-			if (segment.root.name.length > 0 && line.name === segment.root.name && (line.role === "heading" || line.role === "link")) {
+			if (segment.root.role !== "heading" && relativeDepth > 2) {
+				continue;
+			}
+			if (
+				segment.root.name.length > 0 &&
+				line.name === segment.root.name &&
+				(line.role === "heading" || line.role === "link")
+			) {
 				continue;
 			}
 		}
 
 		const key = `${line.role}:${line.name}:${line.ref ?? ""}:${line.depth}`;
-		if (seenPreviewKeys.has(key)) continue;
+		if (seenPreviewKeys.has(key)) {
+			continue;
+		}
 		seenPreviewKeys.add(key);
 		previewLines.push(line);
-		if (line.ref) previewRefIds.add(line.ref);
+		if (line.ref) {
+			previewRefIds.add(line.ref);
+		}
 	}
 
 	return {
@@ -316,11 +384,19 @@ export function buildSegmentPreview(segment: SnapshotSegment, maxLines: number):
 export function buildFallbackSnapshotOutline(snapshotLines: SnapshotLine[]): SnapshotPreview {
 	const selected = new Set<number>();
 	for (let index = 0; index < snapshotLines.length && selected.size < 4; index += 1) {
-		if (!isNoiseSnapshotLine(snapshotLines[index])) selected.add(index);
+		if (!isNoiseSnapshotLine(snapshotLines[index])) {
+			selected.add(index);
+		}
 	}
-	for (let index = 0; index < snapshotLines.length && selected.size < SNAPSHOT_FALLBACK_PREVIEW_MAX_LINES; index += 1) {
+	for (
+		let index = 0;
+		index < snapshotLines.length && selected.size < SNAPSHOT_FALLBACK_PREVIEW_MAX_LINES;
+		index += 1
+	) {
 		const line = snapshotLines[index];
-		if (isNoiseSnapshotLine(line)) continue;
+		if (isNoiseSnapshotLine(line)) {
+			continue;
+		}
 		if (SNAPSHOT_SIGNAL_ROLES.has(line.role) || line.ref || line.name.length > 0) {
 			selected.add(index);
 		}
@@ -339,14 +415,21 @@ export function buildFallbackSnapshotOutline(snapshotLines: SnapshotLine[]): Sna
 export function buildRefLineOrderMap(snapshotLines: SnapshotLine[]): Map<string, number> {
 	const map = new Map<string, number>();
 	for (const line of snapshotLines) {
-		if (!line.ref || map.has(line.ref)) continue;
+		if (!line.ref || map.has(line.ref)) {
+			continue;
+		}
 		map.set(line.ref, line.index);
 	}
 	return map;
 }
 
-export function canUseStructuredSnapshotPreview(snapshotLines: SnapshotLine[], refEntries: SnapshotRefEntry[]): boolean {
-	if (snapshotLines.length === 0) return false;
+export function canUseStructuredSnapshotPreview(
+	snapshotLines: SnapshotLine[],
+	refEntries: SnapshotRefEntry[],
+): boolean {
+	if (snapshotLines.length === 0) {
+		return false;
+	}
 	const linesWithRecognizedRoles = snapshotLines.filter((line) => line.role !== "unknown").length;
 	const linesWithNames = snapshotLines.filter((line) => line.name.length > 0).length;
 	const parsedRefIds = new Set(snapshotLines.flatMap((line) => (line.ref ? [line.ref] : [])));

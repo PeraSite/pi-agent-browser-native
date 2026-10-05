@@ -86,7 +86,9 @@ export function parseCliArgs(argv = process.argv.slice(2)) {
 
 	const unknownArgs = [...args].filter((arg) => !SUPPORTED_ARGS.has(arg));
 	if (unknownArgs.length > 0) {
-		throw new UsageError(`Unknown option${unknownArgs.length === 1 ? "" : "s"}: ${unknownArgs.join(", ")}`);
+		throw new UsageError(
+			`Unknown option${unknownArgs.length === 1 ? "" : "s"}: ${unknownArgs.join(", ")}`,
+		);
 	}
 
 	return {
@@ -161,7 +163,9 @@ export async function packToTemporaryPackageDir(cwd = process.cwd()) {
 		);
 		const packResult = parseSinglePackResult(stdout, stderr);
 		if (typeof packResult.filename !== "string" || packResult.filename.length === 0) {
-			throw new Error(`Unexpected npm pack result without a filename.\nstdout:\n${stdout}\n\nstderr:\n${stderr}`);
+			throw new Error(
+				`Unexpected npm pack result without a filename.\nstdout:\n${stdout}\n\nstderr:\n${stderr}`,
+			);
 		}
 
 		tarballPath = resolve(tempDir, packResult.filename);
@@ -173,23 +177,25 @@ export async function packToTemporaryPackageDir(cwd = process.cwd()) {
 		return {
 			cleanup: async () => {
 				await rm(tempDir, { force: true, recursive: true });
-				if (tarballPath) await rm(tarballPath, { force: true });
+				if (tarballPath) {
+					await rm(tarballPath, { force: true });
+				}
 			},
 			packageDir: join(tempDir, "package"),
 			packResult,
 		};
 	} catch (error) {
 		await rm(tempDir, { force: true, recursive: true });
-		if (tarballPath) await rm(tarballPath, { force: true });
+		if (tarballPath) {
+			await rm(tarballPath, { force: true });
+		}
 		throw error;
 	}
 }
 
 export function collectPackedPaths(files) {
 	return new Set(
-		files
-			.filter((entry) => typeof entry?.path === "string")
-			.map((entry) => entry.path),
+		files.filter((entry) => typeof entry?.path === "string").map((entry) => entry.path),
 	);
 }
 
@@ -203,8 +209,16 @@ function stripMarkdownLinkFragment(target) {
 
 function normalizePackedMarkdownTarget(sourcePath, rawTarget) {
 	const withoutFragment = stripMarkdownLinkFragment(rawTarget.trim());
-	if (!withoutFragment || withoutFragment.startsWith("#")) return undefined;
-	if (withoutFragment.startsWith("//") || withoutFragment.startsWith("/") || EXTERNAL_LINK_PATTERN.test(withoutFragment)) return undefined;
+	if (!withoutFragment || withoutFragment.startsWith("#")) {
+		return undefined;
+	}
+	if (
+		withoutFragment.startsWith("//") ||
+		withoutFragment.startsWith("/") ||
+		EXTERNAL_LINK_PATTERN.test(withoutFragment)
+	) {
+		return undefined;
+	}
 	let decoded = withoutFragment;
 	try {
 		decoded = decodeURI(withoutFragment);
@@ -215,10 +229,14 @@ function normalizePackedMarkdownTarget(sourcePath, rawTarget) {
 }
 
 function packedPathExists(packedPaths, targetPath) {
-	if (packedPaths.has(targetPath)) return true;
+	if (packedPaths.has(targetPath)) {
+		return true;
+	}
 	const directoryPrefix = targetPath.endsWith("/") ? targetPath : `${targetPath}/`;
 	for (const packedPath of packedPaths) {
-		if (packedPath.startsWith(directoryPrefix)) return true;
+		if (packedPath.startsWith(directoryPrefix)) {
+			return true;
+		}
 	}
 	return false;
 }
@@ -232,14 +250,20 @@ export async function collectPackedMarkdownLinkFailures(options) {
 		try {
 			text = await readFile(resolve(cwd, sourcePath), "utf8");
 		} catch (error) {
-			failures.push(`Packed Markdown file ${sourcePath} could not be read for link verification: ${error instanceof Error ? error.message : String(error)}`);
+			failures.push(
+				`Packed Markdown file ${sourcePath} could not be read for link verification: ${error instanceof Error ? error.message : String(error)}`,
+			);
 			continue;
 		}
 		for (const match of text.matchAll(MARKDOWN_LINK_PATTERN)) {
 			const rawTarget = match[1] ?? "";
 			const targetPath = normalizePackedMarkdownTarget(sourcePath, rawTarget);
-			if (!targetPath || packedPathExists(packedPaths, targetPath)) continue;
-			failures.push(`Packed Markdown link ${sourcePath} -> ${rawTarget} resolves to missing packed file ${targetPath}.`);
+			if (!targetPath || packedPathExists(packedPaths, targetPath)) {
+				continue;
+			}
+			failures.push(
+				`Packed Markdown link ${sourcePath} -> ${rawTarget} resolves to missing packed file ${targetPath}.`,
+			);
 		}
 	}
 	return failures;
@@ -252,7 +276,9 @@ export function pluralize(count, singular, plural = `${singular}s`) {
 function isInsidePath(childPath, parentPath) {
 	const normalizedChild = resolve(childPath);
 	const normalizedParent = resolve(parentPath);
-	return normalizedChild === normalizedParent || normalizedChild.startsWith(`${normalizedParent}${sep}`);
+	return (
+		normalizedChild === normalizedParent || normalizedChild.startsWith(`${normalizedParent}${sep}`)
+	);
 }
 
 export function evaluatePiSmokeResult(options) {
@@ -261,17 +287,23 @@ export function evaluatePiSmokeResult(options) {
 	const failures = [];
 
 	if (agentBrowserTools.length !== 1) {
-		failures.push(`Expected exactly one packaged agent_browser tool, found ${agentBrowserTools.length}.`);
+		failures.push(
+			`Expected exactly one packaged agent_browser tool, found ${agentBrowserTools.length}.`,
+		);
 	}
 
 	for (const tool of agentBrowserTools) {
 		const sourcePath = tool.sourceInfo?.path ?? tool.source?.path ?? tool.path;
 		if (typeof sourcePath !== "string" || sourcePath.length === 0) {
-			failures.push("agent_browser tool did not expose source path metadata for package-path verification.");
+			failures.push(
+				"agent_browser tool did not expose source path metadata for package-path verification.",
+			);
 			continue;
 		}
 		if (!isInsidePath(sourcePath, packageDir)) {
-			failures.push(`agent_browser loaded from ${sourcePath}; expected a source inside packed package ${packageDir}.`);
+			failures.push(
+				`agent_browser loaded from ${sourcePath}; expected a source inside packed package ${packageDir}.`,
+			);
 		}
 	}
 
@@ -279,7 +311,9 @@ export function evaluatePiSmokeResult(options) {
 }
 
 function summarizeToolResult(result) {
-	if (!result || typeof result !== "object") return String(result);
+	if (!result || typeof result !== "object") {
+		return String(result);
+	}
 
 	const textContent = Array.isArray(result.content)
 		? result.content
@@ -331,7 +365,9 @@ async function withFakeAgentBrowserOnPath(work) {
 	const fakeBinary = await createFakeAgentBrowserBinary();
 	const previousPath = process.env.PATH;
 	try {
-		process.env.PATH = previousPath ? `${fakeBinary.binDir}${delimiter}${previousPath}` : fakeBinary.binDir;
+		process.env.PATH = previousPath
+			? `${fakeBinary.binDir}${delimiter}${previousPath}`
+			: fakeBinary.binDir;
 		return await work();
 	} finally {
 		if (previousPath === undefined) {
@@ -346,11 +382,15 @@ async function withFakeAgentBrowserOnPath(work) {
 export async function executePackagedAgentBrowserSmoke(options) {
 	const { packageDir, session } = options;
 	const toolDefinition =
-		typeof session.getToolDefinition === "function" ? session.getToolDefinition("agent_browser") : undefined;
+		typeof session.getToolDefinition === "function"
+			? session.getToolDefinition("agent_browser")
+			: undefined;
 
 	if (!toolDefinition || typeof toolDefinition.execute !== "function") {
 		return {
-			failures: ["Packaged agent_browser tool definition was not executable via Pi session.getToolDefinition()."],
+			failures: [
+				"Packaged agent_browser tool definition was not executable via Pi session.getToolDefinition().",
+			],
 			invocation: undefined,
 		};
 	}
@@ -388,7 +428,10 @@ export async function executePackagedAgentBrowserSmoke(options) {
 	}
 
 	const text = summarizeToolResult(result);
-	const details = result && typeof result === "object" && result.details && typeof result.details === "object" ? result.details : {};
+	const details =
+		result && typeof result === "object" && result.details && typeof result.details === "object"
+			? result.details
+			: {};
 	const failures = [];
 	if (result?.isError === true) {
 		failures.push(
@@ -396,10 +439,14 @@ export async function executePackagedAgentBrowserSmoke(options) {
 		);
 	}
 	if (details.inspection !== true) {
-		failures.push("Packaged agent_browser --version smoke did not report a plain-text inspection result.");
+		failures.push(
+			"Packaged agent_browser --version smoke did not report a plain-text inspection result.",
+		);
 	}
 	if (details.exitCode !== 0) {
-		failures.push(`Packaged agent_browser --version smoke exited with ${String(details.exitCode)}; expected 0.`);
+		failures.push(
+			`Packaged agent_browser --version smoke exited with ${String(details.exitCode)}; expected 0.`,
+		);
 	}
 	if (!text.includes(FAKE_AGENT_BROWSER_VERSION)) {
 		failures.push(
@@ -414,20 +461,29 @@ export async function executePackagedAgentBrowserSmoke(options) {
 }
 
 export function collectVerificationFailures(options) {
-	const { forbiddenPackedFiles, forbiddenRepoFiles, missingPackedFiles, missingRepoFiles } = options;
+	const { forbiddenPackedFiles, forbiddenRepoFiles, missingPackedFiles, missingRepoFiles } =
+		options;
 	const failures = [];
 
 	if (missingRepoFiles.length > 0) {
-		failures.push(`Missing required repo file${missingRepoFiles.length === 1 ? "" : "s"}: ${missingRepoFiles.join(", ")}`);
+		failures.push(
+			`Missing required repo file${missingRepoFiles.length === 1 ? "" : "s"}: ${missingRepoFiles.join(", ")}`,
+		);
 	}
 	if (forbiddenRepoFiles.length > 0) {
-		failures.push(`Forbidden repo file${forbiddenRepoFiles.length === 1 ? "" : "s"} present: ${forbiddenRepoFiles.join(", ")}`);
+		failures.push(
+			`Forbidden repo file${forbiddenRepoFiles.length === 1 ? "" : "s"} present: ${forbiddenRepoFiles.join(", ")}`,
+		);
 	}
 	if (missingPackedFiles.length > 0) {
-		failures.push(`Missing required packed file${missingPackedFiles.length === 1 ? "" : "s"}: ${missingPackedFiles.join(", ")}`);
+		failures.push(
+			`Missing required packed file${missingPackedFiles.length === 1 ? "" : "s"}: ${missingPackedFiles.join(", ")}`,
+		);
 	}
 	if (forbiddenPackedFiles.length > 0) {
-		failures.push(`Forbidden packed file${forbiddenPackedFiles.length === 1 ? "" : "s"} present: ${forbiddenPackedFiles.join(", ")}`);
+		failures.push(
+			`Forbidden packed file${forbiddenPackedFiles.length === 1 ? "" : "s"} present: ${forbiddenPackedFiles.join(", ")}`,
+		);
 	}
 
 	return failures;
@@ -436,14 +492,18 @@ export function collectVerificationFailures(options) {
 export function evaluatePackResult(options) {
 	const { forbiddenRepoFiles, missingRepoFiles, packResult, publishContract } = options;
 	const packedPaths = collectPackedPaths(Array.isArray(packResult.files) ? packResult.files : []);
-	const missingPackedFiles = publishContract.requiredPackedFiles.filter((path) => !packedPaths.has(path));
+	const missingPackedFiles = publishContract.requiredPackedFiles.filter(
+		(path) => !packedPaths.has(path),
+	);
 	// ponytail: Only the two canonical leak patterns are supported; add explicit rules if the publish contract grows.
 	const forbiddenPackedFiles = publishContract.forbiddenPackedFiles.filter((pattern) =>
-		[...packedPaths].some((path) =>
-			(pattern.endsWith("/") && path.startsWith(pattern))
-			|| (pattern === ".env*" && path.startsWith(".env"))
-			|| (pattern === "**/*.tgz" && path.endsWith(".tgz"))
-			|| path === pattern),
+		[...packedPaths].some(
+			(path) =>
+				(pattern.endsWith("/") && path.startsWith(pattern)) ||
+				(pattern === ".env*" && path.startsWith(".env")) ||
+				(pattern === "**/*.tgz" && path.endsWith(".tgz")) ||
+				path === pattern,
+		),
 	);
 	const failures = collectVerificationFailures({
 		forbiddenPackedFiles,
@@ -466,7 +526,9 @@ export function evaluatePackResult(options) {
 
 function printVerificationReport(report, options) {
 	console.log(`Tarball: ${report.packResult.filename}`);
-	console.log(`Packed files: ${report.packResult.entryCount} ${pluralize(report.packResult.entryCount, "entry", "entries")}`);
+	console.log(
+		`Packed files: ${report.packResult.entryCount} ${pluralize(report.packResult.entryCount, "entry", "entries")}`,
+	);
 	console.log(`Tarball size: ${report.packResult.size} bytes`);
 	console.log(`Unpacked size: ${report.packResult.unpackedSize} bytes`);
 
@@ -512,8 +574,16 @@ export async function verifyPackageRelease(options = {}) {
 	const publishContract = await loadPublishContract({ cwd });
 	const missingRepoFiles = await collectMissingPaths(publishContract.requiredRepoFiles, cwd);
 	const forbiddenRepoFiles = await collectPresentPaths(publishContract.forbiddenRepoFiles, cwd);
-	const report = evaluatePackResult({ forbiddenRepoFiles, missingRepoFiles, packResult, publishContract });
-	const packedMarkdownLinkFailures = await collectPackedMarkdownLinkFailures({ cwd, packedPaths: report.packedPaths });
+	const report = evaluatePackResult({
+		forbiddenRepoFiles,
+		missingRepoFiles,
+		packResult,
+		publishContract,
+	});
+	const packedMarkdownLinkFailures = await collectPackedMarkdownLinkFailures({
+		cwd,
+		packedPaths: report.packedPaths,
+	});
 	return {
 		...report,
 		failures: [...report.failures, ...packedMarkdownLinkFailures],
@@ -531,11 +601,15 @@ export async function verifyPackagedPiLoad(options = {}) {
 	try {
 		tempAgentDir = await mkdtemp(join(tmpdir(), "pi-agent-browser-agent-"));
 		// The tarball already contains dist; install only its runtime dependencies, as a consumer would.
-		await execFile(npmCommand, ["install", "--omit=dev", "--omit=peer", "--ignore-scripts", "--no-audit", "--no-fund"], {
-			...npmExecOptions,
-			cwd: packageDir,
-			maxBuffer: 5 * 1024 * 1024,
-		});
+		await execFile(
+			npmCommand,
+			["install", "--omit=dev", "--omit=peer", "--ignore-scripts", "--no-audit", "--no-fund"],
+			{
+				...npmExecOptions,
+				cwd: packageDir,
+				maxBuffer: 5 * 1024 * 1024,
+			},
+		);
 		const resourceLoader = new DefaultResourceLoader({
 			agentDir: tempAgentDir,
 			cwd: packageDir,
@@ -557,8 +631,12 @@ export async function verifyPackagedPiLoad(options = {}) {
 
 		const tools = session.getAllTools();
 		const failures = evaluatePiSmokeResult({ packageDir, tools });
-		await session.bindExtensions({ mode: "print", onError: error => failures.push(error.error) });
-		failures.push(...resourceLoader.getExtensions().errors.map(({ path, error }) => `Packaged extension ${path} failed to load: ${error}`));
+		await session.bindExtensions({ mode: "print", onError: (error) => failures.push(error.error) });
+		failures.push(
+			...resourceLoader
+				.getExtensions()
+				.errors.map(({ path, error }) => `Packaged extension ${path} failed to load: ${error}`),
+		);
 		let invocation;
 
 		if (failures.length === 0) {
@@ -569,12 +647,42 @@ export async function verifyPackagedPiLoad(options = {}) {
 			invocation = executionReport.invocation;
 			const marker = join(tempAgentDir, "cli.json");
 			const observer = join(tempAgentDir, "observer.ts");
-			await writeFile(observer, `import { writeFileSync } from "node:fs";
-export default function(pi) { pi.on("session_start", (_event, ctx) => { writeFileSync(${JSON.stringify(marker)}, JSON.stringify(pi.getActiveTools())); ctx.shutdown(); }); }`);
-			const cliProcess = execFile(process.execPath, [hostCli, "--mode", "rpc", "--no-session", "-ne", "-ns", "-np", "-nc", "--no-themes", "--approve", "-e", packageDir, "-e", observer], {
-				cwd: packageDir, timeout: 30_000,
-				env: { ...process.env, HOME: tempAgentDir, USERPROFILE: tempAgentDir, PI_CODING_AGENT_DIR: tempAgentDir, PI_OFFLINE: "1", PI_TELEMETRY: "0" },
-			});
+			await writeFile(
+				observer,
+				`import { writeFileSync } from "node:fs";
+export default function(pi) { pi.on("session_start", (_event, ctx) => { writeFileSync(${JSON.stringify(marker)}, JSON.stringify(pi.getActiveTools())); ctx.shutdown(); }); }`,
+			);
+			const cliProcess = execFile(
+				process.execPath,
+				[
+					hostCli,
+					"--mode",
+					"rpc",
+					"--no-session",
+					"-ne",
+					"-ns",
+					"-np",
+					"-nc",
+					"--no-themes",
+					"--approve",
+					"-e",
+					packageDir,
+					"-e",
+					observer,
+				],
+				{
+					cwd: packageDir,
+					timeout: 30_000,
+					env: {
+						...process.env,
+						HOME: tempAgentDir,
+						USERPROFILE: tempAgentDir,
+						PI_CODING_AGENT_DIR: tempAgentDir,
+						PI_OFFLINE: "1",
+						PI_TELEMETRY: "0",
+					},
+				},
+			);
 			cliProcess.child.stdin.end();
 			const child = await cliProcess;
 			assert.doesNotMatch(child.stderr, /Failed to load extension|Extension error/);
@@ -593,17 +701,23 @@ export default function(pi) { pi.on("session_start", (_event, ctx) => { writeFil
 		};
 	} finally {
 		try {
-			if (session) await session.extensionRunner.emit({ type: "session_shutdown", reason: "quit" });
+			if (session) {
+				await session.extensionRunner.emit({ type: "session_shutdown", reason: "quit" });
+			}
 		} finally {
 			session?.dispose();
 		}
 		await cleanup();
-		if (tempAgentDir) await rm(tempAgentDir, { force: true, recursive: true });
+		if (tempAgentDir) {
+			await rm(tempAgentDir, { force: true, recursive: true });
+		}
 	}
 }
 
 function isDirectRun(metaUrl, argv = process.argv) {
-	if (!argv[1]) return false;
+	if (!argv[1]) {
+		return false;
+	}
 	return metaUrl === pathToFileURL(argv[1]).href;
 }
 
@@ -617,7 +731,9 @@ export async function main(argv = process.argv.slice(2)) {
 
 		const report = await verifyPackageRelease();
 		printVerificationReport(report, cliArgs);
-		if (report.failures.length > 0) return 1;
+		if (report.failures.length > 0) {
+			return 1;
+		}
 
 		if (cliArgs.smokePi) {
 			const smokeReport = await verifyPackagedPiLoad();

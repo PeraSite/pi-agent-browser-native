@@ -10,14 +10,25 @@ export interface SuccessfulBatchCloseLifecycle {
 	statePath?: string;
 }
 
-export function batchHasSuccessfulCloseAll(data: unknown, fallbackCommands: string[][] = []): boolean {
-	if (!Array.isArray(data)) return false;
+export function batchHasSuccessfulCloseAll(
+	data: unknown,
+	fallbackCommands: string[][] = [],
+): boolean {
+	if (!Array.isArray(data)) {
+		return false;
+	}
 	return data.some((row, index) => {
-		if (!isRecord(row) || row.success !== true) return false;
-		const rowCommand = Array.isArray(row.command) && row.command.every((token) => typeof token === "string")
-			? row.command
-			: fallbackCommands[index];
-		return rowCommand ? !detectConfirmationRequired(row.result) && isCloseAllCommand(extractUpstreamCommandTokens(rowCommand)) : false;
+		if (!isRecord(row) || row.success !== true) {
+			return false;
+		}
+		const rowCommand =
+			Array.isArray(row.command) && row.command.every((token) => typeof token === "string")
+				? row.command
+				: fallbackCommands[index];
+		return rowCommand
+			? !detectConfirmationRequired(row.result) &&
+					isCloseAllCommand(extractUpstreamCommandTokens(rowCommand))
+			: false;
 	});
 }
 
@@ -25,22 +36,36 @@ export function getSuccessfulBatchCloseLifecycle(
 	rows: unknown,
 	fallbackCommands: string[][] = [],
 ): SuccessfulBatchCloseLifecycle | undefined {
-	if (!Array.isArray(rows)) return undefined;
+	if (!Array.isArray(rows)) {
+		return undefined;
+	}
 	let sawClose = false;
 	let endsClosed = false;
 	let browserActiveAfterClose = false;
 	let recordingClosedAfterBatch = false;
 	let statePath: string | undefined;
 	for (const [index, row] of rows.entries()) {
-		if (!isRecord(row)) continue;
+		if (!isRecord(row)) {
+			continue;
+		}
 		const stepSucceeded = row.success === true;
-		const rowCommand = Array.isArray(row.command) && row.command.every((token) => typeof token === "string")
-			? row.command
-			: fallbackCommands[index];
+		const rowCommand =
+			Array.isArray(row.command) && row.command.every((token) => typeof token === "string")
+				? row.command
+				: fallbackCommands[index];
 		const result = isRecord(row.result) ? row.result : isRecord(row.data) ? row.data : undefined;
-		const lifecycle = isRecord(row.lifecycle) ? row.lifecycle : isRecord(result?.lifecycle) ? result.lifecycle : undefined;
-		const effectiveLaunch = isRecord(lifecycle?.effectiveLaunch) ? lifecycle.effectiveLaunch : undefined;
-		const browserLaunched = typeof effectiveLaunch?.browserLaunched === "boolean" ? effectiveLaunch.browserLaunched : undefined;
+		const lifecycle = isRecord(row.lifecycle)
+			? row.lifecycle
+			: isRecord(result?.lifecycle)
+				? result.lifecycle
+				: undefined;
+		const effectiveLaunch = isRecord(lifecycle?.effectiveLaunch)
+			? lifecycle.effectiveLaunch
+			: undefined;
+		const browserLaunched =
+			typeof effectiveLaunch?.browserLaunched === "boolean"
+				? effectiveLaunch.browserLaunched
+				: undefined;
 		if (!rowCommand) {
 			if (sawClose && browserLaunched !== false) {
 				endsClosed = false;
@@ -50,20 +75,36 @@ export function getSuccessfulBatchCloseLifecycle(
 			continue;
 		}
 		const [command, subcommand] = extractUpstreamCommandTokens(rowCommand);
-		if (stepSucceeded && !detectConfirmationRequired(result) && (isCloseCommand(command) || isSuccessfulNativeConfirmedClose(extractUpstreamCommandTokens(rowCommand), result))) {
+		if (
+			stepSucceeded &&
+			!detectConfirmationRequired(result) &&
+			(isCloseCommand(command) ||
+				isSuccessfulNativeConfirmedClose(extractUpstreamCommandTokens(rowCommand), result))
+		) {
 			sawClose = true;
 			endsClosed = true;
 			browserActiveAfterClose = false;
 			recordingClosedAfterBatch = true;
-			const closeData = command === "confirm" && isRecord(result?.result) ? result.result.data : result;
-			statePath = isRecord(closeData) && typeof closeData.statePath === "string" ? closeData.statePath : undefined;
+			const closeData =
+				command === "confirm" && isRecord(result?.result) ? result.result.data : result;
+			statePath =
+				isRecord(closeData) && typeof closeData.statePath === "string"
+					? closeData.statePath
+					: undefined;
 		} else if (sawClose && command === "record") {
 			if (browserLaunched !== false) {
 				endsClosed = false;
 				browserActiveAfterClose = true;
 			}
-			if (stepSucceeded && subcommand === "stop") recordingClosedAfterBatch = true;
-			else if (stepSucceeded && browserActiveAfterClose && (subcommand === "start" || subcommand === "restart")) recordingClosedAfterBatch = false;
+			if (stepSucceeded && subcommand === "stop") {
+				recordingClosedAfterBatch = true;
+			} else if (
+				stepSucceeded &&
+				browserActiveAfterClose &&
+				(subcommand === "start" || subcommand === "restart")
+			) {
+				recordingClosedAfterBatch = false;
+			}
 		} else if (sawClose && browserLaunched !== false) {
 			endsClosed = false;
 			browserActiveAfterClose = true;

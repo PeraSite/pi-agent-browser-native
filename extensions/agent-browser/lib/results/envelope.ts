@@ -9,7 +9,10 @@ function hasStructuredBatchStepFailure(data: unknown): data is AgentBrowserBatch
 	return Array.isArray(data) && data.some((item) => isRecord(item) && item.success === false);
 }
 
-async function readEnvelopeSource(options: { stdout: string; stdoutPath?: string }): Promise<string> {
+async function readEnvelopeSource(options: {
+	stdout: string;
+	stdoutPath?: string;
+}): Promise<string> {
 	if (!options.stdoutPath) {
 		return options.stdout;
 	}
@@ -30,7 +33,9 @@ export function extractEnvelopeErrorText(error: unknown): string | undefined {
 		return String(error);
 	}
 	if (Array.isArray(error)) {
-		const parts = error.map((item) => extractEnvelopeErrorText(item) ?? stringifyUnknown(item)).filter((item) => item.length > 0);
+		const parts = error
+			.map((item) => extractEnvelopeErrorText(item) ?? stringifyUnknown(item))
+			.filter((item) => item.length > 0);
 		return parts.length > 0 ? parts.join("\n") : undefined;
 	}
 	if (!isRecord(error)) {
@@ -39,14 +44,20 @@ export function extractEnvelopeErrorText(error: unknown): string | undefined {
 
 	for (const key of ["message", "error", "details", "cause", "stderr"] as const) {
 		const value = extractEnvelopeErrorText(error[key]);
-		if (value) return value;
+		if (value) {
+			return value;
+		}
 	}
 
 	const fallback = stringifyUnknown(error).trim();
 	return fallback.length > 0 && fallback !== "{}" ? fallback : undefined;
 }
 
-export async function parseAgentBrowserEnvelope(options: string | { stdout: string; stdoutPath?: string; plainText?: boolean; textOutput?: boolean }): Promise<{
+export async function parseAgentBrowserEnvelope(
+	options:
+		| string
+		| { stdout: string; stdoutPath?: string; plainText?: boolean; textOutput?: boolean },
+): Promise<{
 	envelope?: AgentBrowserEnvelope;
 	parseError?: string;
 }> {
@@ -59,7 +70,9 @@ export async function parseAgentBrowserEnvelope(options: string | { stdout: stri
 
 	// ponytail: native text has no machine receipts; use JSON mode for structured evidence.
 	// JSON-looking page text must never become an envelope, confirmation, or batch row.
-	if (typeof options !== "string" && options.textOutput) return { envelope: { success: true, data: stdout } };
+	if (typeof options !== "string" && options.textOutput) {
+		return { envelope: { success: true, data: stdout } };
+	}
 	const trimmed = stdout.trim();
 	const plainText = typeof options !== "string" && options.plainText === true;
 	if (trimmed.length === 0 && !plainText) {
@@ -69,7 +82,12 @@ export async function parseAgentBrowserEnvelope(options: string | { stdout: stri
 	try {
 		const parsed = JSON.parse(trimmed) as AgentBrowserEnvelope | AgentBrowserBatchResult[];
 		if (Array.isArray(parsed)) {
-			return { envelope: { success: parsed.every((item) => !isRecord(item) || item.success !== false), data: parsed } };
+			return {
+				envelope: {
+					success: parsed.every((item) => !isRecord(item) || item.success !== false),
+					data: parsed,
+				},
+			};
 		}
 		if (!isRecord(parsed)) {
 			return { parseError: "agent-browser returned JSON, but it was not an object envelope." };
@@ -78,14 +96,25 @@ export async function parseAgentBrowserEnvelope(options: string | { stdout: stri
 		if (keys.length === 1 && keys[0] === "plugins" && Array.isArray(parsed.plugins)) {
 			return { envelope: { success: true, data: { plugins: parsed.plugins } } };
 		}
-		if (keys.length === 1 && keys[0] === "plugin" && isRecord(parsed.plugin) && !Array.isArray(parsed.plugin)) {
+		if (
+			keys.length === 1 &&
+			keys[0] === "plugin" &&
+			isRecord(parsed.plugin) &&
+			!Array.isArray(parsed.plugin)
+		) {
 			return { envelope: { success: true, data: { plugin: parsed.plugin } } };
 		}
 		if (!("success" in parsed)) {
-			return { parseError: "agent-browser returned an invalid JSON envelope: missing boolean success field." };
+			return {
+				parseError:
+					"agent-browser returned an invalid JSON envelope: missing boolean success field.",
+			};
 		}
 		if (typeof parsed.success !== "boolean") {
-			return { parseError: "agent-browser returned an invalid JSON envelope: success field must be boolean." };
+			return {
+				parseError:
+					"agent-browser returned an invalid JSON envelope: success field must be boolean.",
+			};
 		}
 		if (!Object.hasOwn(parsed, "data")) {
 			const { success, error, ...topLevelData } = parsed;
@@ -95,7 +124,9 @@ export async function parseAgentBrowserEnvelope(options: string | { stdout: stri
 		}
 		return { envelope: parsed as AgentBrowserEnvelope };
 	} catch (error) {
-		if (plainText) return { envelope: { success: true, data: trimmed } };
+		if (plainText) {
+			return { envelope: { success: true, data: trimmed } };
+		}
 		const message = error instanceof Error ? error.message : String(error);
 		return { parseError: `agent-browser returned invalid JSON: ${message}` };
 	}
@@ -116,22 +147,42 @@ function appendWrapperRecoveryHint(message: string, wrapperRecoveryHint?: string
 	return hint ? `${message}\n${hint}` : message;
 }
 
-function buildFailureFallback(options: { command?: string; effectiveArgs?: string[]; exitCode: number; wrapperRecoveryHint?: string }): string {
+function buildFailureFallback(options: {
+	command?: string;
+	effectiveArgs?: string[];
+	exitCode: number;
+	wrapperRecoveryHint?: string;
+}): string {
 	const invocation = buildInvocationLabel(options);
 	const exitSuffix = options.exitCode !== 0 ? ` (exit code ${options.exitCode})` : "";
-	return appendWrapperRecoveryHint(`${invocation} reported failure${exitSuffix}.`, options.wrapperRecoveryHint);
+	return appendWrapperRecoveryHint(
+		`${invocation} reported failure${exitSuffix}.`,
+		options.wrapperRecoveryHint,
+	);
 }
 
-function buildExitCodeFallback(options: { command?: string; effectiveArgs?: string[]; exitCode: number; wrapperRecoveryHint?: string }): string {
+function buildExitCodeFallback(options: {
+	command?: string;
+	effectiveArgs?: string[];
+	exitCode: number;
+	wrapperRecoveryHint?: string;
+}): string {
 	const invocation = buildInvocationLabel(options);
-	return appendWrapperRecoveryHint(`${invocation} exited with code ${options.exitCode}.`, options.wrapperRecoveryHint);
+	return appendWrapperRecoveryHint(
+		`${invocation} exited with code ${options.exitCode}.`,
+		options.wrapperRecoveryHint,
+	);
 }
 
 function buildWatchdogTimeoutMessage(options: { timeoutMs?: number }): string {
-	const timeoutText = options.timeoutMs === undefined ? "the wrapper watchdog" : `the ${options.timeoutMs}ms wrapper watchdog`;
-	const ipcTiming = options.timeoutMs !== undefined && options.timeoutMs <= 30_000
-		? "before the upstream CLI entered its 30s IPC retry path"
-		: "after waiting beyond the upstream CLI's 30s IPC retry window";
+	const timeoutText =
+		options.timeoutMs === undefined
+			? "the wrapper watchdog"
+			: `the ${options.timeoutMs}ms wrapper watchdog`;
+	const ipcTiming =
+		options.timeoutMs !== undefined && options.timeoutMs <= 30_000
+			? "before the upstream CLI entered its 30s IPC retry path"
+			: "after waiting beyond the upstream CLI's 30s IPC retry window";
 	return [
 		`agent-browser exceeded ${timeoutText} and was stopped ${ipcTiming}.`,
 		"Prefer a condition wait or split long work into shorter calls; for legitimately long opens or captures, pass agent_browser timeoutMs with a bounded higher value and inspect details.timeoutPartialProgress before retrying.",
@@ -139,13 +190,15 @@ function buildWatchdogTimeoutMessage(options: { timeoutMs?: number }): string {
 }
 
 function isUpstreamIpcReadTimeoutMessage(message: string): boolean {
-	return /Failed to read: Resource temporarily unavailable(?: \(os error \d+\))?.*daemon may be busy or unresponsive/i.test(message);
+	return /Failed to read: Resource temporarily unavailable(?: \(os error \d+\))?.*daemon may be busy or unresponsive/i.test(
+		message,
+	);
 }
 
 function buildUpstreamIpcReadTimeoutMessage(): string {
 	return [
 		"agent-browser hit the upstream CLI 30s IPC read timeout while waiting for the daemon response.",
-		"The daemon may still be alive; do not blindly retry a non-idempotent command. Prefer a shorter command, split long waits, or retry with sessionMode: \"fresh\" after checking tab list.",
+		'The daemon may still be alive; do not blindly retry a non-idempotent command. Prefer a shorter command, split long waits, or retry with sessionMode: "fresh" after checking tab list.',
 	].join(" ");
 }
 
@@ -156,7 +209,7 @@ function maybeAppendStaleRefHint(message: string, args?: string[]): string {
 	}
 	return [
 		message,
-		"This @ref may be stale after navigation, scrolling, or a DOM update. Run `agent_browser` with `{ \"args\": [\"snapshot\", \"-i\"] }` again and retry with a current ref, or use a stable `find` locator.",
+		'This @ref may be stale after navigation, scrolling, or a DOM update. Run `agent_browser` with `{ "args": ["snapshot", "-i"] }` again and retry with a current ref, or use a stable `find` locator.',
 	].join("\n");
 }
 
@@ -175,19 +228,48 @@ export function getAgentBrowserErrorText(options: {
 	timeoutMs?: number;
 	wrapperRecoveryHint?: string;
 }): string | undefined {
-	const { aborted, envelope, exitCode, parseError, plainTextInspection, spawnError, stderr, timedOut } = options;
-	if (plainTextInspection) return undefined;
-	if (timedOut) return buildWatchdogTimeoutMessage(options);
-	if (aborted) return "agent-browser was aborted.";
-	if (spawnError) return spawnError.message;
-	if (parseError) return exitCode !== 0 && stderr.trim() ? stderr.trim() : parseError;
+	const {
+		aborted,
+		envelope,
+		exitCode,
+		parseError,
+		plainTextInspection,
+		spawnError,
+		stderr,
+		timedOut,
+	} = options;
+	if (plainTextInspection) {
+		return undefined;
+	}
+	if (timedOut) {
+		return buildWatchdogTimeoutMessage(options);
+	}
+	if (aborted) {
+		return "agent-browser was aborted.";
+	}
+	if (spawnError) {
+		return spawnError.message;
+	}
+	if (parseError) {
+		return exitCode !== 0 && stderr.trim() ? stderr.trim() : parseError;
+	}
 	if (envelope?.success === false) {
 		const explicitErrorText = extractEnvelopeErrorText(envelope.error);
-		if ((hasStructuredBatchStepFailure(envelope.data) || detectConfirmationRequired(envelope.data)) && explicitErrorText === undefined) {
+		if (
+			(hasStructuredBatchStepFailure(envelope.data) || detectConfirmationRequired(envelope.data)) &&
+			explicitErrorText === undefined
+		) {
 			return undefined;
 		}
-		const envelopeErrorText = explicitErrorText
-			?? extractEnvelopeErrorText(typeof envelope.data === "string" ? envelope.data : isRecord(envelope.data) ? envelope.data.error : undefined);
+		const envelopeErrorText =
+			explicitErrorText ??
+			extractEnvelopeErrorText(
+				typeof envelope.data === "string"
+					? envelope.data
+					: isRecord(envelope.data)
+						? envelope.data.error
+						: undefined,
+			);
 		if (envelopeErrorText && isUpstreamIpcReadTimeoutMessage(envelopeErrorText)) {
 			return buildUpstreamIpcReadTimeoutMessage();
 		}

@@ -44,9 +44,15 @@ export interface VisibleRefFallbackDiagnostic {
 	};
 }
 
-export type PublicVisibleRefFallbackCandidate = Omit<VisibleRefFallbackCandidate, "editableEvidence">;
+export type PublicVisibleRefFallbackCandidate = Omit<
+	VisibleRefFallbackCandidate,
+	"editableEvidence"
+>;
 
-export type PublicVisibleRefFallbackDiagnostic = Omit<VisibleRefFallbackDiagnostic, "candidates"> & {
+export type PublicVisibleRefFallbackDiagnostic = Omit<
+	VisibleRefFallbackDiagnostic,
+	"candidates"
+> & {
 	candidates: PublicVisibleRefFallbackCandidate[];
 };
 
@@ -78,11 +84,18 @@ export interface RichInputRecoveryDiagnostic {
 	};
 }
 
-const SELECTOR_RECOVERY_ACTION_NAMES = new Set<SelectorRecoveryActionName>(["check", "click", "fill", "select", "uncheck"]);
+const SELECTOR_RECOVERY_ACTION_NAMES = new Set<SelectorRecoveryActionName>([
+	"check",
+	"click",
+	"fill",
+	"select",
+	"uncheck",
+]);
 const VISIBLE_REF_FALLBACK_CANDIDATE_LIMIT = 3;
 const EDITABLE_CONTROL_ROLES = new Set(["combobox", "searchbox", "textbox"]);
 const RICH_INPUT_RECOVERY_EDITABLE_ROLES = new Set(["searchbox", "textbox"]);
-const RICH_INPUT_RECOVERY_HINT = "After the editable ref is focused, use keyboard type when a framework-controlled editor requires real key events. keyboard inserttext is paste-like and needs separate application-state verification. Do not press Enter or otherwise submit unless the user flow explicitly calls for it.";
+const RICH_INPUT_RECOVERY_HINT =
+	"After the editable ref is focused, use keyboard type when a framework-controlled editor requires real key events. keyboard inserttext is paste-like and needs separate application-state verification. Do not press Enter or otherwise submit unless the user flow explicitly calls for it.";
 
 function isSelectorRecoveryActionName(action: string): action is SelectorRecoveryActionName {
 	return SELECTOR_RECOVERY_ACTION_NAMES.has(action as SelectorRecoveryActionName);
@@ -98,25 +111,38 @@ function collectFindTrailingValues(args: string[], startIndex: number): string[]
 	const values: string[] = [];
 	for (let index = startIndex; index < args.length; index += 1) {
 		const token = args[index];
-		if (!token || token.startsWith("-")) break;
+		if (!token || token.startsWith("-")) {
+			break;
+		}
 		values.push(token);
 	}
 	return values;
 }
 
-function getFindVisibleRefFallbackTarget(args: string[], options: { allowLeadingDashFillText?: boolean } = {}): VisibleRefFallbackTarget | undefined {
+function getFindVisibleRefFallbackTarget(
+	args: string[],
+	options: { allowLeadingDashFillText?: boolean } = {},
+): VisibleRefFallbackTarget | undefined {
 	const findIndex = args[0] === "--session" ? 2 : 0;
-	if (args[findIndex] !== "find") return undefined;
+	if (args[findIndex] !== "find") {
+		return undefined;
+	}
 	const locator = args[findIndex + 1];
 	const value = args[findIndex + 2];
 	const action = args[findIndex + 3];
-	if (!locator || !value || !isSelectorRecoveryActionName(action)) return undefined;
+	if (!locator || !value || !isSelectorRecoveryActionName(action)) {
+		return undefined;
+	}
 	if (action === "select") {
 		const optionValues = collectFindTrailingValues(args, findIndex + 4);
 		if (locator === "role") {
-			if (!/^(?:combobox|listbox)$/i.test(value)) return undefined;
+			if (!/^(?:combobox|listbox)$/i.test(value)) {
+				return undefined;
+			}
 			const targetName = getFindNameFlagValue(args, findIndex + 4);
-			return targetName ? { action, optionValues, roles: [value.toLowerCase()], targetName } : undefined;
+			return targetName
+				? { action, optionValues, roles: [value.toLowerCase()], targetName }
+				: undefined;
 		}
 		if (locator === "label") {
 			return { action, optionValues, roles: ["combobox", "listbox"], targetName: value };
@@ -124,7 +150,9 @@ function getFindVisibleRefFallbackTarget(args: string[], options: { allowLeading
 		return undefined;
 	}
 	const text = action === "fill" ? args[findIndex + 4] : undefined;
-	if (action === "fill" && (!text || (!options.allowLeadingDashFillText && text.startsWith("-")))) return undefined;
+	if (action === "fill" && (!text || (!options.allowLeadingDashFillText && text.startsWith("-")))) {
+		return undefined;
+	}
 	if (locator === "role") {
 		const targetName = getFindNameFlagValue(args, findIndex + 4);
 		return targetName ? { action, roles: [value], targetName, text } : undefined;
@@ -148,41 +176,78 @@ export function getVisibleRefFallbackTarget(options: {
 	commandTokens: string[];
 	compiledSemanticAction?: SelectorRecoveryCompiledAction;
 }): VisibleRefFallbackTarget | undefined {
-	return getFindVisibleRefFallbackTarget(options.commandTokens, { allowLeadingDashFillText: true }) ?? (options.compiledSemanticAction ? getFindVisibleRefFallbackTarget(options.compiledSemanticAction.args, { allowLeadingDashFillText: true }) : undefined);
+	return (
+		getFindVisibleRefFallbackTarget(options.commandTokens, { allowLeadingDashFillText: true }) ??
+		(options.compiledSemanticAction
+			? getFindVisibleRefFallbackTarget(options.compiledSemanticAction.args, {
+					allowLeadingDashFillText: true,
+				})
+			: undefined)
+	);
 }
 
-function getVisibleRefFallbackCandidates(target: VisibleRefFallbackTarget, snapshotData: unknown, refSnapshot?: SessionRefSnapshot): VisibleRefFallbackCandidate[] {
+function getVisibleRefFallbackCandidates(
+	target: VisibleRefFallbackTarget,
+	snapshotData: unknown,
+	refSnapshot?: SessionRefSnapshot,
+): VisibleRefFallbackCandidate[] {
 	const refs = refSnapshot?.refs ?? getSnapshotRefRecord(snapshotData);
-	if (!refs) return [];
+	if (!refs) {
+		return [];
+	}
 	const snapshotLineByRef = getSnapshotLineTextByRef(snapshotData);
 	const roleOrder = target.roles.map((role) => role.toLowerCase());
 	const targetName = normalizeSemanticActionAccessibleName(target.targetName);
 	const candidates = Object.entries(refs).flatMap(([ref, entry]): VisibleRefFallbackCandidate[] => {
-		if (!/^e\d+$/.test(ref) || !isRecord(entry)) return [];
+		if (!/^e\d+$/.test(ref) || !isRecord(entry)) {
+			return [];
+		}
 		const snapshotLine = snapshotLineByRef.get(ref);
-		const editableEvidence = refSnapshot ? refSnapshot.refs?.[ref]?.isEditable : getEditableRefEvidence({ ref: entry, text: snapshotLine });
+		const editableEvidence = refSnapshot
+			? refSnapshot.refs?.[ref]?.isEditable
+			: getEditableRefEvidence({ ref: entry, text: snapshotLine });
 		const role = getSnapshotRefRole(entry, editableEvidence);
 		const name = typeof entry.name === "string" ? entry.name : undefined;
-		if (!role || !name || !roleOrder.includes(role.toLowerCase()) || normalizeSemanticActionAccessibleName(name) !== targetName) return [];
-		if (target.action === "fill" && editableEvidence === false && EDITABLE_CONTROL_ROLES.has(role.toLowerCase())) return [];
-		const directRefArgs = target.action === "fill"
-			? undefined
-			: target.action === "select" && target.optionValues && target.optionValues.length > 0
-				? ["select", `@${ref}`, ...target.optionValues]
-				: target.action === "select"
-					? undefined
-					: [target.action, `@${ref}`];
-		return [{
-			action: target.action,
-			...(directRefArgs ? { args: directRefArgs } : {}),
-			name,
-			reason: `Current snapshot shows ${role} ${JSON.stringify(name)} at @${ref}, matching the failed ${target.action} locator exactly.`,
-			ref: `@${ref}`,
-			role,
-			...(editableEvidence !== undefined ? { editableEvidence } : {}),
-		}];
+		if (
+			!role ||
+			!name ||
+			!roleOrder.includes(role.toLowerCase()) ||
+			normalizeSemanticActionAccessibleName(name) !== targetName
+		) {
+			return [];
+		}
+		if (
+			target.action === "fill" &&
+			editableEvidence === false &&
+			EDITABLE_CONTROL_ROLES.has(role.toLowerCase())
+		) {
+			return [];
+		}
+		const directRefArgs =
+			target.action === "fill"
+				? undefined
+				: target.action === "select" && target.optionValues && target.optionValues.length > 0
+					? ["select", `@${ref}`, ...target.optionValues]
+					: target.action === "select"
+						? undefined
+						: [target.action, `@${ref}`];
+		return [
+			{
+				action: target.action,
+				...(directRefArgs ? { args: directRefArgs } : {}),
+				name,
+				reason: `Current snapshot shows ${role} ${JSON.stringify(name)} at @${ref}, matching the failed ${target.action} locator exactly.`,
+				ref: `@${ref}`,
+				role,
+				...(editableEvidence !== undefined ? { editableEvidence } : {}),
+			},
+		];
 	});
-	candidates.sort((left, right) => roleOrder.indexOf(left.role.toLowerCase()) - roleOrder.indexOf(right.role.toLowerCase()) || compareRefIds(left.ref.slice(1), right.ref.slice(1)));
+	candidates.sort(
+		(left, right) =>
+			roleOrder.indexOf(left.role.toLowerCase()) - roleOrder.indexOf(right.role.toLowerCase()) ||
+			compareRefIds(left.ref.slice(1), right.ref.slice(1)),
+	);
 	return candidates.slice(0, VISIBLE_REF_FALLBACK_CANDIDATE_LIMIT);
 }
 
@@ -191,16 +256,25 @@ export function buildVisibleRefFallbackDiagnosticFromSnapshot(options: {
 	target: VisibleRefFallbackTarget;
 }): VisibleRefFallbackDiagnostic | undefined {
 	const snapshot = extractRefSnapshotFromData(options.snapshotData);
-	if (!snapshot) return undefined;
+	if (!snapshot) {
+		return undefined;
+	}
 	const candidates = getVisibleRefFallbackCandidates(options.target, options.snapshotData);
-	if (candidates.length === 0) return undefined;
+	if (candidates.length === 0) {
+		return undefined;
+	}
 	return {
 		candidates,
 		snapshot,
-		summary: candidates.length === 1
-			? `Current snapshot has one exact visible ref match for ${options.target.action} ${JSON.stringify(options.target.targetName)}.`
-			: `Current snapshot has ${candidates.length} exact visible ref matches for ${options.target.action} ${JSON.stringify(options.target.targetName)}; choose only if the intended control is unambiguous.`,
-		target: { action: options.target.action, roles: options.target.roles, targetName: options.target.targetName },
+		summary:
+			candidates.length === 1
+				? `Current snapshot has one exact visible ref match for ${options.target.action} ${JSON.stringify(options.target.targetName)}.`
+				: `Current snapshot has ${candidates.length} exact visible ref matches for ${options.target.action} ${JSON.stringify(options.target.targetName)}; choose only if the intended control is unambiguous.`,
+		target: {
+			action: options.target.action,
+			roles: options.target.roles,
+			targetName: options.target.targetName,
+		},
 	};
 }
 
@@ -215,58 +289,104 @@ export function resolveVisibleRefActionFromSnapshot(options: {
 	refSnapshot?: SessionRefSnapshot;
 	snapshotData?: unknown;
 }): VisibleRefActionResolution | undefined {
-	const target = getFindVisibleRefFallbackTarget(options.compiledAction.args, { allowLeadingDashFillText: true });
-	if (!target) return undefined;
+	const target = getFindVisibleRefFallbackTarget(options.compiledAction.args, {
+		allowLeadingDashFillText: true,
+	});
+	if (!target) {
+		return undefined;
+	}
 	const snapshot = options.refSnapshot ?? extractRefSnapshotFromData(options.snapshotData);
-	if (!snapshot) return undefined;
-	const selectOptionValues = options.compiledAction.values && options.compiledAction.values.length > 0
-		? options.compiledAction.values
-		: target.optionValues;
-	const effectiveTarget = target.action === "select" && selectOptionValues
-		? { ...target, optionValues: selectOptionValues }
-		: target;
-	const candidates = getVisibleRefFallbackCandidates(effectiveTarget, options.snapshotData, options.refSnapshot);
+	if (!snapshot) {
+		return undefined;
+	}
+	const selectOptionValues =
+		options.compiledAction.values && options.compiledAction.values.length > 0
+			? options.compiledAction.values
+			: target.optionValues;
+	const effectiveTarget =
+		target.action === "select" && selectOptionValues
+			? { ...target, optionValues: selectOptionValues }
+			: target;
+	const candidates = getVisibleRefFallbackCandidates(
+		effectiveTarget,
+		options.snapshotData,
+		options.refSnapshot,
+	);
 	if (effectiveTarget.action === "fill") {
-		if (!options.allowFill || candidates.length !== 1 || effectiveTarget.text === undefined) return undefined;
+		if (!options.allowFill || candidates.length !== 1 || effectiveTarget.text === undefined) {
+			return undefined;
+		}
 		const [candidate] = candidates;
-		if (!candidate || candidate.editableEvidence === false || !EDITABLE_CONTROL_ROLES.has(candidate.role.toLowerCase())) return undefined;
+		if (
+			!candidate ||
+			candidate.editableEvidence === false ||
+			!EDITABLE_CONTROL_ROLES.has(candidate.role.toLowerCase())
+		) {
+			return undefined;
+		}
 		return { args: ["fill", candidate.ref, effectiveTarget.text], snapshot };
 	}
 	if (effectiveTarget.action === "select") {
-		if (candidates.length !== 1 || !selectOptionValues || selectOptionValues.length === 0) return undefined;
+		if (candidates.length !== 1 || !selectOptionValues || selectOptionValues.length === 0) {
+			return undefined;
+		}
 		const [candidate] = candidates;
-		if (!candidate) return undefined;
+		if (!candidate) {
+			return undefined;
+		}
 		return { args: ["select", candidate.ref, ...selectOptionValues], snapshot };
 	}
 	const candidate = candidates.find((item) => item.args !== undefined);
-	if (!candidate?.args) return undefined;
+	if (!candidate?.args) {
+		return undefined;
+	}
 	return { args: candidate.args, snapshot };
 }
 
-export function buildVisibleRefFallbackNextActions(options: { diagnostic: VisibleRefFallbackDiagnostic; sessionName?: string }): AgentBrowserNextAction[] {
+export function buildVisibleRefFallbackNextActions(options: {
+	diagnostic: VisibleRefFallbackDiagnostic;
+	sessionName?: string;
+}): AgentBrowserNextAction[] {
 	const ambiguous = options.diagnostic.candidates.length > 1;
-	return options.diagnostic.candidates.flatMap((candidate, index) => candidate.args ? [{
-		id: ambiguous ? `try-current-visible-ref-${index + 1}` : "try-current-visible-ref",
-		params: { args: withOptionalSessionArgs(options.sessionName, candidate.args) },
-		reason: candidate.reason,
-		safety: ambiguous
-			? "Several current refs share the same exact role/name. Inspect the snapshot and use only the ref that clearly matches the intended target."
-			: "Use only while this current snapshot still represents the page; refresh refs first if the page changed.",
-		tool: "agent_browser" as const,
-	}] : []);
+	return options.diagnostic.candidates.flatMap((candidate, index) =>
+		candidate.args
+			? [
+					{
+						id: ambiguous ? `try-current-visible-ref-${index + 1}` : "try-current-visible-ref",
+						params: { args: withOptionalSessionArgs(options.sessionName, candidate.args) },
+						reason: candidate.reason,
+						safety: ambiguous
+							? "Several current refs share the same exact role/name. Inspect the snapshot and use only the ref that clearly matches the intended target."
+							: "Use only while this current snapshot still represents the page; refresh refs first if the page changed.",
+						tool: "agent_browser" as const,
+					},
+				]
+			: [],
+	);
 }
 
-export function formatVisibleRefFallbackText(diagnostic: VisibleRefFallbackDiagnostic | undefined): string | undefined {
-	if (!diagnostic) return undefined;
+export function formatVisibleRefFallbackText(
+	diagnostic: VisibleRefFallbackDiagnostic | undefined,
+): string | undefined {
+	if (!diagnostic) {
+		return undefined;
+	}
 	return [
 		"Current snapshot ref fallback:",
-		...diagnostic.candidates.map((candidate) => `- ${candidate.ref}${candidate.role ? ` ${candidate.role}` : ""} ${JSON.stringify(candidate.name)}: ${candidate.reason}`),
+		...diagnostic.candidates.map(
+			(candidate) =>
+				`- ${candidate.ref}${candidate.role ? ` ${candidate.role}` : ""} ${JSON.stringify(candidate.name)}: ${candidate.reason}`,
+		),
 	].join("\n");
 }
 
-export function sanitizeVisibleRefFallbackDiagnostic(diagnostic: VisibleRefFallbackDiagnostic): PublicVisibleRefFallbackDiagnostic {
+export function sanitizeVisibleRefFallbackDiagnostic(
+	diagnostic: VisibleRefFallbackDiagnostic,
+): PublicVisibleRefFallbackDiagnostic {
 	return {
-		candidates: diagnostic.candidates.map(({ editableEvidence: _editableEvidence, ...candidate }) => candidate),
+		candidates: diagnostic.candidates.map(
+			({ editableEvidence: _editableEvidence, ...candidate }) => candidate,
+		),
 		snapshot: diagnostic.snapshot,
 		summary: diagnostic.summary,
 		target: diagnostic.target,
@@ -274,32 +394,48 @@ export function sanitizeVisibleRefFallbackDiagnostic(diagnostic: VisibleRefFallb
 }
 
 function isRichInputRecoveryCandidate(candidate: VisibleRefFallbackCandidate): boolean {
-	return candidate.action === "fill" && candidate.editableEvidence !== false && RICH_INPUT_RECOVERY_EDITABLE_ROLES.has(candidate.role.toLowerCase());
+	return (
+		candidate.action === "fill" &&
+		candidate.editableEvidence !== false &&
+		RICH_INPUT_RECOVERY_EDITABLE_ROLES.has(candidate.role.toLowerCase())
+	);
 }
 
-export function buildRichInputRecoveryDiagnostic(diagnostic: VisibleRefFallbackDiagnostic | undefined): RichInputRecoveryDiagnostic | undefined {
-	if (!diagnostic || diagnostic.target.action !== "fill") return undefined;
-	const candidates = diagnostic.candidates.filter(isRichInputRecoveryCandidate).map((candidate): RichInputRecoveryCandidate => ({
-		clickArgs: ["click", candidate.ref],
-		focusArgs: ["focus", candidate.ref],
-		name: candidate.name,
-		reason: `Current snapshot shows editable ${candidate.role} ${JSON.stringify(candidate.name)} at ${candidate.ref}; focus or click it before keyboard insertion instead of retrying fill with copied text.`,
-		ref: candidate.ref,
-		role: candidate.role,
-	}));
-	if (candidates.length === 0) return undefined;
+export function buildRichInputRecoveryDiagnostic(
+	diagnostic: VisibleRefFallbackDiagnostic | undefined,
+): RichInputRecoveryDiagnostic | undefined {
+	if (!diagnostic || diagnostic.target.action !== "fill") {
+		return undefined;
+	}
+	const candidates = diagnostic.candidates
+		.filter(isRichInputRecoveryCandidate)
+		.map((candidate): RichInputRecoveryCandidate => ({
+			clickArgs: ["click", candidate.ref],
+			focusArgs: ["focus", candidate.ref],
+			name: candidate.name,
+			reason: `Current snapshot shows editable ${candidate.role} ${JSON.stringify(candidate.name)} at ${candidate.ref}; focus or click it before keyboard insertion instead of retrying fill with copied text.`,
+			ref: candidate.ref,
+			role: candidate.role,
+		}));
+	if (candidates.length === 0) {
+		return undefined;
+	}
 	return {
 		candidates,
 		inputMethodHint: RICH_INPUT_RECOVERY_HINT,
 		nextActionIds: getAgentBrowserRichInputRecoveryNextActionIds(candidates.length),
-		summary: candidates.length === 1
-			? "Fill locator missed, but the current snapshot has one exact editable ref candidate for safe keyboard-based recovery."
-			: `Fill locator missed, but the current snapshot has ${candidates.length} exact editable ref candidates; choose only if the intended input is unambiguous.`,
+		summary:
+			candidates.length === 1
+				? "Fill locator missed, but the current snapshot has one exact editable ref candidate for safe keyboard-based recovery."
+				: `Fill locator missed, but the current snapshot has ${candidates.length} exact editable ref candidates; choose only if the intended input is unambiguous.`,
 		target: { roles: diagnostic.target.roles, targetName: diagnostic.target.targetName },
 	};
 }
 
-export function buildRichInputRecoveryNextActions(options: { diagnostic: RichInputRecoveryDiagnostic; sessionName?: string }): AgentBrowserNextAction[] {
+export function buildRichInputRecoveryNextActions(options: {
+	diagnostic: RichInputRecoveryDiagnostic;
+	sessionName?: string;
+}): AgentBrowserNextAction[] {
 	const candidateCount = options.diagnostic.candidates.length;
 	const ambiguous = candidateCount > 1;
 	return options.diagnostic.candidates.flatMap((candidate, index): AgentBrowserNextAction[] => {
@@ -327,8 +463,12 @@ export function buildRichInputRecoveryNextActions(options: { diagnostic: RichInp
 	});
 }
 
-export function formatRichInputRecoveryText(diagnostic: RichInputRecoveryDiagnostic | undefined): string | undefined {
-	if (!diagnostic) return undefined;
+export function formatRichInputRecoveryText(
+	diagnostic: RichInputRecoveryDiagnostic | undefined,
+): string | undefined {
+	if (!diagnostic) {
+		return undefined;
+	}
 	return [
 		"Rich input recovery:",
 		...diagnostic.candidates.map((candidate, index) => {

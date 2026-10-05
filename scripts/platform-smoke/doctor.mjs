@@ -28,7 +28,9 @@ function fail(label, failures) {
 
 function silent(cmd, args, options = {}) {
 	try {
-		return execFileSync(cmd, args, { timeout: 20_000, stdio: "pipe", ...options }).toString().trim();
+		return execFileSync(cmd, args, { timeout: 20_000, stdio: "pipe", ...options })
+			.toString()
+			.trim();
 	} catch {
 		return null;
 	}
@@ -36,7 +38,9 @@ function silent(cmd, args, options = {}) {
 
 function shell(command, options = {}) {
 	try {
-		return execSync(command, { timeout: 20_000, stdio: "pipe", ...options }).toString().trim();
+		return execSync(command, { timeout: 20_000, stdio: "pipe", ...options })
+			.toString()
+			.trim();
 	} catch {
 		return null;
 	}
@@ -58,28 +62,38 @@ function parseVersion(version) {
 function versionAtLeast(actual, minimum) {
 	const parsedActual = parseVersion(actual);
 	const parsedMinimum = parseVersion(minimum);
-	if (!parsedActual || !parsedMinimum) return false;
+	if (!parsedActual || !parsedMinimum) {
+		return false;
+	}
 	for (let index = 0; index < Math.max(parsedActual.length, parsedMinimum.length); index += 1) {
 		const a = parsedActual[index] ?? 0;
 		const b = parsedMinimum[index] ?? 0;
-		if (a > b) return true;
-		if (a < b) return false;
+		if (a > b) {
+			return true;
+		}
+		if (a < b) {
+			return false;
+		}
 	}
 	return true;
 }
 
 function isForbiddenProjectPath(path) {
-	return /(^|\/)\.env(?:\..*)?$/.test(path)
-		|| /(^|\/)[^/]+\.tgz$/.test(path)
-		|| /(^|\/)\.artifacts(?:\/|$)/.test(path)
-		|| /(^|\/)\.crabbox(?:\/|$)/.test(path)
-		|| /(^|\/)\.debug(?:\/|$)/.test(path)
-		|| /(^|\/)\.platform-smoke-runs(?:\/|$)/.test(path);
+	return (
+		/(^|\/)\.env(?:\..*)?$/.test(path) ||
+		/(^|\/)[^/]+\.tgz$/.test(path) ||
+		/(^|\/)\.artifacts(?:\/|$)/.test(path) ||
+		/(^|\/)\.crabbox(?:\/|$)/.test(path) ||
+		/(^|\/)\.debug(?:\/|$)/.test(path) ||
+		/(^|\/)\.platform-smoke-runs(?:\/|$)/.test(path)
+	);
 }
 
 function npmPackFiles() {
 	const output = silent("npm", ["pack", "--dry-run", "--json"]);
-	if (!output) return null;
+	if (!output) {
+		return null;
+	}
 	try {
 		const parsed = JSON.parse(output);
 		return parsed[0]?.files?.map((file) => file.path) ?? [];
@@ -91,13 +105,23 @@ function npmPackFiles() {
 function checkForbiddenProjectFiles(failures) {
 	const tracked = shell("git ls-files")?.split(/\r?\n/).filter(Boolean) ?? [];
 	const trackedForbidden = tracked.filter(isForbiddenProjectPath);
-	if (trackedForbidden.length === 0) ok("tracked source files exclude forbidden local artifacts");
-	else fail(`forbidden tracked source path(s): ${trackedForbidden.join(", ")}`, failures);
+	if (trackedForbidden.length === 0) {
+		ok("tracked source files exclude forbidden local artifacts");
+	} else {
+		fail(`forbidden tracked source path(s): ${trackedForbidden.join(", ")}`, failures);
+	}
 
-	const localForbidden = shell("find . -maxdepth 2 \\( -name '.env' -o -name '.env.*' -o -name '*.tgz' \\) -not -path './node_modules/*' 2>/dev/null")
-		?.split(/\r?\n/).filter(Boolean) ?? [];
-	if (localForbidden.length === 0) ok("no local .env or package tarball artifacts at repo top level");
-	else fail(`forbidden local artifact(s): ${localForbidden.join(", ")}`, failures);
+	const localForbidden =
+		shell(
+			"find . -maxdepth 2 \\( -name '.env' -o -name '.env.*' -o -name '*.tgz' \\) -not -path './node_modules/*' 2>/dev/null",
+		)
+			?.split(/\r?\n/)
+			.filter(Boolean) ?? [];
+	if (localForbidden.length === 0) {
+		ok("no local .env or package tarball artifacts at repo top level");
+	} else {
+		fail(`forbidden local artifact(s): ${localForbidden.join(", ")}`, failures);
+	}
 
 	const packFiles = npmPackFiles();
 	if (!packFiles) {
@@ -105,8 +129,11 @@ function checkForbiddenProjectFiles(failures) {
 		return;
 	}
 	const packedForbidden = packFiles.filter(isForbiddenProjectPath);
-	if (packedForbidden.length === 0) ok("npm package excludes forbidden local artifacts");
-	else fail(`forbidden npm package path(s): ${packedForbidden.join(", ")}`, failures);
+	if (packedForbidden.length === 0) {
+		ok("npm package excludes forbidden local artifacts");
+	} else {
+		fail(`forbidden npm package path(s): ${packedForbidden.join(", ")}`, failures);
+	}
 }
 
 function crabboxProviders(cbox) {
@@ -114,16 +141,29 @@ function crabboxProviders(cbox) {
 	if (jsonOutput) {
 		try {
 			const parsed = JSON.parse(jsonOutput);
-			if (Array.isArray(parsed)) return parsed.map((provider) => provider.name ?? provider.id ?? provider.provider).filter(Boolean);
-			if (Array.isArray(parsed.providers)) return parsed.providers.map((provider) => provider.name ?? provider.id ?? provider.provider).filter(Boolean);
-			if (typeof parsed === "object" && parsed) return Object.keys(parsed.providers ?? parsed);
+			if (Array.isArray(parsed)) {
+				return parsed
+					.map((provider) => provider.name ?? provider.id ?? provider.provider)
+					.filter(Boolean);
+			}
+			if (Array.isArray(parsed.providers)) {
+				return parsed.providers
+					.map((provider) => provider.name ?? provider.id ?? provider.provider)
+					.filter(Boolean);
+			}
+			if (typeof parsed === "object" && parsed) {
+				return Object.keys(parsed.providers ?? parsed);
+			}
 		} catch {
 			// Fall through to text parsing for older or non-JSON provider output.
 		}
 	}
 	const output = silent(cbox, ["providers"]);
-	if (!output) return [];
-	return output.split(/\r?\n/)
+	if (!output) {
+		return [];
+	}
+	return output
+		.split(/\r?\n/)
 		.filter((line) => /^\S/.test(line))
 		.map((line) => line.trim().split(/\s+/)[0])
 		.filter(Boolean);
@@ -136,8 +176,11 @@ function checkRequiredProviders(cbox, failures) {
 		return;
 	}
 	for (const provider of ["ssh", "local-container", "parallels"]) {
-		if (providers.includes(provider)) ok(`crabbox provider available: ${provider}`);
-		else fail(`crabbox provider missing: ${provider}`, failures);
+		if (providers.includes(provider)) {
+			ok(`crabbox provider available: ${provider}`);
+		} else {
+			fail(`crabbox provider missing: ${provider}`, failures);
+		}
 	}
 }
 
@@ -149,8 +192,11 @@ function checkCrabboxProvider(cbox, args, label, failures) {
 	}
 	try {
 		const parsed = JSON.parse(output);
-		if (parsed.ok) ok(`${label} provider OK`);
-		else fail(`${label} provider not ready: ${parsed.error ?? "unknown error"}`, failures);
+		if (parsed.ok) {
+			ok(`${label} provider OK`);
+		} else {
+			fail(`${label} provider not ready: ${parsed.error ?? "unknown error"}`, failures);
+		}
 	} catch {
 		warn(`${label} provider returned non-JSON doctor output`);
 	}
@@ -160,7 +206,11 @@ function crabbox(cbox, args, timeout = 300_000) {
 	try {
 		return {
 			ok: true,
-			stdout: execFileSync(cbox, args, { timeout, stdio: "pipe", env: { ...process.env, CRABBOX_SYNC_GIT_SEED: "false" } }).toString(),
+			stdout: execFileSync(cbox, args, {
+				timeout,
+				stdio: "pipe",
+				env: { ...process.env, CRABBOX_SYNC_GIT_SEED: "false" },
+			}).toString(),
 			stderr: "",
 		};
 	} catch (error) {
@@ -173,17 +223,21 @@ function crabbox(cbox, args, timeout = 300_000) {
 }
 
 function parseLeaseId(text) {
-	return text.match(/\bleased\s+(\S+)/)?.[1]
-		?? text.match(/\blease=(\S+)/)?.[1]
-		?? null;
+	return text.match(/\bleased\s+(\S+)/)?.[1] ?? text.match(/\blease=(\S+)/)?.[1] ?? null;
 }
 
 export function disposableWindowsAgentBrowserProbe(cbox, config, expectedVersion) {
 	const slug = "piab-doctor-agent-browser";
 	const baseArgs = buildTargetBaseArgs("windows-native", config);
-	const warm = crabbox(cbox, ["warmup", ...baseArgs, "--slug", slug, "--keep", "--reclaim"], 300_000);
+	const warm = crabbox(
+		cbox,
+		["warmup", ...baseArgs, "--slug", slug, "--keep", "--reclaim"],
+		300_000,
+	);
 	const leaseId = parseLeaseId(`${warm.stdout}\n${warm.stderr}`) ?? slug;
-	if (!warm.ok) return { ok: false, message: `warmup failed: ${(warm.stderr || warm.stdout).slice(-500)}` };
+	if (!warm.ok) {
+		return { ok: false, message: `warmup failed: ${(warm.stderr || warm.stdout).slice(-500)}` };
+	}
 
 	let outcome;
 	try {
@@ -198,22 +252,40 @@ $chrome = Get-ChildItem -Path $roots -Recurse -Filter chrome.exe -ErrorAction Si
 if (-not $chrome) { throw "agent-browser browser cache missing chrome.exe" }
 Write-Output "PLATFORM_DOCTOR_AGENT_BROWSER_CHROME=$($chrome.FullName)"`;
 		const probeCommand = `powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -EncodedCommand ${Buffer.from(probeScript, "utf16le").toString("base64")}`;
-		const run = crabbox(cbox, ["run", ...baseArgs, "--id", leaseId, "--no-sync", "--shell", probeCommand], 180_000);
-		if (!run.ok) outcome = { ok: false, message: `probe failed: ${(run.stderr || run.stdout).slice(-700)}` };
-		else {
+		const run = crabbox(
+			cbox,
+			["run", ...baseArgs, "--id", leaseId, "--no-sync", "--shell", probeCommand],
+			180_000,
+		);
+		if (!run.ok) {
+			outcome = { ok: false, message: `probe failed: ${(run.stderr || run.stdout).slice(-700)}` };
+		} else {
 			const output = run.stdout;
-			const versionLine = output.match(/^PLATFORM_DOCTOR_AGENT_BROWSER_VERSION=(.*)$/m)?.[1]?.trim() ?? "";
-			const pathLine = output.match(/^PLATFORM_DOCTOR_AGENT_BROWSER_PATH=(.*)$/m)?.[1]?.trim() ?? "";
-			const chromeLine = output.match(/^PLATFORM_DOCTOR_AGENT_BROWSER_CHROME=(.*)$/m)?.[1]?.trim() ?? "";
-			if (versionLine !== `agent-browser ${expectedVersion}`) outcome = { ok: false, message: `expected agent-browser ${expectedVersion}, got ${versionLine || "missing version"}` };
-			else if (!pathLine || !chromeLine) outcome = { ok: false, message: "agent-browser path or browser cache marker missing" };
-			else outcome = { ok: true, message: `${versionLine} | ${pathLine} | ${chromeLine}` };
+			const versionLine =
+				output.match(/^PLATFORM_DOCTOR_AGENT_BROWSER_VERSION=(.*)$/m)?.[1]?.trim() ?? "";
+			const pathLine =
+				output.match(/^PLATFORM_DOCTOR_AGENT_BROWSER_PATH=(.*)$/m)?.[1]?.trim() ?? "";
+			const chromeLine =
+				output.match(/^PLATFORM_DOCTOR_AGENT_BROWSER_CHROME=(.*)$/m)?.[1]?.trim() ?? "";
+			if (versionLine !== `agent-browser ${expectedVersion}`) {
+				outcome = {
+					ok: false,
+					message: `expected agent-browser ${expectedVersion}, got ${versionLine || "missing version"}`,
+				};
+			} else if (!pathLine || !chromeLine) {
+				outcome = { ok: false, message: "agent-browser path or browser cache marker missing" };
+			} else {
+				outcome = { ok: true, message: `${versionLine} | ${pathLine} | ${chromeLine}` };
+			}
 		}
 	} finally {
 		const stop = crabbox(cbox, ["stop", ...baseArgs, "--id", leaseId], 90_000);
 		if (!stop.ok) {
 			const prior = outcome?.ok === false ? `; prior result: ${outcome.message}` : "";
-			outcome = { ok: false, message: `cleanup failed: ${(stop.stderr || stop.stdout).slice(-500)}${prior}` };
+			outcome = {
+				ok: false,
+				message: `cleanup failed: ${(stop.stderr || stop.stdout).slice(-500)}${prior}`,
+			};
 		}
 	}
 	return outcome;
@@ -226,8 +298,11 @@ function checkAgentBrowserVersion(expectedVersion, failures, command = "agent-br
 		return;
 	}
 	const firstLine = version.split(/\r?\n/)[0];
-	if (!expectedVersion || firstLine.includes(expectedVersion)) ok(`${command}: ${firstLine}`);
-	else fail(`${command} version ${firstLine} does not match expected ${expectedVersion}`, failures);
+	if (!expectedVersion || firstLine.includes(expectedVersion)) {
+		ok(`${command}: ${firstLine}`);
+	} else {
+		fail(`${command} version ${firstLine} does not match expected ${expectedVersion}`, failures);
+	}
 }
 
 export async function runDoctor(config) {
@@ -247,7 +322,10 @@ export async function runDoctor(config) {
 	const cbox = env("PLATFORM_SMOKE_CRABBOX") || "crabbox";
 	const cboxPath = env("PLATFORM_SMOKE_CRABBOX") || commandPath("crabbox");
 	if (!cboxPath) {
-		fail("crabbox not found on PATH; install with Homebrew or set PLATFORM_SMOKE_CRABBOX", failures);
+		fail(
+			"crabbox not found on PATH; install with Homebrew or set PLATFORM_SMOKE_CRABBOX",
+			failures,
+		);
 	} else {
 		if (env("PLATFORM_SMOKE_CRABBOX")) {
 			try {
@@ -265,8 +343,11 @@ export async function runDoctor(config) {
 			ok(`version: ${displayVersion}`);
 			const minVersion = config?.requiredCrabbox?.minVersion;
 			if (minVersion) {
-				if (versionAtLeast(displayVersion, minVersion)) ok(`version ${displayVersion} >= ${minVersion}`);
-				else fail(`Crabbox version ${displayVersion} < ${minVersion}`, failures);
+				if (versionAtLeast(displayVersion, minVersion)) {
+					ok(`version ${displayVersion} >= ${minVersion}`);
+				} else {
+					fail(`Crabbox version ${displayVersion} < ${minVersion}`, failures);
+				}
 			}
 		} else {
 			fail("could not read Crabbox version", failures);
@@ -274,43 +355,89 @@ export async function runDoctor(config) {
 	}
 
 	console.log("\n── Host tools ──");
-	for (const [name, command] of [["node", "node --version"], ["npm", "npm --version"], ["git", "git --version"], ["tar", "tar --version"]]) {
+	for (const [name, command] of [
+		["node", "node --version"],
+		["npm", "npm --version"],
+		["git", "git --version"],
+		["tar", "tar --version"],
+	]) {
 		const output = shell(command);
-		if (!output) fail(`${name} not found`, failures);
-		else ok(`${name}: ${output.split(/\r?\n/)[0]}`);
+		if (!output) {
+			fail(`${name} not found`, failures);
+		} else {
+			ok(`${name}: ${output.split(/\r?\n/)[0]}`);
+		}
 	}
 	const localNode = shell("node --version");
-	if (nodeVersion && localNode && versionAtLeast(localNode, nodeVersion)) ok(`host Node ${localNode} >= ${nodeVersion}`);
-	else fail(`host Node ${localNode || "unknown"} < ${nodeVersion ?? "configured minimum"}`, failures);
+	if (nodeVersion && localNode && versionAtLeast(localNode, nodeVersion)) {
+		ok(`host Node ${localNode} >= ${nodeVersion}`);
+	} else {
+		fail(`host Node ${localNode || "unknown"} < ${nodeVersion ?? "configured minimum"}`, failures);
+	}
 	checkAgentBrowserVersion(agentBrowserVersion, failures);
 
 	console.log("\n── Crabbox providers ──");
 	if (cboxPath) {
 		checkRequiredProviders(cbox, failures);
-		const ubuntuImage = env("PLATFORM_SMOKE_UBUNTU_IMAGE") || config?.ubuntuContainerImage || DEFAULT_UBUNTU_IMAGE;
-		checkCrabboxProvider(cbox, ["--provider", "local-container", "--local-container-image", ubuntuImage], "ubuntu local-container", failures);
+		const ubuntuImage =
+			env("PLATFORM_SMOKE_UBUNTU_IMAGE") || config?.ubuntuContainerImage || DEFAULT_UBUNTU_IMAGE;
+		checkCrabboxProvider(
+			cbox,
+			["--provider", "local-container", "--local-container-image", ubuntuImage],
+			"ubuntu local-container",
+			failures,
+		);
 		const macUser = env("PLATFORM_SMOKE_MAC_USER") || env("USER");
 		const macHost = env("PLATFORM_SMOKE_MAC_HOST") || config?.macos?.host || "localhost";
 		const macPort = String(env("PLATFORM_SMOKE_MAC_PORT") || config?.macos?.port || 22);
-		const macRoot = env("PLATFORM_SMOKE_MAC_WORK_ROOT") || config?.macos?.workRoot || `/Users/${macUser}/crabbox/${packageName}`;
-		checkCrabboxProvider(cbox, ["--provider", "ssh", "--target", "macos", "--static-host", macHost, "--static-user", macUser, "--static-port", macPort, "--static-work-root", macRoot], "macOS ssh", failures);
+		const macRoot =
+			env("PLATFORM_SMOKE_MAC_WORK_ROOT") ||
+			config?.macos?.workRoot ||
+			`/Users/${macUser}/crabbox/${packageName}`;
+		checkCrabboxProvider(
+			cbox,
+			[
+				"--provider",
+				"ssh",
+				"--target",
+				"macos",
+				"--static-host",
+				macHost,
+				"--static-user",
+				macUser,
+				"--static-port",
+				macPort,
+				"--static-work-root",
+				macRoot,
+			],
+			"macOS ssh",
+			failures,
+		);
 	}
 
 	console.log("\n── Docker / Ubuntu ──");
 	const dockerVersion = shell("docker info --format '{{.ServerVersion}}'");
-	if (dockerVersion) ok(`Docker ${dockerVersion}`);
-	else fail("Docker is not available or not running", failures);
-	const ubuntuImage = env("PLATFORM_SMOKE_UBUNTU_IMAGE") || config?.ubuntuContainerImage || DEFAULT_UBUNTU_IMAGE;
+	if (dockerVersion) {
+		ok(`Docker ${dockerVersion}`);
+	} else {
+		fail("Docker is not available or not running", failures);
+	}
+	const ubuntuImage =
+		env("PLATFORM_SMOKE_UBUNTU_IMAGE") || config?.ubuntuContainerImage || DEFAULT_UBUNTU_IMAGE;
 	ok(`Ubuntu image: ${ubuntuImage}`);
 
 	console.log("\n── macOS SSH ──");
 	const sshUser = env("PLATFORM_SMOKE_MAC_USER") || env("USER");
 	const sshHost = env("PLATFORM_SMOKE_MAC_HOST") || config?.macos?.host || "localhost";
 	const sshPort = String(env("PLATFORM_SMOKE_MAC_PORT") || config?.macos?.port || 22);
-	const sshProbe = shell(`ssh -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no -p ${sshPort} ${sshUser}@${sshHost} 'node --version && npm --version && git --version && agent-browser --version'`);
+	const sshProbe = shell(
+		`ssh -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no -p ${sshPort} ${sshUser}@${sshHost} 'node --version && npm --version && git --version && agent-browser --version'`,
+	);
 	if (sshProbe) {
 		ok(`SSH ${sshUser}@${sshHost}: ${sshProbe.split(/\r?\n/).join(" | ")}`);
-		if (agentBrowserVersion && !sshProbe.includes(agentBrowserVersion)) fail(`macOS SSH agent-browser does not match expected ${agentBrowserVersion}`, failures);
+		if (agentBrowserVersion && !sshProbe.includes(agentBrowserVersion)) {
+			fail(`macOS SSH agent-browser does not match expected ${agentBrowserVersion}`, failures);
+		}
 	} else {
 		fail(`SSH probe failed for ${sshUser}@${sshHost}`, failures);
 	}
@@ -321,10 +448,20 @@ export async function runDoctor(config) {
 			fail("prlctl not found", failures);
 		} else {
 			ok("prlctl found");
-			const vmName = env("PLATFORM_SMOKE_WINDOWS_VM") || config?.windowsParallels?.sourceVm || "pi-extension-windows-template";
-			const snapshot = env("PLATFORM_SMOKE_WINDOWS_SNAPSHOT") || config?.windowsParallels?.snapshot || "crabbox-ready";
-			const user = env("PLATFORM_SMOKE_WINDOWS_USER") || config?.windowsParallels?.user || env("USER");
-			const workRoot = env("PLATFORM_SMOKE_WINDOWS_WORK_ROOT") || config?.windowsParallels?.workRoot || `C:\\crabbox\\${packageName}`;
+			const vmName =
+				env("PLATFORM_SMOKE_WINDOWS_VM") ||
+				config?.windowsParallels?.sourceVm ||
+				"pi-extension-windows-template";
+			const snapshot =
+				env("PLATFORM_SMOKE_WINDOWS_SNAPSHOT") ||
+				config?.windowsParallels?.snapshot ||
+				"crabbox-ready";
+			const user =
+				env("PLATFORM_SMOKE_WINDOWS_USER") || config?.windowsParallels?.user || env("USER");
+			const workRoot =
+				env("PLATFORM_SMOKE_WINDOWS_WORK_ROOT") ||
+				config?.windowsParallels?.workRoot ||
+				`C:\\crabbox\\${packageName}`;
 			const list = shell("prlctl list -a --no-header 2>/dev/null");
 			if (!list) {
 				fail("prlctl list returned no VMs", failures);
@@ -332,29 +469,84 @@ export async function runDoctor(config) {
 				fail(`Windows VM ${vmName} not found`, failures);
 			} else {
 				ok(`Windows VM ${vmName} found`);
-				const status = shell(`prlctl status "${vmName.replace(/"/g, "\\\"")}" 2>/dev/null`);
-				if (/\bstopped\b/i.test(status ?? "")) ok(`Windows source VM ${vmName} is stopped`);
-				else fail(`Windows source VM ${vmName} must be stopped for forkable snapshot use; current status: ${status ?? "unknown"}`, failures);
-				const snapshotsJson = shell(`prlctl snapshot-list "${vmName.replace(/"/g, "\\\"")}" -j 2>/dev/null`);
+				const status = shell(`prlctl status "${vmName.replace(/"/g, '\\"')}" 2>/dev/null`);
+				if (/\bstopped\b/i.test(status ?? "")) {
+					ok(`Windows source VM ${vmName} is stopped`);
+				} else {
+					fail(
+						`Windows source VM ${vmName} must be stopped for forkable snapshot use; current status: ${status ?? "unknown"}`,
+						failures,
+					);
+				}
+				const snapshotsJson = shell(
+					`prlctl snapshot-list "${vmName.replace(/"/g, '\\"')}" -j 2>/dev/null`,
+				);
 				let snapshotMatch = null;
 				try {
 					const snapshots = JSON.parse(snapshotsJson ?? "{}");
-					snapshotMatch = Object.entries(snapshots).find(([id, data]) => id === snapshot || data?.name === snapshot);
+					snapshotMatch = Object.entries(snapshots).find(
+						([id, data]) => id === snapshot || data?.name === snapshot,
+					);
 				} catch {
 					// Fall through to the failure below.
 				}
 				if (snapshotMatch) {
 					ok(`snapshot ${snapshot} found`);
 					const snapshotState = snapshotMatch[1]?.state ?? "unknown";
-					if (snapshotState === "poweroff") ok(`snapshot ${snapshot} state is poweroff`);
-					else fail(`snapshot ${snapshot} must be poweroff; current snapshot state: ${snapshotState}`, failures);
+					if (snapshotState === "poweroff") {
+						ok(`snapshot ${snapshot} state is poweroff`);
+					} else {
+						fail(
+							`snapshot ${snapshot} must be poweroff; current snapshot state: ${snapshotState}`,
+							failures,
+						);
+					}
 				} else {
 					fail(`snapshot ${snapshot} not found on ${vmName}`, failures);
 				}
-				checkCrabboxProvider(cbox, ["--provider", "parallels", "--target", "windows", "--windows-mode", "normal", "--parallels-source", vmName, "--parallels-source-snapshot", snapshot, "--parallels-user", user, "--parallels-work-root", workRoot], "windows parallels", failures);
-				const agentBrowserProbe = disposableWindowsAgentBrowserProbe(cbox, { ...config, windowsParallels: { ...config?.windowsParallels, sourceVm: vmName, snapshot, user, workRoot } }, agentBrowserVersion);
-				if (agentBrowserProbe.ok) ok(`Windows disposable agent-browser: ${agentBrowserProbe.message}`);
-				else fail(`Windows disposable agent-browser probe failed: ${agentBrowserProbe.message}`, failures);
+				checkCrabboxProvider(
+					cbox,
+					[
+						"--provider",
+						"parallels",
+						"--target",
+						"windows",
+						"--windows-mode",
+						"normal",
+						"--parallels-source",
+						vmName,
+						"--parallels-source-snapshot",
+						snapshot,
+						"--parallels-user",
+						user,
+						"--parallels-work-root",
+						workRoot,
+					],
+					"windows parallels",
+					failures,
+				);
+				const agentBrowserProbe = disposableWindowsAgentBrowserProbe(
+					cbox,
+					{
+						...config,
+						windowsParallels: {
+							...config?.windowsParallels,
+							sourceVm: vmName,
+							snapshot,
+							user,
+							workRoot,
+						},
+					},
+					agentBrowserVersion,
+				);
+				if (agentBrowserProbe.ok) {
+					ok(`Windows disposable agent-browser: ${agentBrowserProbe.message}`);
+				} else {
+					fail(
+						`Windows disposable agent-browser probe failed: ${agentBrowserProbe.message}`,
+						failures,
+					);
+				}
 			}
 		}
 	} else {
@@ -376,8 +568,11 @@ export async function runDoctor(config) {
 
 	console.log("\n── Repository hygiene ──");
 	const status = shell("git status --short");
-	if (status) warn(`${status.split(/\r?\n/).length} uncommitted change(s) recorded for smoke evidence`);
-	else ok("git status clean");
+	if (status) {
+		warn(`${status.split(/\r?\n/).length} uncommitted change(s) recorded for smoke evidence`);
+	} else {
+		ok("git status clean");
+	}
 	checkForbiddenProjectFiles(failures);
 
 	console.log(`\n=== Results: ${failures.count} failure(s) ===`);

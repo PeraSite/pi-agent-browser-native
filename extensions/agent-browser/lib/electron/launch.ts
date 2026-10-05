@@ -26,7 +26,11 @@ const ELECTRON_LAUNCH_MAX_TIMEOUT_MS = 120_000;
 
 const DEVTOOLS_ACTIVE_PORT_FILE = "DevToolsActivePort";
 export const ELECTRON_PROFILE_DIR_PREFIX = "electron-profile-";
-const ELECTRON_DEFAULT_APP_ARGS = ["--disable-extensions", "--no-first-run", "--no-default-browser-check"] as const;
+const ELECTRON_DEFAULT_APP_ARGS = [
+	"--disable-extensions",
+	"--no-first-run",
+	"--no-default-browser-check",
+] as const;
 const ELECTRON_DEVTOOLS_POLL_INTERVAL_MS = 100;
 // ponytail: bound failure reads, not lifetime log growth; noisy long-lived apps need rotation if that becomes a problem.
 const ELECTRON_OUTPUT_TAIL_BYTES = 4096;
@@ -119,7 +123,9 @@ export interface ElectronLaunchFailure {
 	userDataDir?: string;
 }
 
-export type ElectronLaunchResult = { ok: true; value: ElectronLaunchSuccess } | { ok: false; failure: ElectronLaunchFailure };
+export type ElectronLaunchResult =
+	| { ok: true; value: ElectronLaunchSuccess }
+	| { ok: false; failure: ElectronLaunchFailure };
 
 export interface ResolveElectronTargetOptions {
 	appName?: string;
@@ -129,12 +135,16 @@ export interface ResolveElectronTargetOptions {
 }
 
 function normalizeTimeoutMs(timeoutMs: number | undefined): number {
-	if (!Number.isSafeInteger(timeoutMs) || (timeoutMs ?? 0) <= 0) return ELECTRON_LAUNCH_DEFAULT_TIMEOUT_MS;
+	if (!Number.isSafeInteger(timeoutMs) || (timeoutMs ?? 0) <= 0) {
+		return ELECTRON_LAUNCH_DEFAULT_TIMEOUT_MS;
+	}
 	return Math.min(timeoutMs as number, ELECTRON_LAUNCH_MAX_TIMEOUT_MS);
 }
 
 function sleep(ms: number, signal?: AbortSignal): Promise<void> {
-	if (signal?.aborted) return Promise.resolve();
+	if (signal?.aborted) {
+		return Promise.resolve();
+	}
 	return new Promise((resolve) => {
 		const timer = setTimeout(done, ms);
 		function done() {
@@ -152,14 +162,19 @@ function normalizeIdentifier(value: string | undefined): string | undefined {
 }
 
 function appIdentifiers(app: ElectronAppDiscovery): string[] {
-	return [app.name, app.bundleId, app.desktopId, app.appPath, app.executablePath]
-		.filter((value): value is string => typeof value === "string" && value.trim().length > 0);
+	return [app.name, app.bundleId, app.desktopId, app.appPath, app.executablePath].filter(
+		(value): value is string => typeof value === "string" && value.trim().length > 0,
+	);
 }
 
 function policyEntryMatchesApp(entry: string, app: ElectronAppDiscovery): boolean {
 	const normalizedEntry = normalizeIdentifier(entry);
-	if (!normalizedEntry) return false;
-	return appIdentifiers(app).some((identifier) => identifier.toLowerCase().includes(normalizedEntry));
+	if (!normalizedEntry) {
+		return false;
+	}
+	return appIdentifiers(app).some((identifier) =>
+		identifier.toLowerCase().includes(normalizedEntry),
+	);
 }
 
 function evaluateElectronLaunchPolicy(options: {
@@ -180,16 +195,23 @@ function evaluateElectronLaunchPolicy(options: {
 		if (!allowEntry) {
 			return {
 				list: "allow",
-				message: "Electron launch blocked because the resolved app did not match caller allow policy.",
+				message:
+					"Electron launch blocked because the resolved app did not match caller allow policy.",
 			};
 		}
 	}
 	return undefined;
 }
 
-async function resolveElectronLaunchTarget(options: ResolveElectronTargetOptions): Promise<ElectronAppDiscovery | undefined> {
-	if (options.appPath) return inspectElectronAppPath(options.appPath);
-	if (options.executablePath) return inspectElectronExecutablePath(options.executablePath);
+async function resolveElectronLaunchTarget(
+	options: ResolveElectronTargetOptions,
+): Promise<ElectronAppDiscovery | undefined> {
+	if (options.appPath) {
+		return inspectElectronAppPath(options.appPath);
+	}
+	if (options.executablePath) {
+		return inspectElectronExecutablePath(options.executablePath);
+	}
 	const query = options.bundleId ?? options.appName;
 	const discovery = await discoverElectronApps({ maxResults: 200, query });
 	if (options.bundleId) {
@@ -198,12 +220,18 @@ async function resolveElectronLaunchTarget(options: ResolveElectronTargetOptions
 	}
 	if (options.appName) {
 		const normalizedName = normalizeIdentifier(options.appName);
-		return discovery.apps.find((app) => normalizeIdentifier(app.name) === normalizedName) ?? discovery.apps[0];
+		return (
+			discovery.apps.find((app) => normalizeIdentifier(app.name) === normalizedName) ??
+			discovery.apps[0]
+		);
 	}
 	return undefined;
 }
 
-function targetMatchesType(target: ElectronCdpTarget, targetType: "any" | "page" | "webview" | undefined): boolean {
+function targetMatchesType(
+	target: ElectronCdpTarget,
+	targetType: "any" | "page" | "webview" | undefined,
+): boolean {
 	return targetType === undefined || targetType === "any" || target.type === targetType;
 }
 
@@ -213,11 +241,15 @@ function selectElectronConnectArg(options: {
 	targetType?: "any" | "page" | "webview";
 	version: ElectronCdpVersion;
 }): string {
-	const targetWebSocket = options.targets.find((target) => targetMatchesType(target, options.targetType) && target.webSocketDebuggerUrl)?.webSocketDebuggerUrl;
+	const targetWebSocket = options.targets.find(
+		(target) => targetMatchesType(target, options.targetType) && target.webSocketDebuggerUrl,
+	)?.webSocketDebuggerUrl;
 	return targetWebSocket ?? options.version.webSocketDebuggerUrl ?? String(options.port);
 }
 
-async function readDevToolsActivePort(userDataDir: string): Promise<ElectronDevToolsActivePortRead> {
+async function readDevToolsActivePort(
+	userDataDir: string,
+): Promise<ElectronDevToolsActivePortRead> {
 	const path = `${userDataDir}/${DEVTOOLS_ACTIVE_PORT_FILE}`;
 	try {
 		const text = await readFile(path, "utf8");
@@ -227,12 +259,17 @@ async function readDevToolsActivePort(userDataDir: string): Promise<ElectronDevT
 			found: true,
 			path,
 			port: Number.isSafeInteger(port) && port > 0 && port <= 65_535 ? port : undefined,
-			...(Number.isSafeInteger(port) && port > 0 && port <= 65_535 ? {} : { error: "DevToolsActivePort did not contain a valid TCP port." }),
+			...(Number.isSafeInteger(port) && port > 0 && port <= 65_535
+				? {}
+				: { error: "DevToolsActivePort did not contain a valid TCP port." }),
 		};
 	} catch (error) {
 		const code = (error as NodeJS.ErrnoException).code;
 		return {
-			error: code && code !== "ENOENT" ? `${code}: ${error instanceof Error ? error.message : String(error)}` : undefined,
+			error:
+				code && code !== "ENOENT"
+					? `${code}: ${error instanceof Error ? error.message : String(error)}`
+					: undefined,
 			found: false,
 			path,
 		};
@@ -245,31 +282,62 @@ async function pollDevToolsActivePort(options: {
 	getSpawnError: () => Error | undefined;
 	signal?: AbortSignal;
 	userDataDir: string;
-}): Promise<{ devToolsActivePort?: ElectronDevToolsActivePortRead; failure?: ElectronLaunchFailureReason; port?: number; spawnError?: Error }> {
+}): Promise<{
+	devToolsActivePort?: ElectronDevToolsActivePortRead;
+	failure?: ElectronLaunchFailureReason;
+	port?: number;
+	spawnError?: Error;
+}> {
 	let devToolsActivePort: ElectronDevToolsActivePortRead | undefined;
 	while (Date.now() <= options.deadlineMs) {
-		if (options.signal?.aborted) return { devToolsActivePort, failure: "aborted" };
+		if (options.signal?.aborted) {
+			return { devToolsActivePort, failure: "aborted" };
+		}
 		const spawnError = options.getSpawnError();
-		if (spawnError) return { devToolsActivePort, failure: "spawn-error", spawnError };
+		if (spawnError) {
+			return { devToolsActivePort, failure: "spawn-error", spawnError };
+		}
 		devToolsActivePort = await readDevToolsActivePort(options.userDataDir);
-		if (devToolsActivePort.port) return { devToolsActivePort, port: devToolsActivePort.port };
+		if (devToolsActivePort.port) {
+			return { devToolsActivePort, port: devToolsActivePort.port };
+		}
 		const exit = options.getChildExit();
 		if (exit.code !== null || exit.signal !== null) {
-			return { devToolsActivePort, failure: exit.code === 0 ? "single-instance-conflict" : "spawn-error" };
+			return {
+				devToolsActivePort,
+				failure: exit.code === 0 ? "single-instance-conflict" : "spawn-error",
+			};
 		}
 		await sleep(ELECTRON_DEVTOOLS_POLL_INTERVAL_MS, options.signal);
 	}
 	return { devToolsActivePort, failure: "timeout" };
 }
 
-async function pollCdpMetadata(port: number, deadlineMs: number, signal?: AbortSignal): Promise<{ aborted: boolean; metadata?: { targets: ElectronCdpTarget[]; version: ElectronCdpVersion } }> {
+async function pollCdpMetadata(
+	port: number,
+	deadlineMs: number,
+	signal?: AbortSignal,
+): Promise<{
+	aborted: boolean;
+	metadata?: { targets: ElectronCdpTarget[]; version: ElectronCdpVersion };
+}> {
 	while (Date.now() <= deadlineMs) {
-		if (signal?.aborted) return { aborted: true };
-		const version = parseCdpVersion(await fetchCdpJson(`http://127.0.0.1:${port}/json/version`, signal));
-		if (signal?.aborted) return { aborted: true };
+		if (signal?.aborted) {
+			return { aborted: true };
+		}
+		const version = parseCdpVersion(
+			await fetchCdpJson(`http://127.0.0.1:${port}/json/version`, signal),
+		);
+		if (signal?.aborted) {
+			return { aborted: true };
+		}
 		if (version) {
-			const targets = parseCdpTargets(await fetchCdpJson(`http://127.0.0.1:${port}/json/list`, signal));
-			return signal?.aborted ? { aborted: true } : { aborted: false, metadata: { targets, version } };
+			const targets = parseCdpTargets(
+				await fetchCdpJson(`http://127.0.0.1:${port}/json/list`, signal),
+			);
+			return signal?.aborted
+				? { aborted: true }
+				: { aborted: false, metadata: { targets, version } };
 		}
 		await sleep(ELECTRON_DEVTOOLS_POLL_INTERVAL_MS, signal);
 	}
@@ -287,15 +355,21 @@ function buildLaunchArgs(userDataDir: string, appArgs: string[]): string[] {
 
 async function waitForLaunchChildExit(child: ChildProcess, deadlineMs: number): Promise<boolean> {
 	while (Date.now() <= deadlineMs) {
-		if (child.exitCode !== null || child.signalCode !== null) return true;
+		if (child.exitCode !== null || child.signalCode !== null) {
+			return true;
+		}
 		await sleep(50);
 	}
 	return child.exitCode !== null || child.signalCode !== null;
 }
 
 function isLaunchChildPidAlive(child: ChildProcess): boolean | undefined {
-	if (!child.pid) return undefined;
-	if (child.exitCode !== null || child.signalCode !== null) return false;
+	if (!child.pid) {
+		return undefined;
+	}
+	if (child.exitCode !== null || child.signalCode !== null) {
+		return false;
+	}
 	try {
 		process.kill(child.pid, 0);
 		return true;
@@ -305,19 +379,25 @@ function isLaunchChildPidAlive(child: ChildProcess): boolean | undefined {
 }
 
 async function terminateLaunchChild(child: ChildProcess): Promise<string | undefined> {
-	if (!child.pid || child.exitCode !== null || child.signalCode !== null) return undefined;
+	if (!child.pid || child.exitCode !== null || child.signalCode !== null) {
+		return undefined;
+	}
 	try {
 		child.kill("SIGTERM");
 	} catch (error) {
 		return error instanceof Error ? error.message : String(error);
 	}
-	if (await waitForLaunchChildExit(child, Date.now() + 1_000)) return undefined;
+	if (await waitForLaunchChildExit(child, Date.now() + 1_000)) {
+		return undefined;
+	}
 	try {
 		child.kill("SIGKILL");
 	} catch (error) {
 		return error instanceof Error ? error.message : String(error);
 	}
-	if (await waitForLaunchChildExit(child, Date.now() + 1_000)) return undefined;
+	if (await waitForLaunchChildExit(child, Date.now() + 1_000)) {
+		return undefined;
+	}
 	return `PID ${child.pid} remained alive after failed Electron launch cleanup.`;
 }
 
@@ -352,7 +432,11 @@ function buildLaunchRecord(options: {
 	};
 }
 
-function launchFailureMessage(reason: ElectronLaunchFailureReason, target: ElectronAppDiscovery | undefined, detail?: string): string {
+function launchFailureMessage(
+	reason: ElectronLaunchFailureReason,
+	target: ElectronAppDiscovery | undefined,
+	detail?: string,
+): string {
 	const label = target ? `${target.name} (${target.appPath ?? target.executablePath})` : "target";
 	switch (reason) {
 		case "aborted":
@@ -385,9 +469,24 @@ export async function launchElectronApp(options: {
 	signal?: AbortSignal;
 }): Promise<ElectronLaunchResult> {
 	const appArgs = options.appArgs ?? [];
-	if (options.signal?.aborted) return { ok: false, failure: { appArgs, error: launchFailureMessage("aborted", undefined), reason: "aborted" } };
+	if (options.signal?.aborted) {
+		return {
+			ok: false,
+			failure: { appArgs, error: launchFailureMessage("aborted", undefined), reason: "aborted" },
+		};
+	}
 	const target = await resolveElectronLaunchTarget(options);
-	if (options.signal?.aborted) return { ok: false, failure: { appArgs, error: launchFailureMessage("aborted", target), reason: "aborted", target } };
+	if (options.signal?.aborted) {
+		return {
+			ok: false,
+			failure: {
+				appArgs,
+				error: launchFailureMessage("aborted", target),
+				reason: "aborted",
+				target,
+			},
+		};
+	}
 	if (!target) {
 		return {
 			ok: false,
@@ -424,7 +523,17 @@ export async function launchElectronApp(options: {
 		} catch (error) {
 			cleanupError = error instanceof Error ? error.message : String(error);
 		}
-		return { ok: false, failure: { appArgs, cleanupError, error: launchFailureMessage("aborted", target), reason: "aborted", target, userDataDir } };
+		return {
+			ok: false,
+			failure: {
+				appArgs,
+				cleanupError,
+				error: launchFailureMessage("aborted", target),
+				reason: "aborted",
+				target,
+				userDataDir,
+			},
+		};
 	}
 	let cleanupError: string | undefined;
 	let spawnError: Error | undefined;
@@ -435,7 +544,9 @@ export async function launchElectronApp(options: {
 	let outputCaptured = false;
 	const outputFiles: FileHandle[] = [];
 	try {
-		for (const stream of ["stdout", "stderr"]) outputFiles.push(await open(join(userDataDir, `${stream}.log`), "wx", 0o600));
+		for (const stream of ["stdout", "stderr"]) {
+			outputFiles.push(await open(join(userDataDir, `${stream}.log`), "wx", 0o600));
+		}
 		options.signal?.throwIfAborted();
 		child = spawn(target.executablePath, args, {
 			cwd: dirname(target.executablePath),
@@ -456,16 +567,23 @@ export async function launchElectronApp(options: {
 	} finally {
 		for (const file of outputFiles) {
 			await file.close().catch((error) => {
-				cleanupError = [cleanupError, `Output handle close failed: ${error instanceof Error ? error.message : String(error)}`].filter(Boolean).join("; ");
+				cleanupError = [
+					cleanupError,
+					`Output handle close failed: ${error instanceof Error ? error.message : String(error)}`,
+				]
+					.filter(Boolean)
+					.join("; ");
 			});
 		}
 	}
 
-	const buildFailureDiagnostics = (options: {
-		cdpVersionReached?: boolean;
-		devToolsActivePort?: ElectronDevToolsActivePortRead;
-		port?: number;
-	} = {}): ElectronLaunchFailureDiagnostics => ({
+	const buildFailureDiagnostics = (
+		options: {
+			cdpVersionReached?: boolean;
+			devToolsActivePort?: ElectronDevToolsActivePortRead;
+			port?: number;
+		} = {},
+	): ElectronLaunchFailureDiagnostics => ({
 		cdpVersionReached: options.cdpVersionReached,
 		devToolsActivePort: options.devToolsActivePort,
 		elapsedMs: Math.max(0, Date.now() - startedAtMs),
@@ -479,7 +597,11 @@ export async function launchElectronApp(options: {
 		userDataDir,
 	});
 
-	const fail = async (reason: ElectronLaunchFailureReason, detail?: string, diagnosticOptions?: Parameters<typeof buildFailureDiagnostics>[0]): Promise<ElectronLaunchResult> => {
+	const fail = async (
+		reason: ElectronLaunchFailureReason,
+		detail?: string,
+		diagnosticOptions?: Parameters<typeof buildFailureDiagnostics>[0],
+	): Promise<ElectronLaunchResult> => {
 		const diagnostics = buildFailureDiagnostics(diagnosticOptions);
 		const processCleanupError = child ? await terminateLaunchChild(child) : undefined;
 		const outputLines: string[] = [];
@@ -490,29 +612,56 @@ export async function launchElectronApp(options: {
 					file = await open(join(userDataDir, `${stream}.log`), "r");
 					const { size } = await file.stat();
 					const buffer = Buffer.alloc(Math.min(size, ELECTRON_OUTPUT_TAIL_BYTES));
-					const { bytesRead } = await file.read(buffer, 0, buffer.length, Math.max(0, size - buffer.length));
+					const { bytesRead } = await file.read(
+						buffer,
+						0,
+						buffer.length,
+						Math.max(0, size - buffer.length),
+					);
 					diagnostics[`${stream}Tail`] = buffer.subarray(0, bytesRead).toString("utf8");
 					diagnostics[`${stream}Truncated`] = size > buffer.length;
 				} catch (error) {
 					diagnostics[`${stream}Error`] = error instanceof Error ? error.message : String(error);
 				} finally {
 					await file?.close().catch((error) => {
-						diagnostics[`${stream}Error`] = [diagnostics[`${stream}Error`], `Output reader close failed: ${error instanceof Error ? error.message : String(error)}`].filter(Boolean).join("; ");
+						diagnostics[`${stream}Error`] = [
+							diagnostics[`${stream}Error`],
+							`Output reader close failed: ${error instanceof Error ? error.message : String(error)}`,
+						]
+							.filter(Boolean)
+							.join("; ");
 					});
 				}
 				const tail = diagnostics[`${stream}Tail`];
-				if (tail !== undefined) outputLines.push(`App ${stream}${diagnostics[`${stream}Truncated`] ? ` (last ${ELECTRON_OUTPUT_TAIL_BYTES} bytes)` : ""}: ${tail || "(empty)"}`);
-				if (diagnostics[`${stream}Error`]) outputLines.push(`App ${stream} capture error: ${diagnostics[`${stream}Error`]}`);
+				if (tail !== undefined) {
+					outputLines.push(
+						`App ${stream}${diagnostics[`${stream}Truncated`] ? ` (last ${ELECTRON_OUTPUT_TAIL_BYTES} bytes)` : ""}: ${tail || "(empty)"}`,
+					);
+				}
+				if (diagnostics[`${stream}Error`]) {
+					outputLines.push(`App ${stream} capture error: ${diagnostics[`${stream}Error`]}`);
+				}
 			}
 		}
 		try {
-			if (processCleanupError) await preserveSecureTempDirectory(userDataDir);
-			else await rm(userDataDir, { force: true, recursive: true });
+			if (processCleanupError) {
+				await preserveSecureTempDirectory(userDataDir);
+			} else {
+				await rm(userDataDir, { force: true, recursive: true });
+			}
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
-			cleanupError = [cleanupError, processCleanupError ? `Profile preservation failed: ${message}` : message].filter(Boolean).join("; ");
+			cleanupError = [
+				cleanupError,
+				processCleanupError ? `Profile preservation failed: ${message}` : message,
+			]
+				.filter(Boolean)
+				.join("; ");
 		}
-		cleanupError = [processCleanupError, cleanupError].filter((value): value is string => value !== undefined).join("; ") || undefined;
+		cleanupError =
+			[processCleanupError, cleanupError]
+				.filter((value): value is string => value !== undefined)
+				.join("; ") || undefined;
 		return {
 			ok: false,
 			failure: {
@@ -527,7 +676,9 @@ export async function launchElectronApp(options: {
 		};
 	};
 
-	if (!child) return fail(options.signal?.aborted ? "aborted" : "spawn-error", spawnError?.message);
+	if (!child) {
+		return fail(options.signal?.aborted ? "aborted" : "spawn-error", spawnError?.message);
+	}
 	const portResult = await pollDevToolsActivePort({
 		deadlineMs,
 		getChildExit: () => ({ code: exitCode, signal: exitSignal }),
@@ -536,12 +687,23 @@ export async function launchElectronApp(options: {
 		userDataDir,
 	});
 	if (!portResult.port) {
-		return fail(portResult.failure ?? "timeout", portResult.spawnError?.message, { devToolsActivePort: portResult.devToolsActivePort });
+		return fail(portResult.failure ?? "timeout", portResult.spawnError?.message, {
+			devToolsActivePort: portResult.devToolsActivePort,
+		});
 	}
 	const metadataResult = await pollCdpMetadata(portResult.port, deadlineMs, options.signal);
-	if (metadataResult.aborted) return fail("aborted", undefined, { devToolsActivePort: portResult.devToolsActivePort, port: portResult.port });
+	if (metadataResult.aborted) {
+		return fail("aborted", undefined, {
+			devToolsActivePort: portResult.devToolsActivePort,
+			port: portResult.port,
+		});
+	}
 	if (!metadataResult.metadata) {
-		return fail("port-not-found", undefined, { cdpVersionReached: false, devToolsActivePort: portResult.devToolsActivePort, port: portResult.port });
+		return fail("port-not-found", undefined, {
+			cdpVersionReached: false,
+			devToolsActivePort: portResult.devToolsActivePort,
+			port: portResult.port,
+		});
 	}
 	const metadata = metadataResult.metadata;
 	const record = buildLaunchRecord({

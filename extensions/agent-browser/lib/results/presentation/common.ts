@@ -4,7 +4,8 @@ import type { AgentBrowserLifecycle } from "../contracts.js";
 import { stringifyUnknown, truncateText } from "../text.js";
 
 const UNTITLED_PAGE_SUMMARY = "(untitled page)";
-export const LIGHTPANDA_IMAGE_REASON = "Lightpanda screenshot is a text-rendered page representation, not a graphical capture; CSS/mouse coordinate mapping is unknown.";
+export const LIGHTPANDA_IMAGE_REASON =
+	"Lightpanda screenshot is a text-rendered page representation, not a graphical capture; CSS/mouse coordinate mapping is unknown.";
 
 export function stringifyModelFacing(value: unknown): string {
 	return stringifyUnknown(redactSensitiveValue(value));
@@ -29,21 +30,27 @@ export function extractAgentBrowserLifecycle(result: unknown): AgentBrowserLifec
 	if (Array.isArray(result)) {
 		let latest: AgentBrowserLifecycle | undefined;
 		for (const row of result) {
-			const nested = isRecord(row) ? row.result ?? row.data ?? row : row;
+			const nested = isRecord(row) ? (row.result ?? row.data ?? row) : row;
 			latest = extractAgentBrowserLifecycle(nested) ?? latest;
 		}
 		return latest;
 	}
-	if (!isRecord(result)) return undefined;
+	if (!isRecord(result)) {
+		return undefined;
+	}
 	if (isRecord(result.lifecycle) && isRecord(result.lifecycle.effectiveLaunch)) {
 		const browserLaunched = result.lifecycle.effectiveLaunch.browserLaunched;
-		if (typeof browserLaunched === "boolean") return { effectiveLaunch: { browserLaunched } };
+		if (typeof browserLaunched === "boolean") {
+			return { effectiveLaunch: { browserLaunched } };
+		}
 	}
 	return extractAgentBrowserLifecycle(result.result ?? result.data);
 }
 
 export function omitUpstreamLifecycle(data: Record<string, unknown>): Record<string, unknown> {
-	if (Array.isArray(data)) return data;
+	if (Array.isArray(data)) {
+		return data;
+	}
 	const { lifecycle: _lifecycle, ...rest } = data;
 	return rest;
 }
@@ -55,10 +62,15 @@ export function formatWebMcpCatalogUpdate(catalog: Record<string, unknown>): str
 export function getPageSummary(data: Record<string, unknown>): string | undefined {
 	const title = typeof data.title === "string" ? data.title : undefined;
 	const url = typeof data.url === "string" ? data.url : undefined;
-	if (title === undefined && url === undefined) return undefined;
+	if (title === undefined && url === undefined) {
+		return undefined;
+	}
 	const summary = title && url ? `${title}\n${url}` : url || title || UNTITLED_PAGE_SUMMARY;
 	const webmcp = isRecord(data.webmcp) ? data.webmcp : undefined;
-	return webmcp?.available === true && typeof webmcp.toolCount === "number" && Number.isInteger(webmcp.toolCount) && webmcp.toolCount > 0
+	return webmcp?.available === true &&
+		typeof webmcp.toolCount === "number" &&
+		Number.isInteger(webmcp.toolCount) &&
+		webmcp.toolCount > 0
 		? `${summary}\n\nWebMCP tools are available on this page (experimental). Run webmcp list to view them.`
 		: summary;
 }

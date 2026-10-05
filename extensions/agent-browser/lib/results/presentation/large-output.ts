@@ -6,11 +6,20 @@ import {
 	writeSecureTempFile,
 } from "../../temp.js";
 import { buildEvictedSessionArtifactEntries } from "../artifact-manifest.js";
-import type { ArtifactStorageScope, SessionArtifactManifest, SessionArtifactManifestEntry, ToolPresentation } from "../contracts.js";
+import type {
+	ArtifactStorageScope,
+	SessionArtifactManifest,
+	SessionArtifactManifestEntry,
+	ToolPresentation,
+} from "../contracts.js";
 import type { JsonValue } from "@earendil-works/pi-ai";
 import { countLines, truncateText } from "../text.js";
 import { applyArtifactManifest } from "./artifacts.js";
-import { getPresentationText, projectAgentBrowserObservation, OBSERVATION_INLINE_MAX_CHARS } from "./content.js";
+import {
+	getPresentationText,
+	projectAgentBrowserObservation,
+	OBSERVATION_INLINE_MAX_CHARS,
+} from "./content.js";
 import { redactModelFacingText, stringifyModelFacing } from "./common.js";
 
 const LARGE_OUTPUT_INLINE_MAX_CHARS = 8_000;
@@ -28,7 +37,9 @@ const LARGE_OUTPUT_FAILURE_COMMAND_MAX_CHARS = 240;
 const LARGE_OUTPUT_FILE_PREFIX = "pi-agent-browser-output";
 
 function shouldCompactLargeOutput(text: string): boolean {
-	return text.length > LARGE_OUTPUT_INLINE_MAX_CHARS || countLines(text) > LARGE_OUTPUT_INLINE_MAX_LINES;
+	return (
+		text.length > LARGE_OUTPUT_INLINE_MAX_CHARS || countLines(text) > LARGE_OUTPUT_INLINE_MAX_LINES
+	);
 }
 
 function buildLargeOutputPreview(text: string): { omittedLineCount: number; previewText: string } {
@@ -36,11 +47,17 @@ function buildLargeOutputPreview(text: string): { omittedLineCount: number; prev
 	const previewLines: string[] = [];
 	let previewChars = 0;
 	for (const line of lines) {
-		if (previewLines.length >= LARGE_OUTPUT_PREVIEW_MAX_LINES || previewChars >= LARGE_OUTPUT_PREVIEW_MAX_CHARS) {
+		if (
+			previewLines.length >= LARGE_OUTPUT_PREVIEW_MAX_LINES ||
+			previewChars >= LARGE_OUTPUT_PREVIEW_MAX_CHARS
+		) {
 			break;
 		}
 		const remainingChars = LARGE_OUTPUT_PREVIEW_MAX_CHARS - previewChars;
-		const previewLine = truncateText(line, Math.min(Math.max(40, remainingChars), LARGE_OUTPUT_PREVIEW_MAX_LINE_CHARS));
+		const previewLine = truncateText(
+			line,
+			Math.min(Math.max(40, remainingChars), LARGE_OUTPUT_PREVIEW_MAX_LINE_CHARS),
+		);
 		previewLines.push(previewLine);
 		previewChars += previewLine.length + 1;
 	}
@@ -52,7 +69,9 @@ function buildLargeOutputPreview(text: string): { omittedLineCount: number; prev
 
 function buildLargeOutputFailureContext(presentation: ToolPresentation): string[] {
 	const failure = presentation.batchFailure;
-	if (!failure) return [];
+	if (!failure) {
+		return [];
+	}
 	const failedStep = failure.failedStep;
 	const commandText = truncateText(failedStep.commandText, LARGE_OUTPUT_FAILURE_COMMAND_MAX_CHARS);
 	const lines = [
@@ -60,11 +79,22 @@ function buildLargeOutputFailureContext(presentation: ToolPresentation): string[
 		`- First failing step: ${failedStep.index + 1} — ${commandText}`,
 		`- Batch result: ${failure.successCount}/${failure.totalCount} succeeded${failure.failureCount > 1 ? `; ${failure.failureCount} failed` : ""}`,
 	];
-	if (failedStep.failureCategory) lines.push(`- Failure category: ${failedStep.failureCategory}`);
+	if (failedStep.failureCategory) {
+		lines.push(`- Failure category: ${failedStep.failureCategory}`);
+	}
 	const failureText = (failedStep.text || failedStep.summary).replace(/\s+/g, " ").trim();
-	if (failureText) lines.push(`- Failure detail: ${truncateText(failureText, 700)}`);
-	const stepPaths = [failedStep.fullOutputPath, ...(failedStep.fullOutputPaths ?? [])].filter((path, index, paths): path is string => typeof path === "string" && path.length > 0 && paths.indexOf(path) === index);
-	if (stepPaths.length > 0) lines.push(`- Failed-step spill path${stepPaths.length === 1 ? "" : "s"}: ${stepPaths.join(", ")}`);
+	if (failureText) {
+		lines.push(`- Failure detail: ${truncateText(failureText, 700)}`);
+	}
+	const stepPaths = [failedStep.fullOutputPath, ...(failedStep.fullOutputPaths ?? [])].filter(
+		(path, index, paths): path is string =>
+			typeof path === "string" && path.length > 0 && paths.indexOf(path) === index,
+	);
+	if (stepPaths.length > 0) {
+		lines.push(
+			`- Failed-step spill path${stepPaths.length === 1 ? "" : "s"}: ${stepPaths.join(", ")}`,
+		);
+	}
 	return lines;
 }
 
@@ -87,17 +117,27 @@ async function writeLargeOutputSpillFile(options: {
 				: options.data === undefined
 					? redactModelFacingText(options.text)
 					: stringifyModelFacing(options.data);
-	const isStructuredPayload = typeof options.data !== "string" && typeof options.data !== "number" && typeof options.data !== "boolean";
+	const isStructuredPayload =
+		typeof options.data !== "string" &&
+		typeof options.data !== "number" &&
+		typeof options.data !== "boolean";
 	const fileOptions = {
 		content: payload,
 		prefix: LARGE_OUTPUT_FILE_PREFIX,
 		suffix: isStructuredPayload ? ".json" : ".txt",
 	};
 	if (options.persistentArtifactStore) {
-		const result = await writePersistentSessionArtifactFile({ ...fileOptions, store: options.persistentArtifactStore });
+		const result = await writePersistentSessionArtifactFile({
+			...fileOptions,
+			store: options.persistentArtifactStore,
+		});
 		return { ...result, storageScope: "persistent-session" };
 	}
-	return { evictedArtifacts: [], path: await writeSecureTempFile(fileOptions), storageScope: "process-temp" };
+	return {
+		evictedArtifacts: [],
+		path: await writeSecureTempFile(fileOptions),
+		storageScope: "process-temp",
+	};
 }
 
 function buildSpillArtifactEntries(options: {
@@ -133,44 +173,116 @@ export async function renderAgentBrowserObservation(options: {
 	preserveContent?: boolean;
 	persistentArtifactStore?: PersistentSessionArtifactStore;
 	withArtifactWrite?: <T>(write: () => Promise<T>) => Promise<T>;
-}): Promise<{ content: ToolPresentation["content"]; artifactManifest?: SessionArtifactManifest; structuredContent: JsonValue }> {
+}): Promise<{
+	content: ToolPresentation["content"];
+	artifactManifest?: SessionArtifactManifest;
+	structuredContent: JsonValue;
+}> {
 	const observation = projectAgentBrowserObservation(options.details, options.succeeded);
 	let structuredContent: Record<string, unknown> = observation;
-	const images = options.content.filter(part => part.type === "image");
-	const prose = options.content.filter(part => part.type === "text").map(part => part.text).join("\n\n");
+	const images = options.content.filter((part) => part.type === "image");
+	const prose = options.content
+		.filter((part) => part.type === "text")
+		.map((part) => part.text)
+		.join("\n\n");
 	const { data: _data, error: _error, summary: _summary, ...metadata } = observation;
-	let text = options.json ? JSON.stringify(observation, null, 2) : `${prose}\n\nObservation: ${JSON.stringify(metadata)}`;
+	let text = options.json
+		? JSON.stringify(observation, null, 2)
+		: `${prose}\n\nObservation: ${JSON.stringify(metadata)}`;
 	let artifactManifest = options.details.artifactManifest as SessionArtifactManifest | undefined;
-	if (text.length > OBSERVATION_INLINE_MAX_CHARS || JSON.stringify(observation).length > OBSERVATION_INLINE_MAX_CHARS) {
+	if (
+		text.length > OBSERVATION_INLINE_MAX_CHARS ||
+		JSON.stringify(observation).length > OBSERVATION_INLINE_MAX_CHARS
+	) {
 		let spill: LargeOutputSpillWriteResult | undefined;
 		let spillError: string | undefined;
 		try {
-			const write = () => writeLargeOutputSpillFile({ data: { ...observation, ...(!options.json ? { text: prose } : {}) }, persistentArtifactStore: options.persistentArtifactStore, text });
+			const write = () =>
+				writeLargeOutputSpillFile({
+					data: { ...observation, ...(!options.json ? { text: prose } : {}) },
+					persistentArtifactStore: options.persistentArtifactStore,
+					text,
+				});
 			spill = await (options.withArtifactWrite ? options.withArtifactWrite(write) : write());
-			artifactManifest = applyArtifactManifest({ content: [], summary: "" }, artifactManifest, buildSpillArtifactEntries({
-				commandInfo: { command: typeof options.details.command === "string" ? options.details.command : undefined },
-				evictedArtifacts: spill.evictedArtifacts, path: spill.path, storageScope: spill.storageScope,
-			})).artifactManifest;
+			artifactManifest = applyArtifactManifest(
+				{ content: [], summary: "" },
+				artifactManifest,
+				buildSpillArtifactEntries({
+					commandInfo: {
+						command:
+							typeof options.details.command === "string" ? options.details.command : undefined,
+					},
+					evictedArtifacts: spill.evictedArtifacts,
+					path: spill.path,
+					storageScope: spill.storageScope,
+				}),
+			).artifactManifest;
 		} catch (error) {
 			spillError = error instanceof Error ? error.message : String(error);
 		}
 		const compact: Record<string, unknown> = {
-			success: options.succeeded, resultCategory: observation.resultCategory,
-			failureCategory: observation.failureCategory, successCategory: observation.successCategory,
-			summary: typeof observation.summary === "string" ? truncateText(observation.summary, 700)
-				: typeof observation.error === "string" ? truncateText(observation.error, 700) : undefined,
+			success: options.succeeded,
+			resultCategory: observation.resultCategory,
+			failureCategory: observation.failureCategory,
+			successCategory: observation.successCategory,
+			summary:
+				typeof observation.summary === "string"
+					? truncateText(observation.summary, 700)
+					: typeof observation.error === "string"
+						? truncateText(observation.error, 700)
+						: undefined,
 			compacted: true,
-			...(spill ? { observationPath: spill.path, retrieve: "Read observationPath for the complete redacted observation, including exact recovery actions and requested data." }
-				: { observationUnavailable: truncateText(redactModelFacingText(spillError ?? "Spill could not be written; request a smaller result."), 1_000) }),
+			...(spill
+				? {
+						observationPath: spill.path,
+						retrieve:
+							"Read observationPath for the complete redacted observation, including exact recovery actions and requested data.",
+					}
+				: {
+						observationUnavailable: truncateText(
+							redactModelFacingText(
+								spillError ?? "Spill could not be written; request a smaller result.",
+							),
+							1_000,
+						),
+					}),
 		};
-		for (const key of ["sessionName", "namespace", "codeRun", "error", "failures", "nextActions", "artifactVerification", "imageObservations", "data", "fullOutputPath", "fullOutputPaths"]) {
-			if (observation[key] !== undefined && JSON.stringify({ ...compact, [key]: observation[key] }, null, 2).length <= OBSERVATION_INLINE_MAX_CHARS - 500) compact[key] = observation[key];
+		for (const key of [
+			"sessionName",
+			"namespace",
+			"codeRun",
+			"error",
+			"failures",
+			"nextActions",
+			"artifactVerification",
+			"imageObservations",
+			"data",
+			"fullOutputPath",
+			"fullOutputPaths",
+		]) {
+			if (
+				observation[key] !== undefined &&
+				JSON.stringify({ ...compact, [key]: observation[key] }, null, 2).length <=
+					OBSERVATION_INLINE_MAX_CHARS - 500
+			) {
+				compact[key] = observation[key];
+			}
 		}
 		structuredContent = compact;
-		if (options.preserveContent) text = prose;
-		else { text = JSON.stringify(compact, null, 2); if (!options.json) text = `Browser observation compacted.\n${text}`; }
+		if (options.preserveContent) {
+			text = prose;
+		} else {
+			text = JSON.stringify(compact, null, 2);
+			if (!options.json) {
+				text = `Browser observation compacted.\n${text}`;
+			}
+		}
 	}
-	return { content: [{ type: "text", text }, ...images], artifactManifest, structuredContent: JSON.parse(JSON.stringify(structuredContent)) as JsonValue };
+	return {
+		content: [{ type: "text", text }, ...images],
+		artifactManifest,
+		structuredContent: JSON.parse(JSON.stringify(structuredContent)) as JsonValue,
+	};
 }
 
 export async function compactLargePresentationOutput(options: {

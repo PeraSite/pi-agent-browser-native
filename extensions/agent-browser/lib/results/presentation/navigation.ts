@@ -1,9 +1,18 @@
-import { isNavigationObservableCommandName, isOpenNavigationCommand, isPageChangeSummaryCommand } from "../../command-taxonomy.js";
+import {
+	isNavigationObservableCommandName,
+	isOpenNavigationCommand,
+	isPageChangeSummaryCommand,
+} from "../../command-taxonomy.js";
 import { isRecord } from "../../parsing.js";
 import type { CommandInfo } from "../../runtime.js";
 import { detectConfirmationRequired } from "../confirmation.js";
 import type { AgentBrowserPageChangeSummary, FileArtifactMetadata } from "../contracts.js";
-import { firstLine, omitUpstreamLifecycle, redactModelFacingText, stringifyModelFacing } from "./common.js";
+import {
+	firstLine,
+	omitUpstreamLifecycle,
+	redactModelFacingText,
+	stringifyModelFacing,
+} from "./common.js";
 
 const NAVIGATION_SUMMARY_FIELD = "navigationSummary";
 
@@ -23,15 +32,35 @@ const GET_RESULT_FIELDS: Record<string, string> = {
 	value: "value",
 };
 
-function getScalarExtractionResult(commandInfo: CommandInfo, data: Record<string, unknown>): string | undefined {
-	const fallbackField = commandInfo.command === "get" && commandInfo.subcommand ? GET_RESULT_FIELDS[commandInfo.subcommand] ?? "" : "";
-	const resultField = Object.hasOwn(data, "result") ? "result" : fallbackField.length > 0 && Object.hasOwn(data, fallbackField) ? fallbackField : undefined;
-	if (resultField === undefined) return undefined;
+function getScalarExtractionResult(
+	commandInfo: CommandInfo,
+	data: Record<string, unknown>,
+): string | undefined {
+	const fallbackField =
+		commandInfo.command === "get" && commandInfo.subcommand
+			? (GET_RESULT_FIELDS[commandInfo.subcommand] ?? "")
+			: "";
+	const resultField = Object.hasOwn(data, "result")
+		? "result"
+		: fallbackField.length > 0 && Object.hasOwn(data, fallbackField)
+			? fallbackField
+			: undefined;
+	if (resultField === undefined) {
+		return undefined;
+	}
 	const result = data[resultField];
-	if (typeof result === "string") return result.trim().length > 0 ? result : "(empty string)";
-	if (typeof result === "number" || typeof result === "boolean") return String(result);
-	if (result === null || result === undefined) return "null";
-	if (typeof result === "object") return JSON.stringify(result, null, 2);
+	if (typeof result === "string") {
+		return result.trim().length > 0 ? result : "(empty string)";
+	}
+	if (typeof result === "number" || typeof result === "boolean") {
+		return String(result);
+	}
+	if (result === null || result === undefined) {
+		return "null";
+	}
+	if (typeof result === "object") {
+		return JSON.stringify(result, null, 2);
+	}
 	return undefined;
 }
 
@@ -55,7 +84,10 @@ function formatGetSummaryLabel(subcommand: string | undefined): string {
 	return `${subcommand.slice(0, 1).toUpperCase()}${subcommand.slice(1)}`;
 }
 
-export function formatExtractionSummary(commandInfo: CommandInfo, data: Record<string, unknown>): string | undefined {
+export function formatExtractionSummary(
+	commandInfo: CommandInfo,
+	data: Record<string, unknown>,
+): string | undefined {
 	const scalarResult = getScalarExtractionResult(commandInfo, data);
 	if (!scalarResult) {
 		return undefined;
@@ -71,7 +103,10 @@ export function formatExtractionSummary(commandInfo: CommandInfo, data: Record<s
 	return undefined;
 }
 
-export function formatExtractionText(commandInfo: CommandInfo, data: Record<string, unknown>): string | undefined {
+export function formatExtractionText(
+	commandInfo: CommandInfo,
+	data: Record<string, unknown>,
+): string | undefined {
 	if (commandInfo.command !== "get" && commandInfo.command !== "eval") {
 		return undefined;
 	}
@@ -82,10 +117,15 @@ export function formatExtractionText(commandInfo: CommandInfo, data: Record<stri
 	const origin = getExtractionOrigin(data);
 	const safeScalarResult = redactModelFacingText(scalarResult);
 	const safeOrigin = origin ? redactModelFacingText(origin) : undefined;
-	return safeOrigin && safeOrigin !== safeScalarResult ? `${safeScalarResult}\n\nOrigin: ${safeOrigin}` : safeScalarResult;
+	return safeOrigin && safeOrigin !== safeScalarResult
+		? `${safeScalarResult}\n\nOrigin: ${safeOrigin}`
+		: safeScalarResult;
 }
 
-export function isNavigationObservableCommand(command: string | undefined, subcommand?: string): boolean {
+export function isNavigationObservableCommand(
+	command: string | undefined,
+	subcommand?: string,
+): boolean {
 	return isNavigationObservableCommandName(command, subcommand);
 }
 
@@ -98,25 +138,45 @@ export function getNavigationSummary(data: Record<string, unknown>): NavigationS
 	return isNavigationSummary(candidate) ? candidate : undefined;
 }
 
-function getTopLevelNavigationSummary(data: Record<string, unknown>): NavigationSummary | undefined {
+function getTopLevelNavigationSummary(
+	data: Record<string, unknown>,
+): NavigationSummary | undefined {
 	return isNavigationSummary(data)
 		? {
-			title: typeof data.title === "string" ? data.title : undefined,
-			url: typeof data.url === "string" ? data.url : undefined,
-		}
+				title: typeof data.title === "string" ? data.title : undefined,
+				url: typeof data.url === "string" ? data.url : undefined,
+			}
 		: undefined;
 }
 
-function getNormalizedNavigationSummary(summary: NavigationSummary | undefined): NavigationSummary | undefined {
-	const title = typeof summary?.title === "string" && summary.title.trim().length > 0 ? summary.title.trim() : undefined;
-	const url = typeof summary?.url === "string" && summary.url.trim().length > 0 ? summary.url.trim() : undefined;
-	return title || url ? { title, url, ...(typeof summary?.urlChanged === "boolean" ? { urlChanged: summary.urlChanged } : {}) } : undefined;
+function getNormalizedNavigationSummary(
+	summary: NavigationSummary | undefined,
+): NavigationSummary | undefined {
+	const title =
+		typeof summary?.title === "string" && summary.title.trim().length > 0
+			? summary.title.trim()
+			: undefined;
+	const url =
+		typeof summary?.url === "string" && summary.url.trim().length > 0
+			? summary.url.trim()
+			: undefined;
+	return title || url
+		? {
+				title,
+				url,
+				...(typeof summary?.urlChanged === "boolean" ? { urlChanged: summary.urlChanged } : {}),
+			}
+		: undefined;
 }
 
 export function formatNavigationSummary(summary: NavigationSummary): string | undefined {
 	const normalized = getNormalizedNavigationSummary(summary);
-	if (!normalized) return undefined;
-	if (normalized.title && normalized.url) return `${normalized.title}\n${normalized.url}`;
+	if (!normalized) {
+		return undefined;
+	}
+	if (normalized.title && normalized.url) {
+		return `${normalized.title}\n${normalized.url}`;
+	}
 	return normalized.title ?? normalized.url;
 }
 
@@ -131,26 +191,52 @@ export function buildPageChangeSummary(options: {
 	const { artifacts, commandInfo, data, nextActions, savedFilePath } = options;
 	const artifactCount = artifacts?.length ?? 0;
 	const navigation = isRecord(data)
-		? getNormalizedNavigationSummary(getNavigationSummary(data) ?? (isPageChangeSummaryCommand(commandInfo.command, commandInfo.subcommand) ? getTopLevelNavigationSummary(data) : undefined))
+		? getNormalizedNavigationSummary(
+				getNavigationSummary(data) ??
+					(isPageChangeSummaryCommand(commandInfo.command, commandInfo.subcommand)
+						? getTopLevelNavigationSummary(data)
+						: undefined),
+			)
 		: undefined;
 	const confirmationRequired = detectConfirmationRequired(data) !== undefined;
-	if (!navigation && !confirmationRequired && artifactCount === 0 && !savedFilePath && !isPageChangeSummaryCommand(commandInfo.command, commandInfo.subcommand)) {
+	if (
+		!navigation &&
+		!confirmationRequired &&
+		artifactCount === 0 &&
+		!savedFilePath &&
+		!isPageChangeSummaryCommand(commandInfo.command, commandInfo.subcommand)
+	) {
 		return undefined;
 	}
-	const navigationObserved = navigation && (navigation.urlChanged === true || isOpenNavigationCommand(commandInfo.command) || ["back", "forward", "pushstate", "reload"].includes(commandInfo.command ?? ""));
-	const changeType: AgentBrowserPageChangeSummary["changeType"] = savedFilePath || artifactCount > 0
-		? "artifact"
-		: navigationObserved
-			? "navigation"
-			: confirmationRequired
-				? "confirmation"
-				: "mutation";
+	const navigationObserved =
+		navigation &&
+		(navigation.urlChanged === true ||
+			isOpenNavigationCommand(commandInfo.command) ||
+			["back", "forward", "pushstate", "reload"].includes(commandInfo.command ?? ""));
+	const changeType: AgentBrowserPageChangeSummary["changeType"] =
+		savedFilePath || artifactCount > 0
+			? "artifact"
+			: navigationObserved
+				? "navigation"
+				: confirmationRequired
+					? "confirmation"
+					: "mutation";
 	const observed = changeType !== "mutation";
-	const parts = [commandInfo.command ?? "agent-browser", observed ? changeType : "action dispatched"];
-	if (navigation?.title) parts.push(navigation.title);
-	if (navigation?.url) parts.push(navigation.url);
-	if (savedFilePath) parts.push(savedFilePath);
-	else if (artifactCount > 0) parts.push(`${artifactCount} artifact${artifactCount === 1 ? "" : "s"}`);
+	const parts = [
+		commandInfo.command ?? "agent-browser",
+		observed ? changeType : "action dispatched",
+	];
+	if (navigation?.title) {
+		parts.push(navigation.title);
+	}
+	if (navigation?.url) {
+		parts.push(navigation.url);
+	}
+	if (savedFilePath) {
+		parts.push(savedFilePath);
+	} else if (artifactCount > 0) {
+		parts.push(`${artifactCount} artifact${artifactCount === 1 ? "" : "s"}`);
+	}
 	return {
 		...(artifactCount > 0 ? { artifactCount } : {}),
 		changeType,

@@ -3,23 +3,43 @@ import { basename, dirname, extname, join, resolve } from "node:path";
 
 import { foldAgentBrowserFilesystemIdentity } from "../../argv-grammar.js";
 import { parseWaitCommandTokens } from "../../argv-descriptor.js";
-import { getRecordCommandOperandIndices, getRecordCommandOperands } from "../../command-taxonomy.js";
+import {
+	getRecordCommandOperandIndices,
+	getRecordCommandOperands,
+} from "../../command-taxonomy.js";
 
 const SCREENSHOT_IMAGE_EXTENSIONS = [".jpeg", ".jpg", ".png", ".webp"];
 
 function isSingleScreenshotPathToken(token: string): boolean {
 	const explicitlyRelative = token.startsWith("./") || token.startsWith("../");
-	if (token.startsWith("#") || token.startsWith("@") || (token.startsWith(".") && !explicitlyRelative && !token.includes("/"))) return false;
-	return explicitlyRelative || token.includes("/") || SCREENSHOT_IMAGE_EXTENSIONS.some((extension) => token.endsWith(extension));
+	if (
+		token.startsWith("#") ||
+		token.startsWith("@") ||
+		(token.startsWith(".") && !explicitlyRelative && !token.includes("/"))
+	) {
+		return false;
+	}
+	return (
+		explicitlyRelative ||
+		token.includes("/") ||
+		SCREENSHOT_IMAGE_EXTENSIONS.some((extension) => token.endsWith(extension))
+	);
 }
 
 export function getScreenshotPositionalIndices(commandTokens: readonly string[]): number[] {
-	if (commandTokens[0] !== "screenshot") return [];
+	if (commandTokens[0] !== "screenshot") {
+		return [];
+	}
 	const positionalIndices: number[] = [];
 	for (let index = 1; index < commandTokens.length; index += 1) {
 		const token = commandTokens[index];
-		if (token === "--full" || token === "-f" || token === "--if-changed") continue;
-		if (token === "--threshold") { index += 1; continue; }
+		if (token === "--full" || token === "-f" || token === "--if-changed") {
+			continue;
+		}
+		if (token === "--threshold") {
+			index += 1;
+			continue;
+		}
 		positionalIndices.push(index);
 	}
 
@@ -28,8 +48,11 @@ export function getScreenshotPositionalIndices(commandTokens: readonly string[])
 
 export function getScreenshotPathTokenIndex(commandTokens: string[]): number | undefined {
 	const positionalIndices = getScreenshotPositionalIndices(commandTokens);
-	if (positionalIndices.length === 0) return undefined;
-	const candidateIndex = positionalIndices.length >= 2 ? positionalIndices[1] : positionalIndices[0];
+	if (positionalIndices.length === 0) {
+		return undefined;
+	}
+	const candidateIndex =
+		positionalIndices.length >= 2 ? positionalIndices[1] : positionalIndices[0];
 	const candidate = commandTokens[candidateIndex];
 	if (positionalIndices.length >= 2 || isSingleScreenshotPathToken(candidate)) {
 		return candidateIndex;
@@ -37,25 +60,54 @@ export function getScreenshotPathTokenIndex(commandTokens: string[]): number | u
 	return undefined;
 }
 
-const DIFF_SCREENSHOT_VALUE_FLAGS = new Set(["-b", "--baseline", "-o", "--output", "-s", "--selector", "-t", "--threshold"]);
+const DIFF_SCREENSHOT_VALUE_FLAGS = new Set([
+	"-b",
+	"--baseline",
+	"-o",
+	"--output",
+	"-s",
+	"--selector",
+	"-t",
+	"--threshold",
+]);
 
-export function getDiffFilePathIndices(commandTokens: string[]): { baseline?: number; output?: number } {
-	if (commandTokens[0] !== "diff" || !["snapshot", "screenshot"].includes(commandTokens[1])) return {};
-	const valueFlags = commandTokens[1] === "screenshot" ? DIFF_SCREENSHOT_VALUE_FLAGS : new Set(["-b", "--baseline", "-s", "--selector", "-d", "--depth"]);
+export function getDiffFilePathIndices(commandTokens: string[]): {
+	baseline?: number;
+	output?: number;
+} {
+	if (commandTokens[0] !== "diff" || !["snapshot", "screenshot"].includes(commandTokens[1])) {
+		return {};
+	}
+	const valueFlags =
+		commandTokens[1] === "screenshot"
+			? DIFF_SCREENSHOT_VALUE_FLAGS
+			: new Set(["-b", "--baseline", "-s", "--selector", "-d", "--depth"]);
 	const paths: { baseline?: number; output?: number } = {};
 	for (let index = 2; index < commandTokens.length; index += 1) {
 		const token = commandTokens[index];
-		if (!valueFlags.has(token)) continue;
+		if (!valueFlags.has(token)) {
+			continue;
+		}
 		const value = commandTokens[index + 1];
-		if (value === undefined) return {};
-		if (token === "-o" || token === "--output") paths.output = index + 1;
-		if (token === "-b" || token === "--baseline") paths.baseline = index + 1;
+		if (value === undefined) {
+			return {};
+		}
+		if (token === "-o" || token === "--output") {
+			paths.output = index + 1;
+		}
+		if (token === "-b" || token === "--baseline") {
+			paths.baseline = index + 1;
+		}
 		index += 1;
 	}
 	return paths;
 }
 
-function canonicalizeArtifactPath(absolutePath: string, platform: NodeJS.Platform, seenSymlinks: Set<string>): string {
+function canonicalizeArtifactPath(
+	absolutePath: string,
+	platform: NodeJS.Platform,
+	seenSymlinks: Set<string>,
+): string {
 	let cursor = absolutePath;
 	const suffix: string[] = [];
 	while (true) {
@@ -63,7 +115,9 @@ function canonicalizeArtifactPath(absolutePath: string, platform: NodeJS.Platfor
 			const canonicalPath = join(realpathSync.native(cursor), ...suffix);
 			try {
 				const stats = statSync(canonicalPath, { bigint: true });
-				if (stats.ino > 0n) return `inode:${stats.dev}:${stats.ino}`;
+				if (stats.ino > 0n) {
+					return `inode:${stats.dev}:${stats.ino}`;
+				}
 			} catch {
 				// The destination does not exist yet; canonical ancestry still catches aliases.
 			}
@@ -71,29 +125,48 @@ function canonicalizeArtifactPath(absolutePath: string, platform: NodeJS.Platfor
 		} catch {
 			let symlinkTarget: string | undefined;
 			try {
-				if (lstatSync(cursor).isSymbolicLink()) symlinkTarget = resolve(dirname(cursor), readlinkSync(cursor));
+				if (lstatSync(cursor).isSymbolicLink()) {
+					symlinkTarget = resolve(dirname(cursor), readlinkSync(cursor));
+				}
 			} catch {}
 			if (symlinkTarget) {
-				if (seenSymlinks.has(cursor)) throw new Error(`Artifact destination contains a symlink loop: ${absolutePath}`);
-				if (seenSymlinks.size >= 32) throw new Error(`Artifact destination has too many symlink hops: ${absolutePath}`);
+				if (seenSymlinks.has(cursor)) {
+					throw new Error(`Artifact destination contains a symlink loop: ${absolutePath}`);
+				}
+				if (seenSymlinks.size >= 32) {
+					throw new Error(`Artifact destination has too many symlink hops: ${absolutePath}`);
+				}
 				seenSymlinks.add(cursor);
 				return canonicalizeArtifactPath(join(symlinkTarget, ...suffix), platform, seenSymlinks);
 			}
 			const parent = dirname(cursor);
-			if (parent === cursor) return foldAgentBrowserFilesystemIdentity(absolutePath, platform);
+			if (parent === cursor) {
+				return foldAgentBrowserFilesystemIdentity(absolutePath, platform);
+			}
 			suffix.unshift(basename(cursor));
 			cursor = parent;
 		}
 	}
 }
 
-export function canonicalizeExplicitArtifactDestination(cwd: string, destination: string, platform: NodeJS.Platform = process.platform): string {
+export function canonicalizeExplicitArtifactDestination(
+	cwd: string,
+	destination: string,
+	platform: NodeJS.Platform = process.platform,
+): string {
 	return canonicalizeArtifactPath(resolve(cwd, destination), platform, new Set());
 }
 
 export function getRecordContactSheetDestination(commandTokens: string[]): string | undefined {
 	const path = getRecordCommandOperands(commandTokens).path;
-	if (!path || !commandTokens.some((token) => token === "--contact-sheet" || token === "--contact-sheet-threshold")) return undefined;
+	if (
+		!path ||
+		!commandTokens.some(
+			(token) => token === "--contact-sheet" || token === "--contact-sheet-threshold",
+		)
+	) {
+		return undefined;
+	}
 	const extension = extname(path);
 	return extension ? `${path.slice(0, -extension.length)}.contact-sheet.png` : undefined;
 }
@@ -101,15 +174,33 @@ export function getRecordContactSheetDestination(commandTokens: string[]): strin
 export function getExplicitArtifactDestinationIndex(commandTokens: string[]): number | undefined {
 	const command = commandTokens[0];
 	const subcommand = commandTokens[1];
-	if (command === "screenshot") return getScreenshotPathTokenIndex(commandTokens);
-	if (command === "download") return 2;
-	if (command === "pdf") return 1;
-	if (command === "wait") return parseWaitCommandTokens(commandTokens).downloadPathIndex;
-	if (command === "state" && subcommand === "save") return 2;
-	if (command === "diff" && subcommand === "screenshot") return getDiffFilePathIndices(commandTokens).output;
-	if (command === "network" && subcommand === "har" && commandTokens[2] === "stop") return 3;
-	if ((command === "trace" || command === "profiler") && subcommand === "stop") return 2;
-	if (command === "record") return getRecordCommandOperandIndices(commandTokens)[0];
+	if (command === "screenshot") {
+		return getScreenshotPathTokenIndex(commandTokens);
+	}
+	if (command === "download") {
+		return 2;
+	}
+	if (command === "pdf") {
+		return 1;
+	}
+	if (command === "wait") {
+		return parseWaitCommandTokens(commandTokens).downloadPathIndex;
+	}
+	if (command === "state" && subcommand === "save") {
+		return 2;
+	}
+	if (command === "diff" && subcommand === "screenshot") {
+		return getDiffFilePathIndices(commandTokens).output;
+	}
+	if (command === "network" && subcommand === "har" && commandTokens[2] === "stop") {
+		return 3;
+	}
+	if ((command === "trace" || command === "profiler") && subcommand === "stop") {
+		return 2;
+	}
+	if (command === "record") {
+		return getRecordCommandOperandIndices(commandTokens)[0];
+	}
 	return undefined;
 }
 

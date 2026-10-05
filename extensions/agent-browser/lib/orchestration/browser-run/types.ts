@@ -2,16 +2,50 @@ import type { ChildProcess } from "node:child_process";
 
 import type { AgentToolResult } from "@earendil-works/pi-coding-agent";
 import type { ElectronCleanupResult, ElectronLaunchStatus } from "../../electron/cleanup.js";
-import type { ElectronCdpTarget, ElectronLaunchRecord, ElectronLaunchSuccess } from "../../electron/launch.js";
-import type { AgentBrowserNetworkSourceLookupAnalysis, AgentBrowserQaPresetAnalysis, AgentBrowserSourceLookupAnalysis, CompiledAgentBrowserElectron, CompiledAgentBrowserJob, CompiledAgentBrowserNetworkSourceLookup, CompiledAgentBrowserQaPreset, CompiledAgentBrowserSemanticAction, CompiledAgentBrowserSourceLookup } from "../../input-modes/types.js";
+import type {
+	ElectronCdpTarget,
+	ElectronLaunchRecord,
+	ElectronLaunchSuccess,
+} from "../../electron/launch.js";
+import type {
+	AgentBrowserNetworkSourceLookupAnalysis,
+	AgentBrowserQaPresetAnalysis,
+	AgentBrowserSourceLookupAnalysis,
+	CompiledAgentBrowserElectron,
+	CompiledAgentBrowserJob,
+	CompiledAgentBrowserNetworkSourceLookup,
+	CompiledAgentBrowserQaPreset,
+	CompiledAgentBrowserSemanticAction,
+	CompiledAgentBrowserSourceLookup,
+} from "../../input-modes/types.js";
 import type { runAgentBrowserProcess } from "../../process.js";
-import type { AgentBrowserEnvelope, AgentBrowserNextAction, NetworkRouteRecord, SessionArtifactManifest } from "../../results/contracts.js";
+import type {
+	AgentBrowserEnvelope,
+	AgentBrowserNextAction,
+	NetworkRouteRecord,
+	SessionArtifactManifest,
+} from "../../results/contracts.js";
 import type { buildAgentBrowserResultCategoryDetails } from "../../results/categories.js";
 import type { buildToolPresentation } from "../../results/presentation.js";
-import type { RichInputRecoveryDiagnostic, VisibleRefFallbackDiagnostic } from "../../results/selector-recovery.js";
-import type { SessionPageState, SessionRefSnapshot, SessionRefSnapshotInvalidation, SessionTabTarget } from "../../session-page-state.js";
-import type { buildExecutionPlan, CompatibilityWorkaround, OpenResultTabCorrection } from "../../runtime.js";
-import type { ManagedSessionRestoreState, OwnedManagedSessionContext } from "../../managed-session-restore.js";
+import type {
+	RichInputRecoveryDiagnostic,
+	VisibleRefFallbackDiagnostic,
+} from "../../results/selector-recovery.js";
+import type {
+	SessionPageState,
+	SessionRefSnapshot,
+	SessionRefSnapshotInvalidation,
+	SessionTabTarget,
+} from "../../session-page-state.js";
+import type {
+	buildExecutionPlan,
+	CompatibilityWorkaround,
+	OpenResultTabCorrection,
+} from "../../runtime.js";
+import type {
+	ManagedSessionRestoreState,
+	OwnedManagedSessionContext,
+} from "../../managed-session-restore.js";
 import type { ManagedSessionPolicyLock } from "../../managed-session-policy-lock.js";
 import type { PromptPolicy } from "../../prompt-policy.js";
 import type { ActiveRecordingReservation } from "../../recording-reservations.js";
@@ -22,7 +56,9 @@ export type AgentBrowserToolResult = AgentToolResult<unknown> & { isError?: bool
 export type AgentBrowserProcessResult = Awaited<ReturnType<typeof runAgentBrowserProcess>>;
 export type AgentBrowserExecutionPlan = ReturnType<typeof buildExecutionPlan>;
 export type AgentBrowserToolPresentation = Awaited<ReturnType<typeof buildToolPresentation>>;
-export type AgentBrowserResultCategoryDetails = ReturnType<typeof buildAgentBrowserResultCategoryDetails>;
+export type AgentBrowserResultCategoryDetails = ReturnType<
+	typeof buildAgentBrowserResultCategoryDetails
+>;
 
 export type TraceOwner = "profiler" | "trace";
 export type { BatchCommandStep } from "../batch-stdin.js";
@@ -152,19 +188,19 @@ export interface OverlayBlockerDiagnostic {
 
 export type ClickDispatchProbeTarget =
 	| {
-		kind: "selector";
-		selector: string;
-	}
+			kind: "selector";
+			selector: string;
+	  }
 	| {
-		kind: "xpath";
-		selector: string;
-	}
+			kind: "xpath";
+			selector: string;
+	  }
 	| {
-		kind: "accessible";
-		name: string;
-		refId: string;
-		role: string;
-	};
+			kind: "accessible";
+			name: string;
+			refId: string;
+			role: string;
+	  };
 
 export interface ClickDispatchProbe {
 	cleaned?: boolean;
@@ -399,7 +435,10 @@ export interface ElectronSessionMismatch {
 	summary: string;
 }
 
-export type ElectronPostCommandHealthReason = "about-blank-no-live-target" | "debug-port-dead" | "process-dead";
+export type ElectronPostCommandHealthReason =
+	| "about-blank-no-live-target"
+	| "debug-port-dead"
+	| "process-dead";
 
 export interface ElectronPostCommandHealthDiagnostic {
 	appName: string;
@@ -470,7 +509,9 @@ export interface PreparedBrowserRun {
 	redactedCompiledSourceLookup?: CompiledAgentBrowserSourceLookup;
 	redactedEffectiveArgs: string[];
 	redactedProcessArgs: string[];
-	redactedRecoveryHint?: ReturnType<typeof import("../../runtime.js").buildExecutionPlan>["recoveryHint"];
+	redactedRecoveryHint?: ReturnType<
+		typeof import("../../runtime.js").buildExecutionPlan
+	>["recoveryHint"];
 	resolvedSemanticActionRefSnapshot?: SessionRefSnapshot;
 	runtimeToolArgs: string[];
 	runtimeToolStdin?: string;

@@ -1,6 +1,7 @@
 # Agent Browser command reference
 
 Related docs:
+
 - [`../README.md`](../README.md)
 - [`TOOL_CONTRACT.md`](TOOL_CONTRACT.md)
 - [`ARCHITECTURE.md`](ARCHITECTURE.md)
@@ -26,6 +27,7 @@ SDK hosts can supply an awaited [`beforeExecute` callback](TOOL_CONTRACT.md#host
 
 <!-- agent-browser-capability-baseline:start upstream-baseline -->
 <!-- Generated from scripts/agent-browser-capability-baseline.mjs. Run `npm run docs -- command-reference write` to update. Do not edit manually. -->
+
 This reference is baselined to the locally installed `agent-browser 0.38.1` command/help surface, audited against vercel-labs/agent-browser@aff6125c023b810ea3f2e5deec5379e9a4270bdc. Upstream `agent-browser` remains the source of truth for command semantics; this file is the local fallback for Pi agent sessions where direct binary help is blocked or discouraged.
 
 The lightweight drift check is `npm run verify -- command-reference`. Run it whenever the installed upstream `agent-browser` version changes or this reference is edited.
@@ -214,7 +216,7 @@ Call `agent_browser_code` with `{ code, session?, namespace?, timeoutMs?, output
 
 ```json
 {
-  "code": "const titles = []; for (const url of ['https://example.com', 'https://example.org']) { const opened = await browser({ args: ['open', url] }); if (!opened.success) throw new Error(opened.error); const title = await browser({ args: ['get', 'title'] }); if (!title.success) throw new Error(title.error); titles.push({ url, title: title.data.title ?? title.data.result }); } emit(titles);"
+	"code": "const titles = []; for (const url of ['https://example.com', 'https://example.org']) { const opened = await browser({ args: ['open', url] }); if (!opened.success) throw new Error(opened.error); const title = await browser({ args: ['get', 'title'] }); if (!title.success) throw new Error(title.error); titles.push({ url, title: title.data.title ?? title.data.result }); } emit(titles);"
 }
 ```
 
@@ -236,13 +238,13 @@ On hosts supporting instruction groups, first enable `browser` with `discover_to
 
 Activation is additive and uses native Pi selected-tool history. Omit CLI `--tools` for normal lazy activation, or include desired advanced tools in that explicit selection; excluded tools remain unavailable. The tools take flat input:
 
-| Tool | Example |
-| --- | --- |
-| `agent_browser_action` | `{ "action": "select", "locator": "role", "role": "combobox", "name": "Flavor", "value": "chocolate" }` |
-| `agent_browser_qa` | `{ "url": "https://example.com", "expectedText": "Learn more" }` |
-| `agent_browser_electron` | `{ "action": "list", "query": "code" }` |
-| `agent_browser_source` | `{ "selector": "#save", "componentName": "SaveButton" }` |
-| `agent_browser_network_source` | `{ "requestId": "req-1", "url": "/api/fail" }` |
+| Tool                           | Example                                                                                                 |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------- |
+| `agent_browser_action`         | `{ "action": "select", "locator": "role", "role": "combobox", "name": "Flavor", "value": "chocolate" }` |
+| `agent_browser_qa`             | `{ "url": "https://example.com", "expectedText": "Learn more" }`                                        |
+| `agent_browser_electron`       | `{ "action": "list", "query": "code" }`                                                                 |
+| `agent_browser_source`         | `{ "selector": "#save", "componentName": "SaveButton" }`                                                |
+| `agent_browser_network_source` | `{ "requestId": "req-1", "url": "/api/fail" }`                                                          |
 
 Native commands remain in `agent_browser`; advanced objects are neither nested batch rows nor nested fields on that tool. If a recovery action names an inactive advanced tool, enable it before calling its exact flat payload.
 
@@ -368,7 +370,10 @@ Use `read [url]` for documentation and other unstructured text. `read <url> --ra
 When you already know several visible refs or selectors, extract them in one `batch` call instead of many serial getter calls. When a prior snapshot and session are available and the same-page freshness checks apply, ref-consuming calls add one extra `snapshot -i` preflight per top-level call or batch. Batching shares that probe across rows; it does not remove it:
 
 ```json
-{ "args": ["batch"], "stdin": "[[\"get\",\"text\",\"@e64\"],[\"get\",\"text\",\"@e65\"],[\"get\",\"text\",\"@e66\"]]" }
+{
+	"args": ["batch"],
+	"stdin": "[[\"get\",\"text\",\"@e64\"],[\"get\",\"text\",\"@e65\"],[\"get\",\"text\",\"@e66\"]]"
+}
 ```
 
 Prefer `get` and scoped `eval --stdin` for read-only extraction. Getter names are grouped under `get`: use `get title`, `get url`, or `get text <selector>`, not shortcut commands such as `title` or `url`. When upstream reports an unknown command, unknown subcommand, or unrecognized command for a single-token shortcut (`attr`, `count`, `html`, `text`, `title`, `url`, or `value`), the wrapper adds a visible grouped-`get` hint; only `title` and `url` also get exact read-only `details.nextActions` (`use-get-title` / `use-get-url`, with `--session` preserved when the failed call named a session). If another `Agent-browser hint:` (selector dialect or stale-ref recovery) was already appended to the same error text, the getter hint is omitted.
@@ -389,15 +394,18 @@ For fixed flows, keep native batch rows short around navigation and rerender bou
 
 ```json
 {
-  "args": ["batch", "--bail"],
-  "stdin": "[[\"open\",\"https://shop.example/checkout\"],[\"fill\",\"#email\",\"user@example.com\"],[\"click\",\"#continue\"],[\"wait\",\"--url\",\"**/shipping\"],[\"wait\",\"--text\",\"Shipping address\"],[\"screenshot\",\"/tmp/shipping.png\"]]"
+	"args": ["batch", "--bail"],
+	"stdin": "[[\"open\",\"https://shop.example/checkout\"],[\"fill\",\"#email\",\"user@example.com\"],[\"click\",\"#continue\"],[\"wait\",\"--url\",\"**/shipping\"],[\"wait\",\"--text\",\"Shipping address\"],[\"screenshot\",\"/tmp/shipping.png\"]]"
 }
 ```
 
 Paced input uses explicit native rows, preserving the former job's behavior without assuming `--delay` equivalence:
 
 ```json
-{ "args": ["batch", "--bail"], "stdin": "[[\"focus\",\"#prompt\"],[\"keyboard\",\"type\",\"h\"],[\"wait\",\"20\"],[\"keyboard\",\"type\",\"i\"]]" }
+{
+	"args": ["batch", "--bail"],
+	"stdin": "[[\"focus\",\"#prompt\"],[\"keyboard\",\"type\",\"h\"],[\"wait\",\"20\"],[\"keyboard\",\"type\",\"i\"]]"
+}
 ```
 
 For longer text, code can construct the rows and call native batch; keep the former 200-character pacing bound when porting a job. Add a final `press` only when submission is intended. Fixed waits are not postconditions. Timeout partial progress remains available through the same batch path. See [all job step equivalents](TOOL_CONTRACT.md#07-migration).
@@ -409,7 +417,11 @@ For failed QA, inspect `details.qaPreset.failedChecks` separately from `notRunCh
 The same classification drives plain `network requests` presentation: when any row counts as failed (HTTP status ≥ 400, `failed: true`, or a string `error`), model-facing text starts with a line like `Network failure summary: 0 actionable, 1 benign low-impact (1 total).`, and each preview line can end with an impact tag such as `[benign: low-impact browser icon asset]` or `[actionable: document, script, API, or non-benign request failure]`. When safe request IDs are present, `details.nextActions` adds bounded read-only follow-ups such as `network request <id>`, `agent_browser_network_source` for actionable failed rows, `network requests --filter <path>`, `network requests --clear` before a repro, and `network har start`; prefer those payloads over rebuilding request-id commands from prose. For aggregate buffers, the wrapper accepts `network requests --current-page` / `--current-origin` to render only rows matching the active page origin, or `--current-url` for exact active document URL matching; it strips those wrapper-only flags before upstream spawn and reports counts in `details.networkRequestsPageFilter`. Filtered data receives the same credential redaction as ordinary network diagnostics before entering `details.data` or an `outputPath` export. If the wrapper has seen a prior `network route` in the same session, matching failed, pending, or CORS-looking fetch/XHR rows add `details.networkRouteDiagnostics` plus executable route-mock follow-ups (`inspect-routed-network-request` and `start-network-har-capture-for-route-mock`) so agents do not mistake an unfulfilled mock for a fulfilled mock; same-origin/CORS fixture retry guidance stays in visible prose. `network requests` also hides `data:image` screenshot/artifact noise from the compact preview by default while preserving raw rows in `details.data.requests`. Rules live in `classifyNetworkRequestFailure` / `summarizeNetworkFailures` in `extensions/agent-browser/lib/results/network.ts`; QA aggregation is `analyzeQaPresetResults` in `extensions/agent-browser/lib/input-modes/job.ts`.
 
 ```json
-{ "url": "https://example.com", "expectedText": "Learn more", "screenshotPath": ".dogfood/qa-example.png" }
+{
+	"url": "https://example.com",
+	"expectedText": "Learn more",
+	"screenshotPath": ".dogfood/qa-example.png"
+}
 ```
 
 Optional `loadState`, `checkNetwork`, `checkConsole`, and `checkErrors` default to `"domcontentloaded"`, `true`, `true`, and `true` for URL-opening QA; set a check to `false` to skip that diagnostic. For `qa.attached`, the diagnostic checks default to `false` because upstream buffers may predate the current check; opt in with `checkNetwork`, `checkConsole`, or `checkErrors` when preserved-buffer failures are desired. Omit `expectedText` and `expectedSelector` when you only need load plus diagnostics.
@@ -497,7 +509,10 @@ Use `wait --download [path]` after an earlier action has already started a brows
 For one-call flows, put the click and wait in `batch`; the wait step keeps the saved-file metadata in `details.batchSteps[n].savedFilePath` and `details.batchSteps[n].savedFile`:
 
 ```json
-{ "args": ["batch"], "stdin": "[[\"click\",\"@e5\"],[\"wait\",\"--download\",\"/tmp/report.csv\"]]" }
+{
+	"args": ["batch"],
+	"stdin": "[[\"click\",\"@e5\"],[\"wait\",\"--download\",\"/tmp/report.csv\"]]"
+}
 ```
 
 A successful wait-based download renders a readable summary such as `Download completed: /tmp/report.csv` and exposes top-level `details.savedFilePath` plus `details.savedFile` for non-batch calls. With current upstream `agent-browser`, `wait --download <path>` may report the requested path before this environment can verify that the file was persisted there. Treat `details.savedFilePath` as upstream-reported metadata unless `details.artifacts[].exists` is true. Upstream tracking: [vercel-labs/agent-browser#1300](https://github.com/vercel-labs/agent-browser/issues/1300).
@@ -521,6 +536,7 @@ Screenshot `imageObservations` includes verified pixel dimensions and capture ki
 For evidence-only screenshots, QA captures, or audit artifacts, save to an explicit path and branch on `details.artifactVerification` plus `details.artifacts` before reporting PASS/FAIL. Inline image attachments are optional convenience when size limits allow; do not require vision review unless the user asked for visual inspection.
 
 Wrapper result rendering is metadata-first for saved files. Image MIME types come from a bounded header read for PNG, JPEG, GIF and WebP, never from a filename suffix; missing, unreadable, unknown or truncated headers omit `mediaType`. This identifies a format, not full image validity. Inline screenshots use the same byte check and existing size limit, so a PNG saved as `.webm` still attaches as `image/png`; other artifact kinds are not auto-inlined. An artifact-producing command fails as `artifact-missing` with artifact `status: "stale"` when the reported path's `mtimeMs` falls outside the command's bounded start/end window (with two seconds of filesystem precision tolerance), including a previous recording that `record restart` claims to finalize; clearly old or future-dated evidence is never accepted as a fresh capture. A batch, whether supplied through stdin arrays or argument command strings, must use distinct explicit artifact destinations; preflight canonicalizes existing path ancestry, compares existing file identities to catch hardlinks, and applies full Unicode plus platform case folding on macOS/Windows so aliases cannot satisfy another step's verification. The same preflight prevents `outputPath` from aliasing a same-call browser artifact, follows upstream's forward option consumption and final effective `-o` / `--output` for `diff screenshot`, and treats the optional path on `network har stop` as an artifact destination; upstream ignores positional paths on `network har start`. Outer CLI artifact parsing removes upstream global flags, so direct forms such as `record --json start <path>` and `pdf --quiet <path>` retain their native destinations. Native batch rows do not run that cleanup: `pdf --quick ignored.pdf` writes to the literal path `--quick`, and `download #link --quiet ignored.bin` writes to `--quiet`. Preflight, directory preparation, presentation, and timeout evidence use those same operands, not the ignored trailing tokens. Screenshot destination parsing mirrors upstream's exact flag matching and `[selector] [path]` positional order: `--` is positional, `true` / `false` after screenshot-only `--full` / `-f` remain positional, extra positionals are ignored after the path slot, selector-prefixed (`.`, `#`, `@`) or uppercase-extension single arguments remain selectors, and lowercase image extensions or slash-bearing arguments are paths. The wrapper deliberately keeps its existing slash-bearing hidden-workspace path normalization (for example `.dogfood/run/foo.png`) before launch. `wait --download` is observational and may verify a download that completed just before the wait began, so it is exempt from the command-window mtime gate; an explicit wait destination, in long `--download <path>` or short `-d <path>` form (including `wait --download --timeout 30000 capture.csv`), still participates in active-recording reservation preflight; the path is the next retained operand after the first timeout pair is removed; unsupported `--download=<path>` fails with split-argument guidance:
+
 - screenshots return a saved-path summary, visible artifact metadata, structured `details.artifacts` metadata, and an inline image attachment when safe; the visible block includes artifact type, requested path, absolute path, existence, size, cwd, session, and repair/copy status when applicable
 - downloads, PDFs, `wait --download` files, `state save` state files, diff screenshot output images, traces, CPU profiles, completed video recordings from `record stop`, and path-bearing HAR captures return concise saved-path summaries plus structured `details.artifacts` metadata without inlining large files
 - `record start <path>` and `record restart <path>` report `successCategory: "artifact-pending"` and that output will be written on `record stop`; dispatched `record start` and URL-bearing `record restart` attempts append one `Page state:` warning on success or failure, describing conservative ref invalidation rather than an observed page change; explicit `--json` puts that warning in `warnings`. Only reached batch rows qualify, not preflight failures, missing binaries, help calls or unconfirmed planned rows — the wrapper invalidates the session’s prior ref snapshot (direct calls and batch steps alike, and even when the start fails with `Recording already active`, to protect older supported natives that can swap the page before that check), so old `@e…` refs fail as `stale-ref` until a fresh `snapshot -i` succeeds; `record restart <path> <url>` navigates the current page and invalidates refs the same way, while a restart without a URL, including FPS-only options, keeps the current page and refs; `details.artifacts` / `details.artifactVerification` mark that future file as `pending` with `recordingState: "openRecording"` and `willExistOnStop: true`, and `details.nextActions` includes exact `stop-pending-recording` args. When `record restart` returns a native `previousRecording`, that receipt's outcome and capture window control the previous artifact's verification; without that receipt, only an acknowledged native `restarted: true` retires the previous take, whose file remains unverified, not saved; rejected or pending restarts keep the active take's reservation and stop action; a missing or stale prior file fails as `artifact-missing` while the new recording remains visible as pending and the prior manifest row is retired. Within one Pi extension process, an unbounded transcript-backed index reserves active recording destinations independently of the bounded artifact manifest. Artifact lifecycle calls and result `outputPath` writes serialize around that global check; reservations use canonical namespace/session identity, survive manifest eviction and branch replay, and retire after direct, ordered nested-batch, fresh-replacement, code, Electron, or shutdown close; the newest pending row per identity is authoritative. Legacy batch replay retires a pending manifest only when the ordered close lifecycle leaves recording closed; a later successful browser reactivation plus `record start` keeps the new pending reservation. Lexical, hardlink, existing/dangling symlink, full Unicode-fold, and macOS/Windows case aliases are rejected, so `record restart` must use a distinct new path. Do not place `record start` or `record restart` after `close` / `quit` / `exit` in one batch: wrapper preflight rejects it because upstream can report success without starting a recording; split the close and recording into separate calls. A `No recording in progress` stop failure checks the matching native receipt once and preserves checked file metadata instead of assuming the path is missing; a later successful batch recording row opens its new pending path normally. Recovery offers an exact status query, and a stop only when the matching take is still current and pending. The target remains unverified until recording stops. Native 0.37 checks `ffmpeg` before starting; older supported natives may defer failure. If a successful start/restart reports pending output without `ffmpeg`, the wrapper appends `Recording dependency warning: ffmpeg not found on PATH` and `details.recordingDependencyWarning`; stop, check the result, then install the dependency before starting a new recording.
@@ -563,15 +579,20 @@ Oversized snapshots and oversized generic outputs are different: when a persiste
 
 ```json
 {
-  "args": ["--profile", "Profile 1", "open", "https://mail.google.com"],
-  "sessionMode": "fresh"
+	"args": ["--profile", "Profile 1", "open", "https://mail.google.com"],
+	"sessionMode": "fresh"
 }
 ```
 
 ```json
 {
-  "args": ["--executable-path", "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser", "open", "https://mail.google.com"],
-  "sessionMode": "fresh"
+	"args": [
+		"--executable-path",
+		"/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",
+		"open",
+		"https://mail.google.com"
+	],
+	"sessionMode": "fresh"
 }
 ```
 
@@ -646,58 +667,58 @@ Native-tool note: upstream skills are written for the standalone `agent-browser`
 
 Session note: `skills list`, `skills get …`, and `skills path …` are **stateless** in this wrapper. Even with default `sessionMode: "auto"`, the extension does not prepend the implicit managed `--session` for those commands, so reading bundled skills does not attach to or rotate the active browser session (same intent as plain-text `--help` / `--version` inspection). Other `skills` subcommands follow normal session rules until explicitly allowlisted in `extensions/agent-browser/lib/runtime.ts` alongside regression coverage in `test/agent-browser.runtime.test.ts`.
 
-| Command | Purpose |
-| --- | --- |
-| `skills list` | List available CLI-bundled skills. |
-| `skills get core` | Print the core usage guide. |
-| `skills get core --full` | Print the full version-matched core command reference and templates. |
-| `skills get <name>` | Load a specialized skill such as `electron` or `slack`. Common specialized calls include `skills get electron`, `skills get slack`, `skills get dogfood`, `skills get vercel-sandbox`, `skills get agentcore`, `skills get derive-client` (HAR-to-API-client workflow), and `skills get webmcp-gen` (create and validate page tools). |
-| `skills get <name> --full` | Include a skill's supplementary references/templates when present. |
-| `skills get --all` | Print all visible bundled skills for broad audit/debug work. |
-| `skills path [name]` | Print a skill directory path. |
+| Command                    | Purpose                                                                                                                                                                                                                                                                                                                               |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `skills list`              | List available CLI-bundled skills.                                                                                                                                                                                                                                                                                                    |
+| `skills get core`          | Print the core usage guide.                                                                                                                                                                                                                                                                                                           |
+| `skills get core --full`   | Print the full version-matched core command reference and templates.                                                                                                                                                                                                                                                                  |
+| `skills get <name>`        | Load a specialized skill such as `electron` or `slack`. Common specialized calls include `skills get electron`, `skills get slack`, `skills get dogfood`, `skills get vercel-sandbox`, `skills get agentcore`, `skills get derive-client` (HAR-to-API-client workflow), and `skills get webmcp-gen` (create and validate page tools). |
+| `skills get <name> --full` | Include a skill's supplementary references/templates when present.                                                                                                                                                                                                                                                                    |
+| `skills get --all`         | Print all visible bundled skills for broad audit/debug work.                                                                                                                                                                                                                                                                          |
+| `skills path [name]`       | Print a skill directory path.                                                                                                                                                                                                                                                                                                         |
 
 Skill-source debugging note: upstream honors `AGENT_BROWSER_SKILLS_DIR` as an override for bundled skill discovery. Normal agents should not need it, but it is useful when validating package layout or upstream skill packaging.
 
 ### Core page and element commands
 
-| Command | Purpose |
-| --- | --- |
-| `open [url]` | Navigate when given a URL. URL-less `open` runs native `get url`, launching if needed and otherwise retaining the current page. Use explicit `about:blank` when navigation to blank is intended. |
-| `open <url>` | Navigate to a URL; `goto <url>` and `navigate <url>` are equivalent navigation aliases when a URL is present. |
-| `read [url]` | Fetch agent-readable text from an explicit URL without requiring a Chrome page, or omit the URL to read rendered active-tab DOM. Supports `--raw`, `--require-md`, `--llms <index|full>`, `--outline`, `--filter <text>`, and `--timeout <ms>`. |
-| `click <sel>` | Click an element or `@ref`. |
-| `click <sel> --new-tab` | Click a link/control while requesting a new tab. |
-| `dblclick <sel>` | Double-click an element. |
-| `type <sel> <text>` | Type into an element; both selector and text are required. For the focused element without a selector, use `keyboard type <text>`. |
-| `fill <sel> <text>` | Clear and fill an element. |
-| `press <key>` | Press a key such as `Enter`, `Tab`, or `Control+a`. `key <key>` is the upstream alias. |
-| `key <key>` | Alias for `press <key>`. |
-| `keydown <key>` | Hold a key down without releasing it, useful for modifiers. |
-| `keyup <key>` | Release a key previously held by `keydown <key>`. Common modifier examples are `keydown Shift` and `keyup Shift`. |
-| `keyboard type <text>` | Type text with real keystrokes and no selector. |
-| `keyboard inserttext <text>` | Insert text without key events. |
-| `hover <sel>` | Hover an element. |
-| `focus <sel>` | Focus an element. |
-| `check <sel>` | Check a checkbox. |
-| `uncheck <sel>` | Uncheck a checkbox. |
-| `select <sel> <val...>` | Select one or more dropdown options. |
-| `drag <src> <dst>` | Drag and drop. |
-| `upload <sel> <files...>` | Upload one or more files. |
-| `download <sel> <path>` | Download a file by clicking an element. |
-| `scroll <dir> [px]` | Scroll `up`, `down`, `left`, or `right`. |
-| `scroll <dir> [px] --selector <sel>` | Scroll a specific scrollable element/container instead of the page. |
-| `scrollintoview <sel>` | Scroll an element into view; `scrollinto <sel>` is the upstream alias. |
-| `scrollinto <sel>` | Alias for `scrollintoview <sel>`. |
-| `wait <sel|ms>` | Wait for an element or a duration. |
-| `screenshot [selector] [path]` | Take a full-page or element-scoped screenshot; a single selector-like argument scopes, while a path-like argument saves to that path. |
-| `screenshot [path]` | Take a screenshot and optionally save it to a path. |
-| `pdf <path>` | Save the page as a PDF. |
-| `snapshot` | Print an accessibility tree with refs for AI interaction. Common options include `snapshot --interactive`, `snapshot --urls`, `snapshot --compact`, `snapshot --depth <n>`, `snapshot --selector <sel>`, and native `snapshot --delta` / `snapshot --delta --full`. Cursor-interactive elements are included by default; `snapshot --cursor` / `snapshot -C` are deprecated no-ops. |
-| `eval <js>` | Run JavaScript. Use `eval --stdin` through this wrapper for larger snippets, or `eval -b <base64>` for shell-escaping-safe one-liners. |
-| `connect <port|url>` | Connect to a browser through CDP. |
-| `close [--all]` | Close the current browser or all sessions; `quit` and `exit` are upstream close aliases. |
-| `tap <selector>` | Touch-oriented tap alias for iOS/provider workflows. |
-| `swipe <direction> [distance]` | Touch-oriented swipe for iOS/provider workflows. |
+| Command                              | Purpose                                                                                                                                                                                                                                                                                                                                                                             |
+| ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `open [url]`                         | Navigate when given a URL. URL-less `open` runs native `get url`, launching if needed and otherwise retaining the current page. Use explicit `about:blank` when navigation to blank is intended.                                                                                                                                                                                    |
+| `open <url>`                         | Navigate to a URL; `goto <url>` and `navigate <url>` are equivalent navigation aliases when a URL is present.                                                                                                                                                                                                                                                                       |
+| `read [url]`                         | Fetch agent-readable text from an explicit URL without requiring a Chrome page, or omit the URL to read rendered active-tab DOM. Supports `--raw`, `--require-md`, `--llms <index                                                                                                                                                                                                   | full>`, `--outline`, `--filter <text>`, and `--timeout <ms>`. |
+| `click <sel>`                        | Click an element or `@ref`.                                                                                                                                                                                                                                                                                                                                                         |
+| `click <sel> --new-tab`              | Click a link/control while requesting a new tab.                                                                                                                                                                                                                                                                                                                                    |
+| `dblclick <sel>`                     | Double-click an element.                                                                                                                                                                                                                                                                                                                                                            |
+| `type <sel> <text>`                  | Type into an element; both selector and text are required. For the focused element without a selector, use `keyboard type <text>`.                                                                                                                                                                                                                                                  |
+| `fill <sel> <text>`                  | Clear and fill an element.                                                                                                                                                                                                                                                                                                                                                          |
+| `press <key>`                        | Press a key such as `Enter`, `Tab`, or `Control+a`. `key <key>` is the upstream alias.                                                                                                                                                                                                                                                                                              |
+| `key <key>`                          | Alias for `press <key>`.                                                                                                                                                                                                                                                                                                                                                            |
+| `keydown <key>`                      | Hold a key down without releasing it, useful for modifiers.                                                                                                                                                                                                                                                                                                                         |
+| `keyup <key>`                        | Release a key previously held by `keydown <key>`. Common modifier examples are `keydown Shift` and `keyup Shift`.                                                                                                                                                                                                                                                                   |
+| `keyboard type <text>`               | Type text with real keystrokes and no selector.                                                                                                                                                                                                                                                                                                                                     |
+| `keyboard inserttext <text>`         | Insert text without key events.                                                                                                                                                                                                                                                                                                                                                     |
+| `hover <sel>`                        | Hover an element.                                                                                                                                                                                                                                                                                                                                                                   |
+| `focus <sel>`                        | Focus an element.                                                                                                                                                                                                                                                                                                                                                                   |
+| `check <sel>`                        | Check a checkbox.                                                                                                                                                                                                                                                                                                                                                                   |
+| `uncheck <sel>`                      | Uncheck a checkbox.                                                                                                                                                                                                                                                                                                                                                                 |
+| `select <sel> <val...>`              | Select one or more dropdown options.                                                                                                                                                                                                                                                                                                                                                |
+| `drag <src> <dst>`                   | Drag and drop.                                                                                                                                                                                                                                                                                                                                                                      |
+| `upload <sel> <files...>`            | Upload one or more files.                                                                                                                                                                                                                                                                                                                                                           |
+| `download <sel> <path>`              | Download a file by clicking an element.                                                                                                                                                                                                                                                                                                                                             |
+| `scroll <dir> [px]`                  | Scroll `up`, `down`, `left`, or `right`.                                                                                                                                                                                                                                                                                                                                            |
+| `scroll <dir> [px] --selector <sel>` | Scroll a specific scrollable element/container instead of the page.                                                                                                                                                                                                                                                                                                                 |
+| `scrollintoview <sel>`               | Scroll an element into view; `scrollinto <sel>` is the upstream alias.                                                                                                                                                                                                                                                                                                              |
+| `scrollinto <sel>`                   | Alias for `scrollintoview <sel>`.                                                                                                                                                                                                                                                                                                                                                   |
+| `wait <sel                           | ms>`                                                                                                                                                                                                                                                                                                                                                                                | Wait for an element or a duration.                            |
+| `screenshot [selector] [path]`       | Take a full-page or element-scoped screenshot; a single selector-like argument scopes, while a path-like argument saves to that path.                                                                                                                                                                                                                                               |
+| `screenshot [path]`                  | Take a screenshot and optionally save it to a path.                                                                                                                                                                                                                                                                                                                                 |
+| `pdf <path>`                         | Save the page as a PDF.                                                                                                                                                                                                                                                                                                                                                             |
+| `snapshot`                           | Print an accessibility tree with refs for AI interaction. Common options include `snapshot --interactive`, `snapshot --urls`, `snapshot --compact`, `snapshot --depth <n>`, `snapshot --selector <sel>`, and native `snapshot --delta` / `snapshot --delta --full`. Cursor-interactive elements are included by default; `snapshot --cursor` / `snapshot -C` are deprecated no-ops. |
+| `eval <js>`                          | Run JavaScript. Use `eval --stdin` through this wrapper for larger snippets, or `eval -b <base64>` for shell-escaping-safe one-liners.                                                                                                                                                                                                                                              |
+| `connect <port                       | url>`                                                                                                                                                                                                                                                                                                                                                                               | Connect to a browser through CDP.                             |
+| `close [--all]`                      | Close the current browser or all sessions; `quit` and `exit` are upstream close aliases.                                                                                                                                                                                                                                                                                            |
+| `tap <selector>`                     | Touch-oriented tap alias for iOS/provider workflows.                                                                                                                                                                                                                                                                                                                                |
+| `swipe <direction> [distance]`       | Touch-oriented swipe for iOS/provider workflows.                                                                                                                                                                                                                                                                                                                                    |
 
 On dashboards and other apps with nested scroll containers, `scroll <dir> [px]` can miss because a page-level wheel does not move the document or the intended pane. Without startup-scoped launch flags, the wrapper first applies ordinary `scroll <up|down|left|right> [px|percent]` directly to `document.scrollingElement` with smooth scrolling temporarily disabled; successful movement reports `details.scrollPage`. If the document cannot move, it falls back to upstream wheel behavior. For large fallback calls on an existing or fresh managed session, the wrapper samples viewport and prominent scroll-container positions before and after the command; when nothing changes it reclassifies the nominal upstream success as `failureCategory: "upstream-error"`, prepends `Scroll completed with no observed movement`, appends `Scroll diagnostic: no observed scroll movement`, exposes `details.scrollNoop`, marks `details.data.scrolled: false`, and adds exact `details.nextActions` for a fresh `snapshot -i` and screenshot. Explicit CSS-container calls `scroll <selector> <up|down|left|right> [px|percent]` remain wrapper-handled, use `Element.scrollBy` with `behavior: "instant"` so smooth-scroll CSS cannot delay the measured movement, and report `details.scrollContainer`; `scroll to end` / `scroll to top` report `details.scrollPage`. Calls with startup-scoped flags skip all helper shims so the requested launch configuration runs first. Use these paths before repeating page scrolls; when you need a specific element, prefer `scrollintoview <@ref>` or target the actual scrollable region. Do not pass `text=...` to `scrollintoview`: the wrapper rejects that upstream false-success path and returns `scroll-semantic-text-target` (`find text ... hover`) plus `refresh-refs-for-scroll-target` (`snapshot -i`) actions.
 
@@ -705,39 +726,40 @@ Comboboxes vary by app. For native `<select>` controls, prefer raw `select <sele
 
 ### Navigation
 
-| Command | Purpose |
-| --- | --- |
-| `back` | Go back. |
-| `forward` | Go forward. |
-| `reload` | Reload the current page. |
+| Command   | Purpose                  |
+| --------- | ------------------------ |
+| `back`    | Go back.                 |
+| `forward` | Go forward.              |
+| `reload`  | Reload the current page. |
 
 ### Session, state, frames, dialogs, windows, and inspection commands
 
-| Command | Purpose |
-| --- | --- |
-| `session` | Show current session name. |
-| `session list` | List active sessions. |
-| `state save <path>` | Save cookies, local storage, and session storage to a state file. |
-| `state load <path>` | Load cookies and storage from a state file. |
-| `state list` | List saved state files. |
-| `state show <filename>` | Show saved-state metadata without dumping cookie or storage values. |
-| `state rename <old-name> <new-name>` | Rename a saved state file. |
-| `state clear [session-name] [--all]` | Clear saved states for one name or all names; `state clear -a` is the upstream short alias for clearing all names. |
-| `session id --scope worktree --prefix <name>` | Generate a stable session id for agent/worktree-scoped browser state. |
-| `session info --json` | One read-only preflight: daemon activity/PID versus native browser liveness, Chrome PID, exact profile, tabs and launched/attached ownership, plus separate Pi cleanup ownership. Missing native fields remain unknown; no browser launch or tab changes. |
-| `state clean --older-than <days>` | Delete expired saved-state files. |
-| `frame <selector|main>` | Switch iframe context by selector/ref/name/URL, or return to the main frame. |
-| `dialog accept [text]` | Accept an alert, confirm, or prompt dialog, optionally supplying prompt text. |
-| `dialog dismiss` | Dismiss or cancel the current dialog. |
-| `dialog status` | Check whether a dialog is pending. |
-| `window new` | Open and activate a new blank window. The wrapper keeps that intentional `about:blank` target rather than selecting the old tab. Old refs are invalid; take a fresh snapshot before further interaction. |
-| `close` | Close the current browser session. |
-| `close --all` | Close every session. |
+| Command                                       | Purpose                                                                                                                                                                                                                                                   |
+| --------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `session`                                     | Show current session name.                                                                                                                                                                                                                                |
+| `session list`                                | List active sessions.                                                                                                                                                                                                                                     |
+| `state save <path>`                           | Save cookies, local storage, and session storage to a state file.                                                                                                                                                                                         |
+| `state load <path>`                           | Load cookies and storage from a state file.                                                                                                                                                                                                               |
+| `state list`                                  | List saved state files.                                                                                                                                                                                                                                   |
+| `state show <filename>`                       | Show saved-state metadata without dumping cookie or storage values.                                                                                                                                                                                       |
+| `state rename <old-name> <new-name>`          | Rename a saved state file.                                                                                                                                                                                                                                |
+| `state clear [session-name] [--all]`          | Clear saved states for one name or all names; `state clear -a` is the upstream short alias for clearing all names.                                                                                                                                        |
+| `session id --scope worktree --prefix <name>` | Generate a stable session id for agent/worktree-scoped browser state.                                                                                                                                                                                     |
+| `session info --json`                         | One read-only preflight: daemon activity/PID versus native browser liveness, Chrome PID, exact profile, tabs and launched/attached ownership, plus separate Pi cleanup ownership. Missing native fields remain unknown; no browser launch or tab changes. |
+| `state clean --older-than <days>`             | Delete expired saved-state files.                                                                                                                                                                                                                         |
+| `frame <selector                              | main>`                                                                                                                                                                                                                                                    | Switch iframe context by selector/ref/name/URL, or return to the main frame. |
+| `dialog accept [text]`                        | Accept an alert, confirm, or prompt dialog, optionally supplying prompt text.                                                                                                                                                                             |
+| `dialog dismiss`                              | Dismiss or cancel the current dialog.                                                                                                                                                                                                                     |
+| `dialog status`                               | Check whether a dialog is pending.                                                                                                                                                                                                                        |
+| `window new`                                  | Open and activate a new blank window. The wrapper keeps that intentional `about:blank` target rather than selecting the old tab. Old refs are invalid; take a fresh snapshot before further interaction.                                                  |
+| `close`                                       | Close the current browser session.                                                                                                                                                                                                                        |
+| `close --all`                                 | Close every session.                                                                                                                                                                                                                                      |
 
 A canceled cold-session reopen returns an aborted result with its exact session identity and the consumed reopen marker once the CLI starts. Reload does not repeat that navigation. Cancellation before the attempt leaves the remembered URL pending for the next current-page operation.
 
 <!-- agent-browser-playbook:start inspection -->
 <!-- Generated from extensions/agent-browser/lib/playbook.ts. Run `npm run docs -- playbook write` to update. -->
+
 Native inspection calls use the `agent_browser` tool shape, not shell-like direct-binary commands:
 
 - { "args": ["--help"] }
@@ -748,18 +770,18 @@ These calls return plain text and stay stateless: the extension does not inject 
 
 ### Page state, finding, mouse, settings, network, and storage
 
-| Family | Surface |
-| --- | --- |
-| `get title`, `get url`, `get cdp-url` | Read page/browser metadata without a selector. Upstream root help summarizes this family as `get <what> [selector]`, but the selector is not optional for DOM getters. |
-| `get text/html/value/count <selector>` | Read matched elements; use `get text body` for whole-page text. |
-| `get attr <selector> <name>`, `get box <selector>`, `get styles <selector>` | Read an attribute, bounding box, or computed styles from matched elements. |
-| `is <what> <selector>` | Check `visible`, `enabled`, or `checked`. |
-| `find <locator> <value> <action> [text]` | Locator types include `role`, `text`, `label`, `placeholder`, `alt`, `title`, and `testid`; selector helpers include `find first <sel>`, `find last <sel>`, and `find nth <n> <sel>`. Role/text filters include `find role <role> --name <name>` and `find ... --exact`. Actions are `click, fill, check, hover, text` only. Prefer `find role` for semantic elements: implicit roles work (`find role heading text --name` for `<h2>`, list/banner landmarks, and similar). Default name matching is a case-insensitive substring; `--exact` makes the accessible name case-sensitive. On misses, upstream 0.32.4+ keeps locator detail such as `Names seen: …` or `No element found: getByRole(...)` instead of a generic flatten. |
-| `mouse <action> [args]` | `move <x> <y>`, `down [btn]`, `up [btn]`, `wheel <dy> [dx]`. |
-| `set <setting> [value]` | `viewport <w> <h>`, `device <name>`, `geo <lat> <lng>`, `offline [on|off]`, `headers <json>`, `credentials <user> <pass>`, and `set media <features>` (`dark`, `light`, and/or `reduced-motion`). |
-| `network <action>` | `network route <url> [--abort|--body <json>] [--resource-type <csv>]`, `network unroute [url]`, `network requests [--clear] [--filter <pattern>] [--type <csv>] [--method <method>] [--status <code|range>]`, `network request <requestId>`, `network har start`, `network har start --content text` (default; embeds text bodies), `network har start --content all`, `network har start --content none`, and `network har stop [path]`. `--resource-type` filters intercepted requests by CDP resource type, such as `script`, `image`, `font`, `xhr`, or `fetch`; request listing filters accept resource types (`xhr,fetch`), methods (`POST`), and statuses (`2xx`, `400-499`). HAR files can include auth headers and bodies—do not share them unredacted. For turning a recording into a reusable API client, load `skills get derive-client`. |
-| `cookies [get|set|clear]` | Manage cookies. Full set form: `cookies set <name> <value> --url <url> --domain <domain> --path <path> --httpOnly --secure --sameSite <Strict|Lax|None> --expires <timestamp>`; also supports `cookies set --curl <file>` for JSON, cURL, or bare Cookie-header bulk imports. |
-| `storage <local|session>` | Manage web storage. |
+| Family                                                                      | Surface                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| --------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `get title`, `get url`, `get cdp-url`                                       | Read page/browser metadata without a selector. Upstream root help summarizes this family as `get <what> [selector]`, but the selector is not optional for DOM getters.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `get text/html/value/count <selector>`                                      | Read matched elements; use `get text body` for whole-page text.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `get attr <selector> <name>`, `get box <selector>`, `get styles <selector>` | Read an attribute, bounding box, or computed styles from matched elements.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `is <what> <selector>`                                                      | Check `visible`, `enabled`, or `checked`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `find <locator> <value> <action> [text]`                                    | Locator types include `role`, `text`, `label`, `placeholder`, `alt`, `title`, and `testid`; selector helpers include `find first <sel>`, `find last <sel>`, and `find nth <n> <sel>`. Role/text filters include `find role <role> --name <name>` and `find ... --exact`. Actions are `click, fill, check, hover, text` only. Prefer `find role` for semantic elements: implicit roles work (`find role heading text --name` for `<h2>`, list/banner landmarks, and similar). Default name matching is a case-insensitive substring; `--exact` makes the accessible name case-sensitive. On misses, upstream 0.32.4+ keeps locator detail such as `Names seen: …` or `No element found: getByRole(...)` instead of a generic flatten. |
+| `mouse <action> [args]`                                                     | `move <x> <y>`, `down [btn]`, `up [btn]`, `wheel <dy> [dx]`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `set <setting> [value]`                                                     | `viewport <w> <h>`, `device <name>`, `geo <lat> <lng>`, `offline [on                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | off]`, `headers <json>`, `credentials <user> <pass>`, and `set media <features>` (`dark`, `light`, and/or `reduced-motion`).                                          |
+| `network <action>`                                                          | `network route <url> [--abort                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        | --body <json>] [--resource-type <csv>]`, `network unroute [url]`, `network requests [--clear] [--filter <pattern>] [--type <csv>] [--method <method>] [--status <code | range>]`, `network request <requestId>`, `network har start`, `network har start --content text`(default; embeds text bodies),`network har start --content all`, `network har start --content none`, and `network har stop [path]`. `--resource-type`filters intercepted requests by CDP resource type, such as`script`, `image`, `font`, `xhr`, or `fetch`; request listing filters accept resource types (`xhr,fetch`), methods (`POST`), and statuses (`2xx`, `400-499`). HAR files can include auth headers and bodies—do not share them unredacted. For turning a recording into a reusable API client, load `skills get derive-client`. |
+| `cookies [get                                                               | set                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | clear]`                                                                                                                                                               | Manage cookies. Full set form: `cookies set <name> <value> --url <url> --domain <domain> --path <path> --httpOnly --secure --sameSite <Strict                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | Lax | None> --expires <timestamp>`; also supports `cookies set --curl <file>` for JSON, cURL, or bare Cookie-header bulk imports. |
+| `storage <local                                                             | session>`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | Manage web storage.                                                                                                                                                   |
 
 `cookies set --curl <file>` selects native file-import mode even when `--curl` follows other set operands. Ordinary import paths remain visible in invocation echoes and failed batch diagnostics; inline cookie values, sensitive flags, and secret-bearing path text still redact. File contents are not echoed by this exception.
 
@@ -771,16 +793,16 @@ Privacy note: `cookies get` can expose real profile cookies. Do not run it again
 
 WebMCP support is experimental and browser-dependent. Locally managed Chrome enables it by default; use a fresh launch with `--no-webmcp` or set `AGENT_BROWSER_NO_WEBMCP=1` to disable it. Page tool metadata and results come from the page itself. On 0.37, successful navigation with native `webmcp.available: true` and a positive tool count shows a `webmcp list` hint; the raw object stays in `details.data`. No hint is added for absent, unavailable or empty metadata.
 
-| Command | Purpose |
-| --- | --- |
-| `webmcp list` | List tools registered by the current page, including each tool's frame id, origin, schema, and annotations. |
-| `webmcp invoke <tool>` | Invoke a page tool with an empty input object. |
-| `webmcp invoke <tool> --params <json|@file>` | Pass a JSON object inline or read it from a caller-selected file. |
-| `webmcp invoke <tool> --frame <frame-id>` | Select the registering frame when a tool name is ambiguous. |
-| `webmcp invoke <tool> --detach` | Start the call and return its invocation id without waiting. |
-| `webmcp invoke <tool> --timeout <ms>` | Bound a blocking invocation in milliseconds. |
-| `webmcp result <id>` | Wait for or read a detached invocation result; accepts `--timeout <ms>`. |
-| `webmcp cancel <id>` | Cancel an active detached invocation. |
+| Command                                   | Purpose                                                                                                     |
+| ----------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `webmcp list`                             | List tools registered by the current page, including each tool's frame id, origin, schema, and annotations. |
+| `webmcp invoke <tool>`                    | Invoke a page tool with an empty input object.                                                              |
+| `webmcp invoke <tool> --params <json      | @file>`                                                                                                     | Pass a JSON object inline or read it from a caller-selected file. |
+| `webmcp invoke <tool> --frame <frame-id>` | Select the registering frame when a tool name is ambiguous.                                                 |
+| `webmcp invoke <tool> --detach`           | Start the call and return its invocation id without waiting.                                                |
+| `webmcp invoke <tool> --timeout <ms>`     | Bound a blocking invocation in milliseconds.                                                                |
+| `webmcp result <id>`                      | Wait for or read a detached invocation result; accepts `--timeout <ms>`.                                    |
+| `webmcp cancel <id>`                      | Cancel an active detached invocation.                                                                       |
 
 `webmcp invoke`, `webmcp result`, and `webmcp cancel` can run page code that changes or navigates the document. The wrapper refreshes page-target evidence and invalidates prior `@e…` refs after these commands. A detached invocation that still reports `pending`, or fails to settle while its target is unknown, leaves the target unverified rather than trusting the immediate URL probe; `result`, `cancel`, `get url`, and explicit navigation remain available for recovery. `details.nextActions` replaces the blocked snapshot suggestion with `verify-page-target-after-pending-webmcp` (`get url`) and warns that the detached tool remains unsettled. After a completed WebMCP mutation, run `snapshot -i` before reusing refs; inside `batch --bail`, put `get url` before that snapshot. `webmcp list` does not invalidate refs. Attached browsers, providers, Lightpanda, Safari/iOS, and Chrome builds without the experimental CDP domain may return `webmcp_unsupported`.
 
@@ -788,14 +810,14 @@ WebMCP support is experimental and browser-dependent. Locally managed Chrome ena
 
 Stable tab ids look like `t1`, `t2`, and `t3`. Optional user labels such as `docs` or `app` are interchangeable with ids wherever a tab reference is accepted. Upstream help may refer to numeric tab positions, but this wrapper guidance uses stable `t<N>` ids because positional integers are not accepted by current upstream `agent-browser`.
 
-| Command | Purpose |
-| --- | --- |
-| `tab` | List open tabs by default. |
-| `tab list` | List open tabs with ids and labels. |
-| `tab new [url]` | Open a new tab. |
-| `tab new --label <name> [url]` | Open a new tab with a user label. |
-| `tab <t<N>|label>` | Switch to a tab by id or label. CDP target ids from `tab list --json` are also accepted and stay stable across daemon restarts. |
-| `tab close [t<N>|label|target]` | Close the current tab or a referenced tab. Generic references in workflows may say `tab close [target]`; use a stable `t<N>` id, label, or CDP target id when you have one. |
+| Command                        | Purpose                             |
+| ------------------------------ | ----------------------------------- |
+| `tab`                          | List open tabs by default.          |
+| `tab list`                     | List open tabs with ids and labels. |
+| `tab new [url]`                | Open a new tab.                     |
+| `tab new --label <name> [url]` | Open a new tab with a user label.   |
+| `tab <t<N>                     | label>`                             | Switch to a tab by id or label. CDP target ids from `tab list --json` are also accepted and stay stable across daemon restarts. |
+| `tab close [t<N>               | label                               | target]`                                                                                                                        | Close the current tab or a referenced tab. Generic references in workflows may say `tab close [target]`; use a stable `t<N>` id, label, or CDP target id when you have one. |
 
 The wrapper persists native CDP `targetId` when available so resume/branch recovery distinguishes tabs with the same URL and title. A missing known target requires explicit tab recovery; older transcripts without IDs still use URL matching, and a cold managed reopen adopts its new ID. Failed reached batch navigations retire earlier targets and recheck the live page, including Chrome error pages, before subsequent inspection.
 
@@ -805,17 +827,17 @@ With `--pin-tab`, a closed bound tab fails as `tab_gone` (`data.targetId`, optio
 
 ### Snapshot
 
-| Option | Purpose |
-| --- | --- |
-| `snapshot` | Full accessibility tree with refs. |
-| `snapshot -i` / `snapshot --interactive` | Include only interactive elements. |
-| `snapshot -i --urls` | Include only interactive elements and link hrefs. |
-| `snapshot -u` / `snapshot --urls` | Include href URLs for link elements. |
-| `snapshot -C` / `snapshot --cursor` | Deprecated no-ops; cursor-interactive elements are included by default. |
-| `snapshot -c` / `snapshot --compact` | Remove empty structural elements. |
-| `snapshot -d <n>` / `snapshot --depth <n>` | Limit tree depth. |
-| `snapshot -s <sel>` / `snapshot --selector <sel>` | Scope to a CSS selector. |
-| `snapshot --delta` / `snapshot --delta --full` | Native revision-relative observation or a forced full baseline; see [0.38.1](#upstream-0381-rebaseline). |
+| Option                                            | Purpose                                                                                                  |
+| ------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| `snapshot`                                        | Full accessibility tree with refs.                                                                       |
+| `snapshot -i` / `snapshot --interactive`          | Include only interactive elements.                                                                       |
+| `snapshot -i --urls`                              | Include only interactive elements and link hrefs.                                                        |
+| `snapshot -u` / `snapshot --urls`                 | Include href URLs for link elements.                                                                     |
+| `snapshot -C` / `snapshot --cursor`               | Deprecated no-ops; cursor-interactive elements are included by default.                                  |
+| `snapshot -c` / `snapshot --compact`              | Remove empty structural elements.                                                                        |
+| `snapshot -d <n>` / `snapshot --depth <n>`        | Limit tree depth.                                                                                        |
+| `snapshot -s <sel>` / `snapshot --selector <sel>` | Scope to a CSS selector.                                                                                 |
+| `snapshot --delta` / `snapshot --delta --full`    | Native revision-relative observation or a forced full baseline; see [0.38.1](#upstream-0381-rebaseline). |
 
 When a snapshot is too large for inline output, the Pi wrapper renders a compact view before spilling the full redacted snapshot to `details.fullOutputPath`. Compact snapshots are main-content-first, but dense pages and desktop host screens can still hide actionable controls in omitted content; scan `Omitted high-value controls` before opening the spill file. That bounded section favors editable/searchbox/textbox/combobox controls, named tab/surface controls, primary action buttons, and named action links such as row/navigation links and repository-style result links, then includes other useful controls such as checkboxes, radios, options, and menuitems that were not already listed under key refs or other refs. When that section appears, `details.data.highValueControlRefIds` repeats the same visible ref ids for programmatic follow-up alongside fields such as `previewMode`, `previewSections`, and counts on `details.data` (see [`TOOL_CONTRACT.md`](TOOL_CONTRACT.md#details)).
 
@@ -823,48 +845,48 @@ For dense pages, the wrapper also accepts `snapshot -i --search <text>` and `sna
 
 ### Wait
 
-| Mode | Purpose |
-| --- | --- |
-| `wait <selector>` | Wait for an element to appear. |
-| `wait <ms>` | Wait for a fixed number of milliseconds; the duration is positional, not `--time <ms>`. The native Pi wrapper now forwards long waits and derives a subprocess watchdog from the explicit wait duration when the caller does not provide top-level `timeoutMs`. |
-| `wait --url <pattern>` | Wait for the URL to match a pattern. On timeout the wrapper appends a `fresh-session-after-url-wait-timeout` next action (`sessionMode: "fresh"` + `open about:blank`, after the inspect action): if a preceding click or submit reported success but the page never navigated, upstream click dispatch may have silently missed, so replace about:blank with the target URL and replay the flow as one batch in a fresh session instead of retrying the wait. |
-| `wait --load <state>` | Wait for load state: `load`, `domcontentloaded`, or `networkidle`. |
-| `wait --fn <expression>` | Wait for a JavaScript expression to become truthy. |
-| `wait --text <text>` | Wait for text to appear on the page; failures may include `inspect-after-text-assertion-failure` with a session-scoped `snapshot -i` payload. |
-| `wait --download [path]` | Wait for a download started by a previous action and optionally save it to `path`; successful wrapper results include upstream-reported `savedFilePath`/`savedFile`, while `details.artifacts[].exists` is the wrapper's on-disk verification signal. |
-| `wait --download [path] --timeout <ms>` | Set download-start timeout in milliseconds. The native Pi wrapper forwards explicit wait timeouts and extends the subprocess watchdog unless the caller supplies top-level `timeoutMs`. |
+| Mode                                    | Purpose                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| --------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `wait <selector>`                       | Wait for an element to appear.                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `wait <ms>`                             | Wait for a fixed number of milliseconds; the duration is positional, not `--time <ms>`. The native Pi wrapper now forwards long waits and derives a subprocess watchdog from the explicit wait duration when the caller does not provide top-level `timeoutMs`.                                                                                                                                                                                                |
+| `wait --url <pattern>`                  | Wait for the URL to match a pattern. On timeout the wrapper appends a `fresh-session-after-url-wait-timeout` next action (`sessionMode: "fresh"` + `open about:blank`, after the inspect action): if a preceding click or submit reported success but the page never navigated, upstream click dispatch may have silently missed, so replace about:blank with the target URL and replay the flow as one batch in a fresh session instead of retrying the wait. |
+| `wait --load <state>`                   | Wait for load state: `load`, `domcontentloaded`, or `networkidle`.                                                                                                                                                                                                                                                                                                                                                                                             |
+| `wait --fn <expression>`                | Wait for a JavaScript expression to become truthy.                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `wait --text <text>`                    | Wait for text to appear on the page; failures may include `inspect-after-text-assertion-failure` with a session-scoped `snapshot -i` payload.                                                                                                                                                                                                                                                                                                                  |
+| `wait --download [path]`                | Wait for a download started by a previous action and optionally save it to `path`; successful wrapper results include upstream-reported `savedFilePath`/`savedFile`, while `details.artifacts[].exists` is the wrapper's on-disk verification signal.                                                                                                                                                                                                          |
+| `wait --download [path] --timeout <ms>` | Set download-start timeout in milliseconds. The native Pi wrapper forwards explicit wait timeouts and extends the subprocess watchdog unless the caller supplies top-level `timeoutMs`.                                                                                                                                                                                                                                                                        |
 
 Current upstream still does not parse `wait <selector> --state hidden` / `wait <selector> --state detached` as distinct wait modes even though upstream help mentions those examples. Use `wait --fn "!document.querySelector('#spinner')"` or another explicit JavaScript predicate for disappearance/detach checks until upstream parser support exists.
 
 ### Diff, debug, and streaming
 
-| Command | Purpose |
-| --- | --- |
-| `diff snapshot` | Compare current versus last snapshot. Use `diff snapshot --baseline <file> --selector <sel> --compact --depth <n>` when you need a saved baseline, scoped subtree, compact output, or depth bound. |
-| `diff screenshot --baseline` | Compare current screenshot versus a baseline image. Use `diff screenshot --baseline <file> --output <file> --threshold <0-1> --selector <sel> --full` when you need a saved diff image, threshold tuning, element scope, or full-page capture. |
-| `diff url <u1> <u2>` | Navigate to both pages and compare them, leaving the second destination active. The wrapper observes the final URL, including redirects to `about:blank`, and invalidates old refs without recovering the old tab; direct and reached batch rows use the same rule. If the URL cannot be observed, run `get url` before taking a fresh snapshot. Use `diff url <u1> <u2> --screenshot --wait-until <strategy> --selector <sel> --compact --depth <n>` when you need screenshot comparison, navigation wait control, or scoped/compact snapshot comparison. |
-| `trace start`, `trace stop [path]` | Record a Chrome DevTools trace. |
-| `profiler start|stop [path]` | Record a Chrome DevTools profile. |
-| `record start <path> [url]` | Record the active page; an optional URL navigates first. Use `.webm` or `.mp4` and optional `--fps <n>` (1–60, default 30); native validates startup and requires `ffmpeg` on `PATH`. Verify output after `record stop`. |
-| `record stop` | Finalize video and inspect its native receipt plus wrapper file verification. A failed or recovered stop retains original attempt evidence; use a distinct top-level `outputPath` to save its receipt. |
-| `record restart <path> [url]` | Stop any current recording and start a new video. Supports the same formats and `--fps` option; without a URL it keeps the page and refs. |
-| `console [--clear]` | View or clear console logs. |
-| `errors [--clear]` | View or clear page errors. |
-| `highlight <sel>` | Highlight an element. |
-| `inspect` | Open Chrome DevTools for the active page. |
-| `clipboard <op> [text]` | Read/write clipboard: `clipboard read`, `clipboard write <text>`, `clipboard copy`, and `clipboard paste`. Clipboard access is environment-dependent; `NotAllowedError` / permission-denied failures are common in headless, managed-profile, remote, or `file://` sessions. |
-| `stream enable [--port <n>]` | Start runtime WebSocket streaming for this session. If upstream reports that streaming is already enabled, the wrapper treats it as an idempotent success and adds status/disable follow-ups. |
-| `stream disable` | Stop runtime WebSocket streaming. |
-| `stream status` | Show streaming status and active port. |
-| `react tree` | Print the full React component tree. Requires the page to have been launched with `--enable react-devtools`. |
-| `react inspect <id>` | Inspect one React fiber's props, hooks, state, and source. |
-| `react renders start` | Start recording React render activity. |
-| `react renders stop [--json]` | Stop render recording and print mount/re-render counts and changed details. |
-| `react suspense [--only-dynamic] [--json]` | Classify Suspense boundaries with grouped root-cause recommendations. |
-| `a11y [url]` | Run an embedded axe-core accessibility audit on the current page, or navigate to `url` first. Options: `a11y --tags wcag2a,wcag2aa`, `a11y --selector "#main"`. CDP browsers only (not Safari/iOS WebDriver). Model-facing text summarizes violation/incomplete counts and top rules; full node targets stay in `details.data`. |
-| `vitals [url] [--json]` | Report Core Web Vitals: LCP, CLS, TTFB, FCP, INP, plus React hydration timing when available. `web-vitals [url] [--json]` is the upstream alias. |
-| `pushstate <url>` | Perform SPA client-side navigation; detects Next.js router pushes and falls back to history navigation events. |
-| `removeinitscript <id>` | Remove an init script registered through upstream init-script mechanisms. |
+| Command                                    | Purpose                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `diff snapshot`                            | Compare current versus last snapshot. Use `diff snapshot --baseline <file> --selector <sel> --compact --depth <n>` when you need a saved baseline, scoped subtree, compact output, or depth bound.                                                                                                                                                                                                                                                                                                                                                         |
+| `diff screenshot --baseline`               | Compare current screenshot versus a baseline image. Use `diff screenshot --baseline <file> --output <file> --threshold <0-1> --selector <sel> --full` when you need a saved diff image, threshold tuning, element scope, or full-page capture.                                                                                                                                                                                                                                                                                                             |
+| `diff url <u1> <u2>`                       | Navigate to both pages and compare them, leaving the second destination active. The wrapper observes the final URL, including redirects to `about:blank`, and invalidates old refs without recovering the old tab; direct and reached batch rows use the same rule. If the URL cannot be observed, run `get url` before taking a fresh snapshot. Use `diff url <u1> <u2> --screenshot --wait-until <strategy> --selector <sel> --compact --depth <n>` when you need screenshot comparison, navigation wait control, or scoped/compact snapshot comparison. |
+| `trace start`, `trace stop [path]`         | Record a Chrome DevTools trace.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `profiler start                            | stop [path]`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               | Record a Chrome DevTools profile. |
+| `record start <path> [url]`                | Record the active page; an optional URL navigates first. Use `.webm` or `.mp4` and optional `--fps <n>` (1–60, default 30); native validates startup and requires `ffmpeg` on `PATH`. Verify output after `record stop`.                                                                                                                                                                                                                                                                                                                                   |
+| `record stop`                              | Finalize video and inspect its native receipt plus wrapper file verification. A failed or recovered stop retains original attempt evidence; use a distinct top-level `outputPath` to save its receipt.                                                                                                                                                                                                                                                                                                                                                     |
+| `record restart <path> [url]`              | Stop any current recording and start a new video. Supports the same formats and `--fps` option; without a URL it keeps the page and refs.                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `console [--clear]`                        | View or clear console logs.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `errors [--clear]`                         | View or clear page errors.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `highlight <sel>`                          | Highlight an element.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `inspect`                                  | Open Chrome DevTools for the active page.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `clipboard <op> [text]`                    | Read/write clipboard: `clipboard read`, `clipboard write <text>`, `clipboard copy`, and `clipboard paste`. Clipboard access is environment-dependent; `NotAllowedError` / permission-denied failures are common in headless, managed-profile, remote, or `file://` sessions.                                                                                                                                                                                                                                                                               |
+| `stream enable [--port <n>]`               | Start runtime WebSocket streaming for this session. If upstream reports that streaming is already enabled, the wrapper treats it as an idempotent success and adds status/disable follow-ups.                                                                                                                                                                                                                                                                                                                                                              |
+| `stream disable`                           | Stop runtime WebSocket streaming.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `stream status`                            | Show streaming status and active port.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `react tree`                               | Print the full React component tree. Requires the page to have been launched with `--enable react-devtools`.                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `react inspect <id>`                       | Inspect one React fiber's props, hooks, state, and source.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `react renders start`                      | Start recording React render activity.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `react renders stop [--json]`              | Stop render recording and print mount/re-render counts and changed details.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `react suspense [--only-dynamic] [--json]` | Classify Suspense boundaries with grouped root-cause recommendations.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `a11y [url]`                               | Run an embedded axe-core accessibility audit on the current page, or navigate to `url` first. Options: `a11y --tags wcag2a,wcag2aa`, `a11y --selector "#main"`. CDP browsers only (not Safari/iOS WebDriver). Model-facing text summarizes violation/incomplete counts and top rules; full node targets stay in `details.data`.                                                                                                                                                                                                                            |
+| `vitals [url] [--json]`                    | Report Core Web Vitals: LCP, CLS, TTFB, FCP, INP, plus React hydration timing when available. `web-vitals [url] [--json]` is the upstream alias.                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `pushstate <url>`                          | Perform SPA client-side navigation; detects Next.js router pushes and falls back to history navigation events.                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `removeinitscript <id>`                    | Remove an init script registered through upstream init-script mechanisms.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 
 Recording destinations are reserved within one Pi process, not across processes. Use unique paths for concurrent Pi processes: different explicit sessions can overwrite one file even when both `record stop` results are verified. Upstream’s same-session `record start` guard does not reserve the filename across other sessions.
 
@@ -876,37 +898,37 @@ Long-running or lifecycle commands should be explicitly paired with cleanup call
 
 ### Batch, auth, confirmations, sessions, chat, dashboard, devices, and setup
 
-| Command | Purpose |
-| --- | --- |
-| `batch [--bail] ["cmd" ...]` | Execute multiple commands sequentially from args or stdin. |
-| `auth save <name> [opts]` | Save an auth profile. Full credential form: `auth save <name> --url <url> --username <user> --password <pass>`; selector override form: `auth save <name> --username-selector <s> --password-selector <s> --submit-selector <s>`. Prefer `auth save <name> --password-stdin` with the tool `stdin` field; avoid putting passwords in `args`. |
-| `auth login <name>` | Login using saved credentials; add `--no-navigate` for a prepared, same-origin login page. |
-| `auth list` | List saved auth profiles. |
-| `auth show <name>` | Show auth profile metadata. |
-| `auth delete <name>` | Delete an auth profile; `auth remove <name>` is the upstream alias. |
-| `confirm <id>` | Approve a pending action. |
-| `deny <id>` | Deny a pending action. |
-| `session` | Show current session name. |
-| `session list` | List active sessions. |
-| `chat <message>` | Send a natural-language instruction. |
-| `chat` | Start interactive chat when stdin is a TTY. |
-| `dashboard [start]` | Start the dashboard server on the default port `4848`. |
-| `dashboard start --port <n>` | Start the dashboard on a specific port. |
-| `dashboard start --allowed-origins <origins>` | Allow comma-separated exact HTTPS reverse-proxy origins. Environment: `AGENT_BROWSER_DASHBOARD_ALLOWED_ORIGINS`. |
-| `dashboard stop` | Stop the dashboard server. |
-| `device list` | List available iOS simulators. Use with `-p ios` when exercising iOS provider flows. |
-| `install` | Install browser binaries. |
-| `install --with-deps` | Install browser binaries plus Linux system dependencies; exits nonzero when required libraries cannot be installed. |
-| `upgrade` | Upgrade `agent-browser` using its detected package manager. Native output is text, even with `--json`; the wrapper displays it with surrounding whitespace trimmed and normal redaction, and exposes it in `details.data`. Caller-requested `--json` stays a parseable result with the text in `data`. Nonzero exits, spawn failures, timeout and cancellation remain failures; failed upgrade stdout and stderr remain available as diagnostics. |
-| `doctor [--fix]` | Diagnose install issues and optionally auto-clean stale files. Use `doctor --offline --quick` for a fast local-only check and `doctor --json` for structured output. |
-| `plugin add <ref>` | Add a plugin from npm or GitHub (`<owner>/<repo>` or `@scope/<name>`); writes `agent-browser.json`. Flags such as `--name`, `--capability`, `--global`, and `--no-manifest` shape discovery. |
-| `plugin [list]` | List configured plugins (default subcommand); `{ "plugins": [...] }` is a successful sessionless result. |
-| `plugin show <name>` | Show one configured plugin; `{ "plugin": {...} }` is a successful sessionless result. |
-| `plugin run <name> <type>` | Run a `command.run` or custom plugin request over the agent-browser plugin stdio protocol. |
-| `auth login <name> --credential-provider <plugin>` | Resolve credentials just-in-time from a configured credential plugin (e.g. a vault) instead of saved passwords; pair with `--item <ref>` and optional selector overrides. Credentials are not stored locally. |
-| `mcp --help` | Show MCP server help through the native tool. |
-| `mcp` | Start a local MCP stdio server for external MCP clients; bare native-tool calls are rejected before spawn. External clients can opt into experimental page tools with `mcp --tools core,webmcp`. |
-| `profiles` | List available Chrome profiles. |
+| Command                                            | Purpose                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `batch [--bail] ["cmd" ...]`                       | Execute multiple commands sequentially from args or stdin.                                                                                                                                                                                                                                                                                                                                                                                        |
+| `auth save <name> [opts]`                          | Save an auth profile. Full credential form: `auth save <name> --url <url> --username <user> --password <pass>`; selector override form: `auth save <name> --username-selector <s> --password-selector <s> --submit-selector <s>`. Prefer `auth save <name> --password-stdin` with the tool `stdin` field; avoid putting passwords in `args`.                                                                                                      |
+| `auth login <name>`                                | Login using saved credentials; add `--no-navigate` for a prepared, same-origin login page.                                                                                                                                                                                                                                                                                                                                                        |
+| `auth list`                                        | List saved auth profiles.                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `auth show <name>`                                 | Show auth profile metadata.                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `auth delete <name>`                               | Delete an auth profile; `auth remove <name>` is the upstream alias.                                                                                                                                                                                                                                                                                                                                                                               |
+| `confirm <id>`                                     | Approve a pending action.                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `deny <id>`                                        | Deny a pending action.                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `session`                                          | Show current session name.                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `session list`                                     | List active sessions.                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `chat <message>`                                   | Send a natural-language instruction.                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `chat`                                             | Start interactive chat when stdin is a TTY.                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `dashboard [start]`                                | Start the dashboard server on the default port `4848`.                                                                                                                                                                                                                                                                                                                                                                                            |
+| `dashboard start --port <n>`                       | Start the dashboard on a specific port.                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `dashboard start --allowed-origins <origins>`      | Allow comma-separated exact HTTPS reverse-proxy origins. Environment: `AGENT_BROWSER_DASHBOARD_ALLOWED_ORIGINS`.                                                                                                                                                                                                                                                                                                                                  |
+| `dashboard stop`                                   | Stop the dashboard server.                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `device list`                                      | List available iOS simulators. Use with `-p ios` when exercising iOS provider flows.                                                                                                                                                                                                                                                                                                                                                              |
+| `install`                                          | Install browser binaries.                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `install --with-deps`                              | Install browser binaries plus Linux system dependencies; exits nonzero when required libraries cannot be installed.                                                                                                                                                                                                                                                                                                                               |
+| `upgrade`                                          | Upgrade `agent-browser` using its detected package manager. Native output is text, even with `--json`; the wrapper displays it with surrounding whitespace trimmed and normal redaction, and exposes it in `details.data`. Caller-requested `--json` stays a parseable result with the text in `data`. Nonzero exits, spawn failures, timeout and cancellation remain failures; failed upgrade stdout and stderr remain available as diagnostics. |
+| `doctor [--fix]`                                   | Diagnose install issues and optionally auto-clean stale files. Use `doctor --offline --quick` for a fast local-only check and `doctor --json` for structured output.                                                                                                                                                                                                                                                                              |
+| `plugin add <ref>`                                 | Add a plugin from npm or GitHub (`<owner>/<repo>` or `@scope/<name>`); writes `agent-browser.json`. Flags such as `--name`, `--capability`, `--global`, and `--no-manifest` shape discovery.                                                                                                                                                                                                                                                      |
+| `plugin [list]`                                    | List configured plugins (default subcommand); `{ "plugins": [...] }` is a successful sessionless result.                                                                                                                                                                                                                                                                                                                                          |
+| `plugin show <name>`                               | Show one configured plugin; `{ "plugin": {...} }` is a successful sessionless result.                                                                                                                                                                                                                                                                                                                                                             |
+| `plugin run <name> <type>`                         | Run a `command.run` or custom plugin request over the agent-browser plugin stdio protocol.                                                                                                                                                                                                                                                                                                                                                        |
+| `auth login <name> --credential-provider <plugin>` | Resolve credentials just-in-time from a configured credential plugin (e.g. a vault) instead of saved passwords; pair with `--item <ref>` and optional selector overrides. Credentials are not stored locally.                                                                                                                                                                                                                                     |
+| `mcp --help`                                       | Show MCP server help through the native tool.                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `mcp`                                              | Start a local MCP stdio server for external MCP clients; bare native-tool calls are rejected before spawn. External clients can opt into experimental page tools with `mcp --tools core,webmcp`.                                                                                                                                                                                                                                                  |
+| `profiles`                                         | List available Chrome profiles.                                                                                                                                                                                                                                                                                                                                                                                                                   |
 
 When these commands are invoked through the native `agent_browser` tool, structured diagnostic/status outputs are rendered as compact summaries. `session list` and `state list` keep every upstream row and restore identifier visible. Explicit sessions, state/restore paths, broad state lifecycle commands, config, local files, and launch environment pass through unchanged. Local inspection/setup calls remain sessionless unless you explicitly pass `--session`; browser-backed or context-dependent calls keep normal managed-session behavior when no explicit session is supplied. List-like outputs such as sessions, Chrome profiles, auth profiles, network requests, console messages, and page errors include counts and key fields; large outputs are previewed with a `Full output path:` spill file instead of dumping the entire payload into context. For `network requests`, the wrapper shows a failed-request summary split into actionable versus benign low-impact rows, then status, method, URL, resource/mime type, request id, and, when the installed upstream output includes body-like fields, bounded redacted payload, response, and failure/error snippets. Safe request IDs also produce `details.nextActions` for exact request details, actionable failed-request source lookup candidates, filtered request lists, or starting HAR capture before a repro. If the same session has active wrapper-observed network routes, failed/pending/CORS-looking matched request rows add `details.networkRouteDiagnostics` and executable route-mock next actions before the generic request actions. `data:image` artifact rows are omitted from compact request previews but remain in raw `details.data.requests`. `network request <requestId>` can expose upstream full-detail body fields such as response bodies using the same bounded model-facing preview; its request URL stays diagnostic-only and does not overwrite `details.sessionTabTarget` for later ref guards. Clipboard failures that mention `NotAllowedError` or permission denial are usually browser/OS capability limits, not proof that a read, paste, or page mutation happened; prefer page-native reads (`snapshot -i`, `get text`, `eval --stdin`) or direct typing (`keyboard inserttext` / `keyboard type`) when the workflow allows it, and retry true clipboard flows only from an allowed profile/session on a normal `http(s)` page. Header, cookie, auth, token, and other secret-like fields are not expanded in model-facing text or `details.data`; low-risk primitive storage values may remain visible, while command echoes still redact `--body`, `--headers`, `--password`, proxy credentials, auth-bearing URLs, `clipboard write` text, cookie/storage set values, and bearer/basic credential text in positional arguments. Raw batch row strings receive the same command-aware redaction in visible output and ordered code journals without changing execution argv. Use upstream HAR or full raw details only when complete data is required.
 
@@ -961,9 +983,9 @@ For Exa, effective search type precedence is per-call `searchType` → `webSearc
 
 ```json
 {
-  "query": "pi-agent-browser-native agent_browser_web_search searchType defaults",
-  "searchType": "deep-lite",
-  "count": 5
+	"query": "pi-agent-browser-native agent_browser_web_search searchType defaults",
+	"searchType": "deep-lite",
+	"count": 5
 }
 ```
 
@@ -975,21 +997,21 @@ Example config:
 
 ```json
 {
-  "version": 1,
-  "webSearch": {
-    "enabled": true,
-    "preferredProvider": "exa",
-    "defaultSearchType": "deep-lite",
-    "exaApiKey": "$EXA_API_KEY",
-    "braveApiKey": "$BRAVE_API_KEY"
-  },
-  "browser": {
-    "defaultProfile": {
-      "name": "Profile 1",
-      "policy": "authenticated-only"
-    },
-    "executablePath": "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser"
-  }
+	"version": 1,
+	"webSearch": {
+		"enabled": true,
+		"preferredProvider": "exa",
+		"defaultSearchType": "deep-lite",
+		"exaApiKey": "$EXA_API_KEY",
+		"braveApiKey": "$BRAVE_API_KEY"
+	},
+	"browser": {
+		"defaultProfile": {
+			"name": "Profile 1",
+			"policy": "authenticated-only"
+		},
+		"executablePath": "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser"
+	}
 }
 ```
 
@@ -1106,15 +1128,19 @@ Other useful environment variables include `AGENT_BROWSER_DEFAULT_TIMEOUT`, `AGE
 - The extension may keep following one implicit managed session across later tool calls.
 - If launch-scoped flags like `--engine`, `--profile`, `--args`, `--user-agent`, `--executable-path`, `--ca-cert`, `--no-ca-cert`, `--webgpu`, `--no-webmcp`, `--restore`, `--restore-save`, restore check flags, `--namespace`, `--session-name`, `--cdp`, `--state`, `--auto-connect`, `--init-script`, `--enable`, `--provider` / `-p`, or provider device flags like `--device` would replace or be ignored by an already-active managed session, retry with `sessionMode: "fresh"`. When the call explicitly names the current managed session, the structured recovery payload removes that `--session` so the fresh rotation can succeed.
 - If a `sessionMode: "fresh"` call fails (including upstream failure, timeout, missing binary, or **`qa`** reclassification after a nominally successful batch), read `details.managedSessionOutcome` before assuming where the next default call will go: `preserved` means the prior managed session remains current, while `abandoned` means no managed session became current. When the failure reason is not the fresh launch itself—for example `failureCategory: "qa-failure"`—`status`/`summary` may still describe the managed-session transition while `succeeded` on this object matches the final tool outcome.
+
 <!-- agent-browser-playbook:start wrapper-tab-recovery -->
 <!-- Generated from extensions/agent-browser/lib/playbook.ts. Run `npm run docs -- playbook write` to update. -->
+
 - After open/goto/navigate calls with --profile, --restore, --session-name, or --state, agent_browser best-effort re-selects the tab whose URL matches the returned page when restored tabs steal focus during launch or reconnect.
 - After confirmed shutdown of an automatically restored managed session, the wrapper retains its complete recorded URL, including the fragment, until the first current-page operation (including get url and reload). Non-page calls such as tab list may start a daemon without fulfilling that reopen; explicit URL reads leave the managed browser and pending reopen untouched. The wrapper uses native open once, verifies the observed tab, and discards old refs/frame scope; it does not restore unsaved forms, JavaScript memory, or history. Explicit navigation, caller-owned/attached sessions, and restore-disabled sessions are not auto-reopened.
 - For a still-live browser after tab drift or resume, the wrapper verifies/selects the intended tab before ref/semantic helpers and page commands; failed selection stops the call without navigating. Local commands, read <url>, URL a11y/vitals, diff url, window new, and explicit tab/navigation/connection/state recovery do not require the prior tab. Batch checks follow effective rows past non-page prefixes and stop at explicit context changes, preserving caller argv/stdin and continue-on-error behavior. Same-tab reselection is avoided because it clears refs. Use exact batch --bail for fail-fast, not --bail=<value>. Routine same-session calls skip tab-list preflights.
 - For sessions with observed tab-drift risk, after a successful command on a known target tab, agent_browser also best-effort restores that intended tab if a restored/background tab steals focus after the command completes. Routine same-session commands skip focus correction; observed pages without a native targetId use tab list to establish their identity.
 - If a known session target unexpectedly reports about:blank, agent_browser best-effort re-selects the prior intended target when it still exists; if recovery fails, it records the observed about:blank target and reports exact recovery guidance instead of treating the prior page as active.
 - If upstream reports tab_gone, the pinned bound tab is gone; use details.nextActions (tab list / tab new) instead of assuming another tab is yours.
+
 <!-- agent-browser-playbook:end wrapper-tab-recovery -->
+
 - Wrapper-spawned commands clamp `AGENT_BROWSER_DEFAULT_TIMEOUT` to the upstream documented 25-second default and use a 35-second child-process watchdog (`PI_AGENT_BROWSER_PROCESS_TIMEOUT_MS` overrides the default 35s budget; top-level `timeoutMs` overrides it per browser CLI call). Explicit `wait <ms>`, `wait --timeout <ms>`, and WebMCP `invoke` / `result --timeout <ms>` calls can exceed that default; when top-level `timeoutMs` is omitted, the wrapper derives a subprocess watchdog from the requested command duration plus a small grace window. Batch budgeting and timeout recovery read the same effective source as upstream: raw command strings when present, otherwise stdin rows. Dialog commands are additionally bounded to 5 seconds (`PI_AGENT_BROWSER_DIALOG_PROCESS_TIMEOUT_MS`), and click/tap/find refs or tokens plus `eval --stdin` snippets that look like alert/confirm/prompt/dialog triggers are bounded to 8 seconds (`PI_AGENT_BROWSER_DIALOG_TRIGGER_PROCESS_TIMEOUT_MS`). A `session info` timeout returns only an exact-session `retry-session-info` status action, without page probes, liveness claims, or changes to existing page/ref state. When a browser-operation watchdog fires, `details.timeoutPartialProgress` may include a planned step list with `status: "unknown"` (including `generatedFrom` labels for generated QA rows). Current URLs and existing files do not establish which steps ran, failed, or remained pending. Multi-step timeouts offer `inspect-current-page-after-timeout` when the target is already verified, rather than guessing a retry position. A single read-only or idempotent step may offer a `retry-timeout-step` candidate with a one-row native batch (`args: ["batch"]` plus `stdin`); inspect the current state before retrying because its outcome is still unknown. If the target is unknown, standalone snapshots are removed and visible failure text plus `details.nextActions` show `verify-page-target-after-timeout`, including its session-scoped `batch --bail` args and short stdin for fail-fast `get url` then `snapshot -i`; dialog status/accept/dismiss actions remain allowed for blocking-dialog recovery. It also includes current page URL from best-effort session `get url`, followed by `get title` only after a URL is recovered (or a planned URL inferred from the step list when the session cannot answer), and declared artifact paths such as `screenshot`, `pdf`, `download`, or `wait --download` outputs with existence/state checks; the same evidence is appended under `Timeout partial progress` in visible text with URL/path redaction.
 - Oversized snapshots and oversized generic outputs may be compacted in tool content, with the full redacted output written to a spill file path shown directly in the tool result. Recent artifact metadata is bounded by `PI_AGENT_BROWSER_SESSION_ARTIFACT_MANIFEST_MAX_ENTRIES` (default 100); persisted spill files have a separate `PI_AGENT_BROWSER_SESSION_ARTIFACT_MAX_BYTES` budget (default 32 MiB; `0` disables automatic eviction).
 - The wrapper keeps `--help` and `--version` stateless so they do not consume the implicit managed-session slot.
@@ -1129,6 +1155,7 @@ Other useful environment variables include `AGENT_BROWSER_DEFAULT_TIMEOUT`, `AGE
 This generated block is review data for maintainers. The human-authored reference sections above remain the readable command guide.
 
 #### Source evidence
+
 - repository: `vercel-labs/agent-browser`
 - upstream HEAD: `aff6125c023b810ea3f2e5deec5379e9a4270bdc`
 - upstream package version: `0.38.1`
@@ -1191,6 +1218,7 @@ This generated block is review data for maintainers. The human-authored referenc
 - inspected: `packages/@agent-browser/sandbox/src/eve.ts`
 
 #### Upstream help commands sampled
+
 - root help: `agent-browser --help`
 - skills help: `agent-browser skills --help`
 - skills list: `agent-browser skills list`
@@ -1252,6 +1280,7 @@ This generated block is review data for maintainers. The human-authored referenc
 - plugin help: `agent-browser plugin --help`
 
 #### Inventory sections
+
 - Built-in skills: 19 human-doc token(s), 24 upstream token(s)
 - Core page, element, navigation, and extraction commands: 89 human-doc token(s), 94 upstream token(s)
 - Sessions, state, tabs, frames, dialogs, and windows: 28 human-doc token(s), 26 upstream token(s)
@@ -1260,7 +1289,9 @@ This generated block is review data for maintainers. The human-authored referenc
 - Global flags, config, providers, policy, and environment: 153 human-doc token(s), 120 upstream token(s)
 
 #### Human-authored doc tokens required
+
 ##### Built-in skills
+
 - `skills list`
 - `skills get core`
 - `skills get core --full`
@@ -1282,6 +1313,7 @@ This generated block is review data for maintainers. The human-authored referenc
 - `AGENT_BROWSER_SKILLS_DIR`
 
 ##### Core page, element, navigation, and extraction commands
+
 - `open [url]`
 - `open <url>`
 - `goto <url>`
@@ -1373,6 +1405,7 @@ This generated block is review data for maintainers. The human-authored referenc
 - `swipe <direction> [distance]`
 
 ##### Sessions, state, tabs, frames, dialogs, and windows
+
 - `session`
 - `session id`
 - `session id --scope worktree --prefix <name>`
@@ -1403,6 +1436,7 @@ This generated block is review data for maintainers. The human-authored referenc
 - `window new`
 
 ##### Network, storage, artifacts, diagnostics, and performance
+
 - `network <action>`
 - `network route <url> [--abort|--body <json>] [--resource-type <csv>]`
 - `network unroute [url]`
@@ -1467,6 +1501,7 @@ This generated block is review data for maintainers. The human-authored referenc
 - `removeinitscript <id>`
 
 ##### Batch, auth, confirmations, setup, dashboard, devices, and AI commands
+
 - `batch [--bail]`
 - `auth save <name>`
 - `auth save <name> --url <url> --username <user> --password <pass>`
@@ -1506,6 +1541,7 @@ This generated block is review data for maintainers. The human-authored referenc
 - `profiles`
 
 ##### Global flags, config, providers, policy, and environment
+
 - `--profile <name|path>`
 - `AGENT_BROWSER_PROFILE`
 - `--session <name>`
@@ -1661,7 +1697,9 @@ This generated block is review data for maintainers. The human-authored referenc
 - `AWS_DEFAULT_REGION`
 
 #### Upstream help tokens expected
+
 ##### Built-in skills
+
 - root help: `skills get core --full`
 - skills help: `get <name> --full`
 - skills help: `get --all`
@@ -1688,6 +1726,7 @@ This generated block is review data for maintainers. The human-authored referenc
 - core skill full: `implicit roles work`
 
 ##### Core page, element, navigation, and extraction commands
+
 - open help: `open [url]`
 - open help: `aliases still require a URL.`
 - open help: `agent-browser webmcp list`
@@ -1784,6 +1823,7 @@ This generated block is review data for maintainers. The human-authored referenc
 - swipe help: `swipe <direction> [distance]`
 
 ##### Sessions, state, tabs, frames, dialogs, and windows
+
 - root help: `session list`
 - session help: `id`
 - session help: `info`
@@ -1812,6 +1852,7 @@ This generated block is review data for maintainers. The human-authored referenc
 - window help: `window <operation>`
 
 ##### Network, storage, artifacts, diagnostics, and performance
+
 - root help: `network <action>`
 - root help: `--resource-type <csv>`
 - network help: `unroute [url]`
@@ -1885,6 +1926,7 @@ This generated block is review data for maintainers. The human-authored referenc
 - errors help: `--clear`
 
 ##### Batch, auth, confirmations, setup, dashboard, devices, and AI commands
+
 - root help: `batch [--bail]`
 - root help: `auth save <name>`
 - root help: `auth login <name>`
@@ -1928,6 +1970,7 @@ This generated block is review data for maintainers. The human-authored referenc
 - plugin help: `credential.read`
 
 ##### Global flags, config, providers, policy, and environment
+
 - root help: `--profile <name|path>`
 - root help: `AGENT_BROWSER_PROFILE`
 - root help: `--session <name>`

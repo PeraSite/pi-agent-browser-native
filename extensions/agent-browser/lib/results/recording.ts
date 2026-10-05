@@ -1,6 +1,7 @@
 import { isRecord } from "../parsing.js";
 
-const RECORDING_QUALITY_WARNING = "Capture quality warning: repaint-driven capture, held/repeated or static frames, and late/final-state-only frames cannot establish UI smoothness. Output FPS is not captured-frame rate; inspect the recording and capture window before judging motion.";
+const RECORDING_QUALITY_WARNING =
+	"Capture quality warning: repaint-driven capture, held/repeated or static frames, and late/final-state-only frames cannot establish UI smoothness. Output FPS is not captured-frame rate; inspect the recording and capture window before judging motion.";
 
 export interface RecordingReceipt {
 	warning: string;
@@ -45,32 +46,64 @@ function text(value: unknown): string | null {
 	return typeof value === "string" && value.length > 0 ? value : null;
 }
 
-export function getRecordingReceipt(value: unknown, outcome?: boolean): RecordingReceipt | undefined {
-	if (!isRecord(value) || typeof value.path !== "string" || !value.path) return undefined;
+export function getRecordingReceipt(
+	value: unknown,
+	outcome?: boolean,
+): RecordingReceipt | undefined {
+	if (!isRecord(value) || typeof value.path !== "string" || !value.path) {
+		return undefined;
+	}
 	const capture = isRecord(value.capture) ? value.capture : {};
 	const output = isRecord(value.output) ? value.output : {};
 	const file = isRecord(value.file) ? value.file : {};
 	return {
 		warning: RECORDING_QUALITY_WARNING,
-		recordingId: text(value.recordingId), path: value.path,
-		success: typeof value.success === "boolean" ? value.success : value.success === null ? null : outcome ?? null,
-		error: text(value.error), frames: number(value.frames), capturedFrames: number(value.capturedFrames), fps: number(value.fps),
+		recordingId: text(value.recordingId),
+		path: value.path,
+		success:
+			typeof value.success === "boolean"
+				? value.success
+				: value.success === null
+					? null
+					: (outcome ?? null),
+		error: text(value.error),
+		frames: number(value.frames),
+		capturedFrames: number(value.capturedFrames),
+		fps: number(value.fps),
 		capture: {
-			startedAt: text(capture.startedAt), endedAt: text(capture.endedAt), durationMs: number(capture.durationMs),
-			firstFrameAt: text(capture.firstFrameAt), lastFrameAt: text(capture.lastFrameAt), firstFrameAfterMs: number(capture.firstFrameAfterMs), lastFrameAfterMs: number(capture.lastFrameAfterMs),
-			averageFps: number(capture.averageFps), maxFrameGapMs: number(capture.maxFrameGapMs), timestampSource: text(capture.timestampSource),
+			startedAt: text(capture.startedAt),
+			endedAt: text(capture.endedAt),
+			durationMs: number(capture.durationMs),
+			firstFrameAt: text(capture.firstFrameAt),
+			lastFrameAt: text(capture.lastFrameAt),
+			firstFrameAfterMs: number(capture.firstFrameAfterMs),
+			lastFrameAfterMs: number(capture.lastFrameAfterMs),
+			averageFps: number(capture.averageFps),
+			maxFrameGapMs: number(capture.maxFrameGapMs),
+			timestampSource: text(capture.timestampSource),
 		},
 		output: {
-			frames: number(output.frames ?? value.frames), fps: number(output.fps ?? value.fps), encodedFrames: number(output.encodedFrames),
-			durationMs: number(output.durationMs), durationSource: text(output.durationSource), heldFrames: number(output.heldFrames), droppedFrames: number(output.droppedFrames), skippedFrames: number(output.skippedFrames),
-			encoderSucceeded: typeof output.encoderSucceeded === "boolean" ? output.encoderSucceeded : null,
+			frames: number(output.frames ?? value.frames),
+			fps: number(output.fps ?? value.fps),
+			encodedFrames: number(output.encodedFrames),
+			durationMs: number(output.durationMs),
+			durationSource: text(output.durationSource),
+			heldFrames: number(output.heldFrames),
+			droppedFrames: number(output.droppedFrames),
+			skippedFrames: number(output.skippedFrames),
+			encoderSucceeded:
+				typeof output.encoderSucceeded === "boolean" ? output.encoderSucceeded : null,
 		},
-		file: { exists: typeof file.exists === "boolean" ? file.exists : null, sizeBytes: number(file.sizeBytes) },
+		file: {
+			exists: typeof file.exists === "boolean" ? file.exists : null,
+			sizeBytes: number(file.sizeBytes),
+		},
 	};
 }
 
 export function formatRecordingReceipt(receipt: RecordingReceipt): string {
-	const metric = (value: string | number | null, unit = "") => value === null ? "unknown" : `${value}${unit}`;
+	const metric = (value: string | number | null, unit = "") =>
+		value === null ? "unknown" : `${value}${unit}`;
 	return [
 		`Recording ID: ${metric(receipt.recordingId)}`,
 		`Native recording outcome: ${receipt.success === true ? "succeeded" : receipt.success === false ? "failed" : "pending/unknown"}${receipt.error ? ` — ${receipt.error}` : ""}`,

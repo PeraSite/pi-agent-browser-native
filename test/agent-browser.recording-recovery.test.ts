@@ -8,19 +8,36 @@ import { recoverRecordingStop } from "../extensions/agent-browser/lib/orchestrat
 import { runAgentBrowserProcess } from "../extensions/agent-browser/lib/process.js";
 import { extractUpstreamCommandTokens } from "../extensions/agent-browser/lib/argv-descriptor.js";
 import type { SessionArtifactManifest } from "../extensions/agent-browser/lib/results/contracts.js";
-import { applyArtifactChanges, getBrowserRecord } from "../extensions/agent-browser/lib/browser-transcript.js";
-import { createExtensionHarness, createToolBranchEntry, executeRegisteredTool, readInvocationLog, runExtensionEvent, withPatchedEnv, writeFakeAgentBrowserBinary } from "./helpers/agent-browser-harness.js";
+import {
+	applyArtifactChanges,
+	getBrowserRecord,
+} from "../extensions/agent-browser/lib/browser-transcript.js";
+import {
+	createExtensionHarness,
+	createToolBranchEntry,
+	executeRegisteredTool,
+	readInvocationLog,
+	runExtensionEvent,
+	withPatchedEnv,
+	writeFakeAgentBrowserBinary,
+} from "./helpers/agent-browser-harness.js";
 
-async function withRecorder(mode: string, run: (options: {
-	root: string;
-	logPath: string;
-	harness: ReturnType<typeof createExtensionHarness>;
-	prefix: string[];
-	reload: () => Promise<ReturnType<typeof createExtensionHarness>>;
-}) => Promise<void>): Promise<void> {
+async function withRecorder(
+	mode: string,
+	run: (options: {
+		root: string;
+		logPath: string;
+		harness: ReturnType<typeof createExtensionHarness>;
+		prefix: string[];
+		reload: () => Promise<ReturnType<typeof createExtensionHarness>>;
+	}) => Promise<void>,
+): Promise<void> {
 	const root = await mkdtemp(join(tmpdir(), "piab-recovery-"));
-	const logPath = join(root, "calls.jsonl"), statePath = join(root, "state.json");
-	await writeFakeAgentBrowserBinary(root, `const fs = require('node:fs'), path = require('node:path');
+	const logPath = join(root, "calls.jsonl"),
+		statePath = join(root, "state.json");
+	await writeFakeAgentBrowserBinary(
+		root,
+		`const fs = require('node:fs'), path = require('node:path');
 const args = process.argv.slice(2), stdin = fs.readFileSync(0, 'utf8');
 fs.appendFileSync(${JSON.stringify(logPath)}, JSON.stringify({ args, stdin }) + '\\n');
 const tokens = [];
@@ -83,33 +100,90 @@ if (tokens[0] === 'batch') {
   catch (error) { output = { success: false, error: error.message }; }
 }
 if (output !== undefined && (tokens[0] !== 'batch' || mode === 'mixed-failure')) { process.stdout.write(JSON.stringify(output)); process.exitCode = Array.isArray(output) ? Number(output.some(row => row.success === false)) : output.success === false ? 1 : 0; }
-`);
+`,
+	);
 	try {
-		await withPatchedEnv({ PATH: `${root}${delimiter}${process.env.PATH ?? ""}`, HOME: root, USERPROFILE: root, AGENT_BROWSER_SESSION: undefined, AGENT_BROWSER_NAMESPACE: undefined, PI_AGENT_BROWSER_TEST_CUSTOM_SESSION_INFO: "1" }, async () => {
-			const branch: unknown[] = [];
-			let harness = createExtensionHarness({ cwd: root, branch });
-			await runExtensionEvent(harness.handlers, "session_start", { reason: "new" }, harness.ctx);
-			const prefix = ["--namespace", "scope", "--session", "recorder"];
-			try {
-				await run({ root, logPath, harness, prefix, reload: async () => {
-					await runExtensionEvent(harness.handlers, "session_shutdown", { reason: "reload" }, harness.ctx);
-					harness = createExtensionHarness({ cwd: root, branch });
-					await runExtensionEvent(harness.handlers, "session_start", { reason: "resume" }, harness.ctx);
-					return harness;
-				} });
-			} finally { await runExtensionEvent(harness.handlers, "session_shutdown", { reason: "quit" }, harness.ctx); }
-		});
-	} finally { await rm(root, { recursive: true, force: true }); }
+		await withPatchedEnv(
+			{
+				PATH: `${root}${delimiter}${process.env.PATH ?? ""}`,
+				HOME: root,
+				USERPROFILE: root,
+				AGENT_BROWSER_SESSION: undefined,
+				AGENT_BROWSER_NAMESPACE: undefined,
+				PI_AGENT_BROWSER_TEST_CUSTOM_SESSION_INFO: "1",
+			},
+			async () => {
+				const branch: unknown[] = [];
+				let harness = createExtensionHarness({ cwd: root, branch });
+				await runExtensionEvent(harness.handlers, "session_start", { reason: "new" }, harness.ctx);
+				const prefix = ["--namespace", "scope", "--session", "recorder"];
+				try {
+					await run({
+						root,
+						logPath,
+						harness,
+						prefix,
+						reload: async () => {
+							await runExtensionEvent(
+								harness.handlers,
+								"session_shutdown",
+								{ reason: "reload" },
+								harness.ctx,
+							);
+							harness = createExtensionHarness({ cwd: root, branch });
+							await runExtensionEvent(
+								harness.handlers,
+								"session_start",
+								{ reason: "resume" },
+								harness.ctx,
+							);
+							return harness;
+						},
+					});
+				} finally {
+					await runExtensionEvent(
+						harness.handlers,
+						"session_shutdown",
+						{ reason: "quit" },
+						harness.ctx,
+					);
+				}
+			},
+		);
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
 }
 
 test("code-mode recording recovery retains receipt data without rendering", async () => {
 	await withRecorder("no-recording", async ({ root, harness, prefix }) => {
 		const path = join(root, "code.webm");
-		const started = await executeRegisteredTool(harness.tool, harness.ctx, { args: [...prefix, "record", "start", path] });
+		const started = await executeRegisteredTool(harness.tool, harness.ctx, {
+			args: [...prefix, "record", "start", path],
+		});
 		assert.equal(started.isError, false);
-		const processResult = await runAgentBrowserProcess({ args: ["--json", ...prefix, "record", "stop"], cwd: root });
-		const result = await recoverRecordingStop({ modelVisible: false, artifactRunStartedAtMs: Date.now() - 1000, commandTokens: ["record", "stop"], cwd: root, namespace: "scope", sessionName: "recorder", processResult,
-			envelope: { success: false, error: "No recording in progress" }, reservation: { absolutePath: path, cwd: root, path, namespace: "scope", sessionName: "recorder", recordingId: "new-take" } });
+		const processResult = await runAgentBrowserProcess({
+			args: ["--json", ...prefix, "record", "stop"],
+			cwd: root,
+		});
+		const result = await recoverRecordingStop({
+			modelVisible: false,
+			artifactRunStartedAtMs: Date.now() - 1000,
+			commandTokens: ["record", "stop"],
+			cwd: root,
+			namespace: "scope",
+			sessionName: "recorder",
+			processResult,
+			envelope: { success: false, error: "No recording in progress" },
+			reservation: {
+				absolutePath: path,
+				cwd: root,
+				path,
+				namespace: "scope",
+				sessionName: "recorder",
+				recordingId: "new-take",
+			},
+		});
 		assert.equal(result?.recovery.healed, true);
 		assert.deepEqual(result.presentation.content, []);
 		assert.equal(result.presentation.fullOutputPath, undefined);
@@ -118,35 +192,67 @@ test("code-mode recording recovery retains receipt data without rendering", asyn
 });
 
 for (const outputPrefix of ["", "@"]) {
-	test(`record stop rejects recording outputPath alias: ${outputPrefix || "exact"}`, { concurrency: false }, async () => {
-		await withRecorder("no-recording", async ({ root, logPath, harness, prefix }) => {
-			const path = join(root, "capture.webm"), media = "recording bytes written before stop";
-			const started = await executeRegisteredTool(harness.tool, harness.ctx, { args: [...prefix, "record", "start", path] });
-			assert.equal(started.isError, false, started.content[0]?.text);
-			await writeFile(path, media);
-			await writeFile(logPath, "");
-			const result = await executeRegisteredTool(harness.tool, harness.ctx, { args: [...prefix, "record", "stop"], outputPath: `${outputPrefix}${path}` });
-			assert.equal(result.isError, true);
-			assert.match(result.content[0]?.text ?? "", /reserved by an active recording/);
-			assert.deepEqual(await readInvocationLog(logPath), []);
-			assert.equal(await readFile(path, "utf8"), media);
-			assert.equal(result.details?.outputFile, undefined);
-		});
-	});
+	test(
+		`record stop rejects recording outputPath alias: ${outputPrefix || "exact"}`,
+		{ concurrency: false },
+		async () => {
+			await withRecorder("no-recording", async ({ root, logPath, harness, prefix }) => {
+				const path = join(root, "capture.webm"),
+					media = "recording bytes written before stop";
+				const started = await executeRegisteredTool(harness.tool, harness.ctx, {
+					args: [...prefix, "record", "start", path],
+				});
+				assert.equal(started.isError, false, started.content[0]?.text);
+				await writeFile(path, media);
+				await writeFile(logPath, "");
+				const result = await executeRegisteredTool(harness.tool, harness.ctx, {
+					args: [...prefix, "record", "stop"],
+					outputPath: `${outputPrefix}${path}`,
+				});
+				assert.equal(result.isError, true);
+				assert.match(result.content[0]?.text ?? "", /reserved by an active recording/);
+				assert.deepEqual(await readInvocationLog(logPath), []);
+				assert.equal(await readFile(path, "utf8"), media);
+				assert.equal(result.details?.outputFile, undefined);
+			});
+		},
+	);
 }
 
-for (const mode of ["timeout", "no-recording", "no-recording-no-receipt", "old-receipt", "pending-reused-path", "id-mismatch", "namespace-mismatch", "path-mismatch", "file-mismatch", "no-receipt", "query-failed", "timeout-native-failed", "encode-failed"]) {
+for (const mode of [
+	"timeout",
+	"no-recording",
+	"no-recording-no-receipt",
+	"old-receipt",
+	"pending-reused-path",
+	"id-mismatch",
+	"namespace-mismatch",
+	"path-mismatch",
+	"file-mismatch",
+	"no-receipt",
+	"query-failed",
+	"timeout-native-failed",
+	"encode-failed",
+]) {
 	test(`record stop receipt recovery: ${mode}`, { concurrency: false }, async () => {
 		await withRecorder(mode, async ({ root, logPath, harness, prefix, reload }) => {
-			const started = await executeRegisteredTool(harness.tool, harness.ctx, { args: [...prefix, "record", "start", join(root, "capture.webm")] });
+			const started = await executeRegisteredTool(harness.tool, harness.ctx, {
+				args: [...prefix, "record", "start", join(root, "capture.webm")],
+			});
 			assert.equal(started.isError, false, started.content[0]?.text);
 			if (mode === "old-receipt") {
-				harness.ctx.sessionManager.getBranch().push(createToolBranchEntry({ details: started.details!, isError: started.isError }));
+				harness.ctx.sessionManager
+					.getBranch()
+					.push(createToolBranchEntry({ details: started.details!, isError: started.isError }));
 				harness = await reload();
 			}
 			await writeFile(logPath, "");
 			const outputPath = join(root, "receipt.json");
-			const result = await executeRegisteredTool(harness.tool, harness.ctx, { args: [...prefix, "--json", "record", "stop"], timeoutMs: 200, outputPath });
+			const result = await executeRegisteredTool(harness.tool, harness.ctx, {
+				args: [...prefix, "--json", "record", "stop"],
+				timeoutMs: 200,
+				outputPath,
+			});
 			const healed = ["timeout", "no-recording", "old-receipt"].includes(mode);
 			assert.equal(result.isError, !healed, result.content[0]?.text);
 			const visible = JSON.parse(result.content[0]?.text ?? "");
@@ -158,8 +264,18 @@ for (const mode of ["timeout", "no-recording", "no-recording-no-receipt", "old-r
 			const recovery = exported.recordingRecovery;
 			if (mode !== "encode-failed") {
 				assert.equal(recovery.healed, healed);
-				const calls = (await readInvocationLog(logPath)).map(row => extractUpstreamCommandTokens(row.args));
-				assert.deepEqual(calls, [["session", "info"], ["record", "stop"], ["session", "info"]], "one bootstrap inspection and one bounded receipt recovery, no page probe or repeated stop");
+				const calls = (await readInvocationLog(logPath)).map((row) =>
+					extractUpstreamCommandTokens(row.args),
+				);
+				assert.deepEqual(
+					calls,
+					[
+						["session", "info"],
+						["record", "stop"],
+						["session", "info"],
+					],
+					"one bootstrap inspection and one bounded receipt recovery, no page probe or repeated stop",
+				);
 			}
 			if (healed) {
 				assert.equal(exported.artifactVerification.verified, true);
@@ -169,10 +285,22 @@ for (const mode of ["timeout", "no-recording", "no-recording-no-receipt", "old-r
 			if (mode === "pending-reused-path") {
 				assert.equal(recovery.status, "pending");
 				assert.equal(exported.artifacts[0].recording.recordingId, "new-take");
-				assert.equal(exported.artifacts[0].recording.capturedFrames, 0, "last receipt's frames cannot be attributed to the new take at the same path");
+				assert.equal(
+					exported.artifacts[0].recording.capturedFrames,
+					0,
+					"last receipt's frames cannot be attributed to the new take at the same path",
+				);
 				assert.equal(exported.artifactVerification.pendingCount, 1);
 			}
-			if (["id-mismatch", "namespace-mismatch", "path-mismatch", "no-receipt", "query-failed"].includes(mode)) {
+			if (
+				[
+					"id-mismatch",
+					"namespace-mismatch",
+					"path-mismatch",
+					"no-receipt",
+					"query-failed",
+				].includes(mode)
+			) {
 				assert.equal(exported.artifactVerification.verified, false);
 				assert.equal(recovery.receipt, undefined);
 				assert.equal(result.details?.failureCategory, "timeout");
@@ -180,89 +308,171 @@ for (const mode of ["timeout", "no-recording", "no-recording-no-receipt", "old-r
 			if (mode === "no-recording-no-receipt") {
 				assert.equal(exported.artifacts[0].status, "unverified");
 				assert.equal(exported.artifacts[0].recording.success, null);
-				const manifest = result.details?.artifactManifest as { entries: Array<{ path: string; exists?: boolean; status?: string }> };
-				assert.equal(manifest.entries.find(entry => entry.path.endsWith("capture.webm"))?.exists, true);
+				const manifest = result.details?.artifactManifest as {
+					entries: Array<{ path: string; exists?: boolean; status?: string }>;
+				};
+				assert.equal(
+					manifest.entries.find((entry) => entry.path.endsWith("capture.webm"))?.exists,
+					true,
+				);
 			}
 			if (mode === "file-mismatch") {
 				assert.equal(recovery.status, "unverified");
 				assert.equal(exported.artifactVerification.verified, false);
 			}
-			if (["encode-failed", "timeout-native-failed"].includes(mode)) assert.equal(exported.artifacts[0].recording.success, false);
+			if (["encode-failed", "timeout-native-failed"].includes(mode)) {
+				assert.equal(exported.artifacts[0].recording.success, false);
+			}
 		});
 	});
 }
 
-test("recording failure secrets stay redacted in retained public manifests", { concurrency: false }, async () => {
-	await withRecorder("encode-failed", async ({ root, harness, prefix }) => {
-		const path = join(root, "capture.webm");
-		const started = await executeRegisteredTool(harness.tool, harness.ctx, { args: [...prefix, "record", "start", path] });
-		assert.equal(started.isError, false, started.content[0]?.text);
-		const stopped = await executeRegisteredTool(harness.tool, harness.ctx, { args: [...prefix, "record", "stop"] });
-		assert.equal(stopped.isError, true);
-		const followup = await executeRegisteredTool(harness.tool, harness.ctx, { args: [...prefix, "get", "url"] });
-		assert.equal(followup.isError, false, followup.content[0]?.text);
-		for (const result of [stopped, followup]) {
-			assert.equal(JSON.stringify(result).includes("RECORDING_AUTH_SECRET"), false);
-			assert.equal(JSON.stringify(result).includes("RECORDING_STATE_SECRET"), false);
-		}
-		assert.equal(followup.details?.artifactManifest, undefined, "an unrelated read does not copy recording history");
-		let retained: SessionArtifactManifest | undefined;
-		for (const entry of harness.ctx.sessionManager.getBranch()) retained = applyArtifactChanges(retained, getBrowserRecord(entry)?.event.artifacts);
-		for (const manifest of [stopped.details?.artifactManifest as SessionArtifactManifest, retained!]) {
-			assert.equal(JSON.stringify(manifest).includes("RECORDING_AUTH_SECRET"), false);
-			assert.equal(JSON.stringify(manifest).includes("RECORDING_STATE_SECRET"), false);
-			const artifact = manifest.entries.find(entry => entry.absolutePath === path);
-			assert.equal(artifact?.recording?.recordingId, "new-take");
-			assert.equal(artifact?.recording?.path, path);
-			assert.equal(artifact?.exists, true);
-			assert.equal(decodeURIComponent(artifact?.recording?.error ?? ""), "Encoder failed: https://recording.test/?authorization_session_id=[REDACTED]&state=[REDACTED]");
-		}
-		assert.equal(await readFile(path, "utf8"), "video");
-	});
-});
+test(
+	"recording failure secrets stay redacted in retained public manifests",
+	{ concurrency: false },
+	async () => {
+		await withRecorder("encode-failed", async ({ root, harness, prefix }) => {
+			const path = join(root, "capture.webm");
+			const started = await executeRegisteredTool(harness.tool, harness.ctx, {
+				args: [...prefix, "record", "start", path],
+			});
+			assert.equal(started.isError, false, started.content[0]?.text);
+			const stopped = await executeRegisteredTool(harness.tool, harness.ctx, {
+				args: [...prefix, "record", "stop"],
+			});
+			assert.equal(stopped.isError, true);
+			const followup = await executeRegisteredTool(harness.tool, harness.ctx, {
+				args: [...prefix, "get", "url"],
+			});
+			assert.equal(followup.isError, false, followup.content[0]?.text);
+			for (const result of [stopped, followup]) {
+				assert.equal(JSON.stringify(result).includes("RECORDING_AUTH_SECRET"), false);
+				assert.equal(JSON.stringify(result).includes("RECORDING_STATE_SECRET"), false);
+			}
+			assert.equal(
+				followup.details?.artifactManifest,
+				undefined,
+				"an unrelated read does not copy recording history",
+			);
+			let retained: SessionArtifactManifest | undefined;
+			for (const entry of harness.ctx.sessionManager.getBranch()) {
+				retained = applyArtifactChanges(retained, getBrowserRecord(entry)?.event.artifacts);
+			}
+			for (const manifest of [
+				stopped.details?.artifactManifest as SessionArtifactManifest,
+				retained!,
+			]) {
+				assert.equal(JSON.stringify(manifest).includes("RECORDING_AUTH_SECRET"), false);
+				assert.equal(JSON.stringify(manifest).includes("RECORDING_STATE_SECRET"), false);
+				const artifact = manifest.entries.find((entry) => entry.absolutePath === path);
+				assert.equal(artifact?.recording?.recordingId, "new-take");
+				assert.equal(artifact?.recording?.path, path);
+				assert.equal(artifact?.exists, true);
+				assert.equal(
+					decodeURIComponent(artifact?.recording?.error ?? ""),
+					"Encoder failed: https://recording.test/?authorization_session_id=[REDACTED]&state=[REDACTED]",
+				);
+			}
+			assert.equal(await readFile(path, "utf8"), "video");
+		});
+	},
+);
 
-test("a recovered later stop preserves the earlier failed batch step's repair action", { concurrency: false }, async () => {
-	await withRecorder("mixed-failure", async ({ root, harness, prefix }) => {
-		const started = await executeRegisteredTool(harness.tool, harness.ctx, { args: [...prefix, "record", "start", join(root, "mixed.webm")] });
-		assert.equal(started.isError, false, started.content[0]?.text);
-		const snapshot = await executeRegisteredTool(harness.tool, harness.ctx, { args: [...prefix, "snapshot", "-i"] });
-		assert.equal(snapshot.isError, false, snapshot.content[0]?.text);
-		const result = await executeRegisteredTool(harness.tool, harness.ctx, { args: [...prefix, "batch"], stdin: JSON.stringify([["snapshot", "-i"], ["get", "text", "@e1"], ["record", "stop"]]) });
-		assert.equal(result.isError, true);
-		assert.equal(result.details?.failureCategory, "stale-ref");
-		assert.equal((result.details?.recordingRecovery as { status: string }).status, "recovered");
-		assert.equal((result.details?.recordingRecovery as { healed: boolean }).healed, false);
-		assert.ok((result.details?.nextActions as Array<{ id: string }>).some(action => action.id === "refresh-interactive-refs"));
-		assert.equal((result.details?.batchSteps as Array<{ success: boolean }>)[2].success, true);
-	});
-});
+test(
+	"a recovered later stop preserves the earlier failed batch step's repair action",
+	{ concurrency: false },
+	async () => {
+		await withRecorder("mixed-failure", async ({ root, harness, prefix }) => {
+			const started = await executeRegisteredTool(harness.tool, harness.ctx, {
+				args: [...prefix, "record", "start", join(root, "mixed.webm")],
+			});
+			assert.equal(started.isError, false, started.content[0]?.text);
+			const snapshot = await executeRegisteredTool(harness.tool, harness.ctx, {
+				args: [...prefix, "snapshot", "-i"],
+			});
+			assert.equal(snapshot.isError, false, snapshot.content[0]?.text);
+			const result = await executeRegisteredTool(harness.tool, harness.ctx, {
+				args: [...prefix, "batch"],
+				stdin: JSON.stringify([
+					["snapshot", "-i"],
+					["get", "text", "@e1"],
+					["record", "stop"],
+				]),
+			});
+			assert.equal(result.isError, true);
+			assert.equal(result.details?.failureCategory, "stale-ref");
+			assert.equal((result.details?.recordingRecovery as { status: string }).status, "recovered");
+			assert.equal((result.details?.recordingRecovery as { healed: boolean }).healed, false);
+			assert.ok(
+				(result.details?.nextActions as Array<{ id: string }>).some(
+					(action) => action.id === "refresh-interactive-refs",
+				),
+			);
+			assert.equal((result.details?.batchSteps as Array<{ success: boolean }>)[2].success, true);
+		});
+	},
+);
 
-test("a no-recording failure without start metadata still exports an honest empty receipt", { concurrency: false }, async () => {
-	await withRecorder("no-recording", async ({ root, harness, prefix }) => {
-		const outputPath = join(root, "empty.json");
-		const result = await executeRegisteredTool(harness.tool, harness.ctx, { args: [...prefix, "--json", "record", "stop"], outputPath });
-		assert.equal(result.isError, true);
-		const payload = JSON.parse(await readFile(outputPath, "utf8"));
-		assert.equal(payload.success, false);
-		assert.equal(payload.data, null);
-		assert.equal(payload.recordingRecovery.receipt, undefined);
-		assert.equal(payload.recordingRecovery.healed, false);
-		assert.equal(JSON.parse(result.content[0]?.text ?? "").success, false);
-	});
-});
+test(
+	"a no-recording failure without start metadata still exports an honest empty receipt",
+	{ concurrency: false },
+	async () => {
+		await withRecorder("no-recording", async ({ root, harness, prefix }) => {
+			const outputPath = join(root, "empty.json");
+			const result = await executeRegisteredTool(harness.tool, harness.ctx, {
+				args: [...prefix, "--json", "record", "stop"],
+				outputPath,
+			});
+			assert.equal(result.isError, true);
+			const payload = JSON.parse(await readFile(outputPath, "utf8"));
+			assert.equal(payload.success, false);
+			assert.equal(payload.data, null);
+			assert.equal(payload.recordingRecovery.receipt, undefined);
+			assert.equal(payload.recordingRecovery.healed, false);
+			assert.equal(JSON.parse(result.content[0]?.text ?? "").success, false);
+		});
+	},
+);
 
 for (const mode of ["timeout", "stale-batch"]) {
-	test(`timed-out raw recording batch keeps receipt evidence without claiming other steps succeeded: ${mode}`, { concurrency: false }, async () => {
-		await withRecorder(mode, async ({ root, logPath, harness, prefix }) => {
-			const path = join(root, "raw.webm"), outputPath = join(root, "batch-receipt.json");
-			const result = await executeRegisteredTool(harness.tool, harness.ctx, { args: [...prefix, "batch", `record start ${JSON.stringify(path)}`, "record stop"], stdin: JSON.stringify([["record", "start", join(root, "ignored.webm")], ["record", "stop"]]), timeoutMs: 200, outputPath });
-			assert.equal(result.isError, true, "a recording receipt cannot prove all timed-out batch steps succeeded");
-			assert.equal((result.details?.outputFile as { status?: string } | undefined)?.status, "saved", JSON.stringify(result));
-			const exported = JSON.parse(await readFile(outputPath, "utf8"));
-			assert.equal(exported.recordingRecovery.expected.absolutePath, path);
-			assert.equal(exported.recordingRecovery.healed, false);
-			assert.equal(exported.artifactVerification.verified, mode === "timeout");
-			assert.equal((await readInvocationLog(logPath)).filter(row => extractUpstreamCommandTokens(row.args)[0] === "session").length, 2, "bootstrap inspection plus receipt recovery");
-		});
-	});
+	test(
+		`timed-out raw recording batch keeps receipt evidence without claiming other steps succeeded: ${mode}`,
+		{ concurrency: false },
+		async () => {
+			await withRecorder(mode, async ({ root, logPath, harness, prefix }) => {
+				const path = join(root, "raw.webm"),
+					outputPath = join(root, "batch-receipt.json");
+				const result = await executeRegisteredTool(harness.tool, harness.ctx, {
+					args: [...prefix, "batch", `record start ${JSON.stringify(path)}`, "record stop"],
+					stdin: JSON.stringify([
+						["record", "start", join(root, "ignored.webm")],
+						["record", "stop"],
+					]),
+					timeoutMs: 200,
+					outputPath,
+				});
+				assert.equal(
+					result.isError,
+					true,
+					"a recording receipt cannot prove all timed-out batch steps succeeded",
+				);
+				assert.equal(
+					(result.details?.outputFile as { status?: string } | undefined)?.status,
+					"saved",
+					JSON.stringify(result),
+				);
+				const exported = JSON.parse(await readFile(outputPath, "utf8"));
+				assert.equal(exported.recordingRecovery.expected.absolutePath, path);
+				assert.equal(exported.recordingRecovery.healed, false);
+				assert.equal(exported.artifactVerification.verified, mode === "timeout");
+				assert.equal(
+					(await readInvocationLog(logPath)).filter(
+						(row) => extractUpstreamCommandTokens(row.args)[0] === "session",
+					).length,
+					2,
+					"bootstrap inspection plus receipt recovery",
+				);
+			});
+		},
+	);
 }

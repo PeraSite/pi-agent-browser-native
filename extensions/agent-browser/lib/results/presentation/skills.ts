@@ -3,42 +3,62 @@ import type { CommandInfo } from "../../runtime.js";
 import { getStringField, redactModelFacingText, stringifyModelFacing } from "./common.js";
 
 function formatSkillsListText(skills: unknown[]): string {
-	if (skills.length === 0) return "No agent-browser skills found.";
+	if (skills.length === 0) {
+		return "No agent-browser skills found.";
+	}
 	return skills
 		.map((item, index) => {
-			if (!isRecord(item)) return `${index + 1}. ${stringifyModelFacing(item)}`;
+			if (!isRecord(item)) {
+				return `${index + 1}. ${stringifyModelFacing(item)}`;
+			}
 			const name = redactModelFacingText(getStringField(item, "name") ?? `(skill ${index + 1})`);
 			const description = getStringField(item, "description");
-			return description ? `${index + 1}. ${name} — ${redactModelFacingText(description)}` : `${index + 1}. ${name}`;
+			return description
+				? `${index + 1}. ${name} — ${redactModelFacingText(description)}`
+				: `${index + 1}. ${name}`;
 		})
 		.join("\n");
 }
 
 function getSkillContent(data: unknown): string | undefined {
-	if (typeof data === "string") return data;
-	if (isRecord(data) && typeof data.content === "string") return data.content;
-	if (!Array.isArray(data)) return undefined;
-	const content = data.flatMap((item) => (isRecord(item) && typeof item.content === "string" ? [item.content] : []));
+	if (typeof data === "string") {
+		return data;
+	}
+	if (isRecord(data) && typeof data.content === "string") {
+		return data.content;
+	}
+	if (!Array.isArray(data)) {
+		return undefined;
+	}
+	const content = data.flatMap((item) =>
+		isRecord(item) && typeof item.content === "string" ? [item.content] : [],
+	);
 	return content.length > 0 ? content.join("\n\n") : undefined;
 }
 
 function splitShellWords(input: string): string[] | undefined {
 	const words: string[] = [];
 	let current = "";
-	let quote: 'single' | 'double' | undefined;
+	let quote: "single" | "double" | undefined;
 	for (let index = 0; index < input.length; index += 1) {
 		const char = input[index];
 		if (quote === "single") {
-			if (char === "'") quote = undefined;
-			else current += char;
+			if (char === "'") {
+				quote = undefined;
+			} else {
+				current += char;
+			}
 			continue;
 		}
 		if (quote === "double") {
-			if (char === '"') quote = undefined;
-			else if (char === "\\" && index + 1 < input.length) {
+			if (char === '"') {
+				quote = undefined;
+			} else if (char === "\\" && index + 1 < input.length) {
 				index += 1;
 				current += input[index];
-			} else current += char;
+			} else {
+				current += char;
+			}
 			continue;
 		}
 		if (char === "'") {
@@ -66,8 +86,12 @@ function splitShellWords(input: string): string[] | undefined {
 		}
 		current += char;
 	}
-	if (quote) return undefined;
-	if (current.length > 0) words.push(current);
+	if (quote) {
+		return undefined;
+	}
+	if (current.length > 0) {
+		words.push(current);
+	}
 	return words;
 }
 
@@ -78,7 +102,10 @@ function formatNativeAgentBrowserCall(args: string[], stdin?: string): string {
 }
 
 function formatNativeSkillContent(content: string): string {
-	const lines = content.replace(/^allowed-tools:.*agent-browser.*\n?/gim, "").replace(/^```bash\s*$/gim, "```text").split("\n");
+	const lines = content
+		.replace(/^allowed-tools:.*agent-browser.*\n?/gim, "")
+		.replace(/^```bash\s*$/gim, "```text")
+		.split("\n");
 	const output: string[] = [];
 	for (let index = 0; index < lines.length; index += 1) {
 		const line = lines[index];
@@ -106,7 +133,9 @@ function formatNativeSkillContent(content: string): string {
 		let cursor = index + 1;
 		while (cursor < lines.length) {
 			const candidate = stripsLeadingTabs ? lines[cursor].replace(/^\t+/, "") : lines[cursor];
-			if (candidate === delimiter) break;
+			if (candidate === delimiter) {
+				break;
+			}
 			stdinLines.push(candidate);
 			cursor += 1;
 		}
@@ -121,9 +150,15 @@ function formatNativeSkillContent(content: string): string {
 }
 
 export function formatSkillsText(commandInfo: CommandInfo, data: unknown): string | undefined {
-	if (commandInfo.command !== "skills") return undefined;
-	if (commandInfo.subcommand === "path") return typeof data === "string" ? redactModelFacingText(data) : undefined;
-	if (commandInfo.subcommand === "list" && Array.isArray(data)) return formatSkillsListText(data);
+	if (commandInfo.command !== "skills") {
+		return undefined;
+	}
+	if (commandInfo.subcommand === "path") {
+		return typeof data === "string" ? redactModelFacingText(data) : undefined;
+	}
+	if (commandInfo.subcommand === "list" && Array.isArray(data)) {
+		return formatSkillsListText(data);
+	}
 	const content = getSkillContent(data);
 	if (content) {
 		const note = [
@@ -132,6 +167,8 @@ export function formatSkillsText(commandInfo: CommandInfo, data: unknown): strin
 		].join("\n");
 		return `${note}\n\n${redactModelFacingText(formatNativeSkillContent(content))}`;
 	}
-	if (typeof data === "string") return redactModelFacingText(formatNativeSkillContent(data));
+	if (typeof data === "string") {
+		return redactModelFacingText(formatNativeSkillContent(data));
+	}
 	return undefined;
 }

@@ -1,22 +1,23 @@
 {
-  "compilerOptions": {
-    "target": "ES2022",
-    "module": "NodeNext",
-    "moduleResolution": "NodeNext",
-    "strict": true,
-    "noEmit": true,
-    "noUnusedLocals": true,
-    "allowImportingTsExtensions": true,
-    "allowJs": true,
-    "skipLibCheck": true,
-    "esModuleInterop": true,
-    "forceConsistentCasingInFileNames": true,
-    "types": ["node"]
-  },
-  "include": [
-    ".pi/extensions/**/*.ts",
-    "extensions/**/*.ts",
-    "extensions/agent-browser/lib/config-policy.js",
-    "test/**/*.ts"
-  ]
+	"compilerOptions": {
+		"target": "ES2022",
+		"module": "NodeNext",
+		"moduleResolution": "NodeNext",
+		"strict": true,
+		"noImplicitReturns": true,
+		"noEmit": true,
+		"noUnusedLocals": true,
+		"allowImportingTsExtensions": true,
+		"allowJs": true,
+		"skipLibCheck": true,
+		"esModuleInterop": true,
+		"forceConsistentCasingInFileNames": true,
+		"types": ["node"]
+	},
+	"include": [
+		".pi/extensions/**/*.ts",
+		"extensions/**/*.ts",
+		"extensions/agent-browser/lib/config-policy.js",
+		"test/**/*.ts"
+	]
 }

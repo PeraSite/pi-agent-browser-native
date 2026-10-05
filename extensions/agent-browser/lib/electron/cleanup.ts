@@ -4,7 +4,12 @@ import { win32 } from "node:path";
 import { promisify } from "node:util";
 
 import { fetchCdpJson, parseCdpTargets, parseCdpVersion } from "./cdp.js";
-import { ELECTRON_PROFILE_DIR_PREFIX, type ElectronCdpTarget, type ElectronCdpVersion, type ElectronLaunchRecord } from "./launch.js";
+import {
+	ELECTRON_PROFILE_DIR_PREFIX,
+	type ElectronCdpTarget,
+	type ElectronCdpVersion,
+	type ElectronLaunchRecord,
+} from "./launch.js";
 import { pathExists } from "../fs-utils.js";
 import { getSecureTempChildDirectoryValidationError } from "../temp.js";
 
@@ -46,7 +51,9 @@ function sleep(ms: number): Promise<void> {
 }
 
 function isPidAlive(pid: number | undefined): boolean | undefined {
-	if (!pid || !Number.isSafeInteger(pid) || pid <= 0) return undefined;
+	if (!pid || !Number.isSafeInteger(pid) || pid <= 0) {
+		return undefined;
+	}
 	try {
 		process.kill(pid, 0);
 		return true;
@@ -56,14 +63,24 @@ function isPidAlive(pid: number | undefined): boolean | undefined {
 	}
 }
 
-async function isPortAlive(port: number, signal?: AbortSignal): Promise<{ targets: ElectronCdpTarget[]; version?: ElectronCdpVersion }> {
-	const version = parseCdpVersion(await fetchCdpJson(`http://127.0.0.1:${port}/json/version`, signal));
-	if (!version) return { targets: [] };
+async function isPortAlive(
+	port: number,
+	signal?: AbortSignal,
+): Promise<{ targets: ElectronCdpTarget[]; version?: ElectronCdpVersion }> {
+	const version = parseCdpVersion(
+		await fetchCdpJson(`http://127.0.0.1:${port}/json/version`, signal),
+	);
+	if (!version) {
+		return { targets: [] };
+	}
 	const targets = parseCdpTargets(await fetchCdpJson(`http://127.0.0.1:${port}/json/list`, signal));
 	return { targets, version };
 }
 
-export async function inspectElectronLaunchStatus(record: ElectronLaunchRecord, signal?: AbortSignal): Promise<ElectronLaunchStatus> {
+export async function inspectElectronLaunchStatus(
+	record: ElectronLaunchRecord,
+	signal?: AbortSignal,
+): Promise<ElectronLaunchStatus> {
 	const cdp = await isPortAlive(record.port, signal);
 	let userDataDirState: ElectronLaunchStatus["userDataDirState"];
 	try {
@@ -91,28 +108,42 @@ function hasProcessExited(child: ChildProcess | undefined, pid: number | undefin
 	return child ? child.exitCode !== null || child.signalCode !== null : isPidAlive(pid) === false;
 }
 
-async function waitForProcessExit(child: ChildProcess | undefined, pid: number | undefined, deadlineMs: number): Promise<boolean> {
+async function waitForProcessExit(
+	child: ChildProcess | undefined,
+	pid: number | undefined,
+	deadlineMs: number,
+): Promise<boolean> {
 	while (Date.now() <= deadlineMs) {
-		if (hasProcessExited(child, pid)) return true;
+		if (hasProcessExited(child, pid)) {
+			return true;
+		}
 		await sleep(ELECTRON_CLEANUP_POLL_INTERVAL_MS);
 	}
 	return hasProcessExited(child, pid);
 }
 
 async function readPidCommandLine(pid: number | undefined): Promise<string | undefined> {
-	if (!pid || !Number.isSafeInteger(pid) || pid <= 0) return undefined;
+	if (!pid || !Number.isSafeInteger(pid) || pid <= 0) {
+		return undefined;
+	}
 	try {
 		// Win32_Process.CommandLine is the native ownership evidence; process
 		// start time (used by daemon-policy locks) cannot prove profile ownership.
 		const systemRoot = process.env.SystemRoot;
 		const windowsRoot = systemRoot && win32.isAbsolute(systemRoot) ? systemRoot : "C:\\Windows";
-		const file = process.platform === "win32"
-			? win32.join(windowsRoot, "System32", "WindowsPowerShell", "v1.0", "powershell.exe")
-			: "ps";
-		const args = process.platform === "win32"
-			? ["-NoProfile", "-NonInteractive", "-Command",
-				`[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new(); $p = [wmi]"Win32_Process.Handle='${pid}'"; [Console]::WriteLine($p.CommandLine)`]
-			: ["-ww", "-p", String(pid), "-o", "command="];
+		const file =
+			process.platform === "win32"
+				? win32.join(windowsRoot, "System32", "WindowsPowerShell", "v1.0", "powershell.exe")
+				: "ps";
+		const args =
+			process.platform === "win32"
+				? [
+						"-NoProfile",
+						"-NonInteractive",
+						"-Command",
+						`[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new(); $p = [wmi]"Win32_Process.Handle='${pid}'"; [Console]::WriteLine($p.CommandLine)`,
+					]
+				: ["-ww", "-p", String(pid), "-o", "command="];
 		const { stdout } = await execFileAsync(file, args, {
 			timeout: RESTORED_PROCESS_COMMAND_TIMEOUT_MS,
 		});
@@ -122,11 +153,16 @@ async function readPidCommandLine(pid: number | undefined): Promise<string | und
 	}
 }
 
-function restoredLaunchCommandMatchesRecord(record: ElectronLaunchRecord, commandLine: string | undefined): boolean {
+function restoredLaunchCommandMatchesRecord(
+	record: ElectronLaunchRecord,
+	commandLine: string | undefined,
+): boolean {
 	return commandLine?.includes(`--user-data-dir=${record.userDataDir}`) === true;
 }
 
-async function getRestoredProcessVerificationError(record: ElectronLaunchRecord): Promise<string | undefined> {
+async function getRestoredProcessVerificationError(
+	record: ElectronLaunchRecord,
+): Promise<string | undefined> {
 	const commandLine = await readPidCommandLine(record.pid);
 	if (!commandLine) {
 		return `PID ${record.pid} is alive, but this session has no tracked child handle and its command line could not be inspected; refusing to signal a restored PID that may have been reused.`;
@@ -138,7 +174,9 @@ async function getRestoredProcessVerificationError(record: ElectronLaunchRecord)
 }
 
 function killPid(pid: number | undefined, signal: NodeJS.Signals): boolean {
-	if (!pid || !Number.isSafeInteger(pid) || pid <= 0) return false;
+	if (!pid || !Number.isSafeInteger(pid) || pid <= 0) {
+		return false;
+	}
 	try {
 		process.kill(pid, signal);
 		return true;
@@ -148,7 +186,14 @@ function killPid(pid: number | undefined, signal: NodeJS.Signals): boolean {
 }
 
 function killProcessGroup(processGroupId: number | undefined, signal: NodeJS.Signals): boolean {
-	if (process.platform === "win32" || !processGroupId || !Number.isSafeInteger(processGroupId) || processGroupId <= 0) return false;
+	if (
+		process.platform === "win32" ||
+		!processGroupId ||
+		!Number.isSafeInteger(processGroupId) ||
+		processGroupId <= 0
+	) {
+		return false;
+	}
 	try {
 		process.kill(-processGroupId, signal);
 		return true;
@@ -157,60 +202,135 @@ function killProcessGroup(processGroupId: number | undefined, signal: NodeJS.Sig
 	}
 }
 
-function signalRestoredLaunchProcess(record: ElectronLaunchRecord, signal: NodeJS.Signals): boolean {
+function signalRestoredLaunchProcess(
+	record: ElectronLaunchRecord,
+	signal: NodeJS.Signals,
+): boolean {
 	return killProcessGroup(record.processGroupId, signal) || killPid(record.pid, signal);
 }
 
-async function cleanupProcess(record: ElectronLaunchRecord, child: ChildProcess | undefined, deadlineMs: number): Promise<ElectronCleanupStep> {
-	if (!record.pid) return { resource: "process", state: "skipped" };
-	if (hasProcessExited(child, record.pid)) return { resource: "process", state: "already-gone" };
+async function cleanupProcess(
+	record: ElectronLaunchRecord,
+	child: ChildProcess | undefined,
+	deadlineMs: number,
+): Promise<ElectronCleanupStep> {
+	if (!record.pid) {
+		return { resource: "process", state: "skipped" };
+	}
+	if (hasProcessExited(child, record.pid)) {
+		return { resource: "process", state: "already-gone" };
+	}
 	if (!child) {
 		const verificationError = await getRestoredProcessVerificationError(record);
-		if (verificationError) return { error: verificationError, resource: "process", state: "failed" };
-		if (!signalRestoredLaunchProcess(record, "SIGTERM")) {
-			return { error: `PID ${record.pid} matched wrapper launch metadata but could not be signaled.`, resource: "process", state: "failed" };
+		if (verificationError) {
+			return { error: verificationError, resource: "process", state: "failed" };
 		}
-		if (await waitForProcessExit(undefined, record.pid, deadlineMs)) return { resource: "process", state: "removed" };
+		if (!signalRestoredLaunchProcess(record, "SIGTERM")) {
+			return {
+				error: `PID ${record.pid} matched wrapper launch metadata but could not be signaled.`,
+				resource: "process",
+				state: "failed",
+			};
+		}
+		if (await waitForProcessExit(undefined, record.pid, deadlineMs)) {
+			return { resource: "process", state: "removed" };
+		}
 		signalRestoredLaunchProcess(record, "SIGKILL");
-		if (await waitForProcessExit(undefined, record.pid, Date.now() + 1_000)) return { resource: "process", state: "removed" };
-		return { error: `PID ${record.pid} remained alive after SIGTERM/SIGKILL.`, resource: "process", state: "failed" };
+		if (await waitForProcessExit(undefined, record.pid, Date.now() + 1_000)) {
+			return { resource: "process", state: "removed" };
+		}
+		return {
+			error: `PID ${record.pid} remained alive after SIGTERM/SIGKILL.`,
+			resource: "process",
+			state: "failed",
+		};
 	}
-	if (child.exitCode === null && child.signalCode === null) child.kill("SIGTERM");
-	else killPid(record.pid, "SIGTERM");
-	if (await waitForProcessExit(child, record.pid, deadlineMs)) return { resource: "process", state: "removed" };
-	if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
-	else killPid(record.pid, "SIGKILL");
-	if (await waitForProcessExit(child, record.pid, Date.now() + 1_000)) return { resource: "process", state: "removed" };
-	return { error: `PID ${record.pid} remained alive after SIGTERM/SIGKILL.`, resource: "process", state: "failed" };
+	if (child.exitCode === null && child.signalCode === null) {
+		child.kill("SIGTERM");
+	} else {
+		killPid(record.pid, "SIGTERM");
+	}
+	if (await waitForProcessExit(child, record.pid, deadlineMs)) {
+		return { resource: "process", state: "removed" };
+	}
+	if (child.exitCode === null && child.signalCode === null) {
+		child.kill("SIGKILL");
+	} else {
+		killPid(record.pid, "SIGKILL");
+	}
+	if (await waitForProcessExit(child, record.pid, Date.now() + 1_000)) {
+		return { resource: "process", state: "removed" };
+	}
+	return {
+		error: `PID ${record.pid} remained alive after SIGTERM/SIGKILL.`,
+		resource: "process",
+		state: "failed",
+	};
 }
 
 async function cleanupUserDataDir(record: ElectronLaunchRecord): Promise<ElectronCleanupStep> {
-	if (!record.userDataDir) return { resource: "user-data-dir", state: "skipped" };
-	if (!await pathExists(record.userDataDir)) return { resource: "user-data-dir", state: "already-gone" };
-	const validationError = await getSecureTempChildDirectoryValidationError(record.userDataDir, ELECTRON_PROFILE_DIR_PREFIX);
-	if (validationError) return { error: validationError, resource: "user-data-dir", state: "failed" };
+	if (!record.userDataDir) {
+		return { resource: "user-data-dir", state: "skipped" };
+	}
+	if (!(await pathExists(record.userDataDir))) {
+		return { resource: "user-data-dir", state: "already-gone" };
+	}
+	const validationError = await getSecureTempChildDirectoryValidationError(
+		record.userDataDir,
+		ELECTRON_PROFILE_DIR_PREFIX,
+	);
+	if (validationError) {
+		return { error: validationError, resource: "user-data-dir", state: "failed" };
+	}
 	try {
 		await rm(record.userDataDir, { force: true, recursive: true });
-		return { resource: "user-data-dir", state: await pathExists(record.userDataDir) ? "failed" : "removed" };
+		return {
+			resource: "user-data-dir",
+			state: (await pathExists(record.userDataDir)) ? "failed" : "removed",
+		};
 	} catch (error) {
-		return { error: error instanceof Error ? error.message : String(error), resource: "user-data-dir", state: "failed" };
+		return {
+			error: error instanceof Error ? error.message : String(error),
+			resource: "user-data-dir",
+			state: "failed",
+		};
 	}
 }
 
-function shouldSkipUserDataDirCleanup(processStep: ElectronCleanupStep, debugPortStep: ElectronCleanupStep): string | undefined {
-	if (processStep.state === "failed") return `Skipped because process cleanup failed: ${processStep.error ?? "process state could not be verified"}.`;
-	if (debugPortStep.state === "failed") return `Skipped because debug port cleanup is incomplete: ${debugPortStep.error ?? "debug port still responds"}.`;
+function shouldSkipUserDataDirCleanup(
+	processStep: ElectronCleanupStep,
+	debugPortStep: ElectronCleanupStep,
+): string | undefined {
+	if (processStep.state === "failed") {
+		return `Skipped because process cleanup failed: ${processStep.error ?? "process state could not be verified"}.`;
+	}
+	if (debugPortStep.state === "failed") {
+		return `Skipped because debug port cleanup is incomplete: ${debugPortStep.error ?? "debug port still responds"}.`;
+	}
 	return undefined;
 }
 
 async function cleanupDebugPort(record: ElectronLaunchRecord): Promise<ElectronCleanupStep> {
 	const cdp = await isPortAlive(record.port);
-	return cdp.version ? { resource: "debug-port", state: "failed", error: `/json/version still responds on port ${record.port}.` } : { resource: "debug-port", state: "already-gone" };
+	return cdp.version
+		? {
+				resource: "debug-port",
+				state: "failed",
+				error: `/json/version still responds on port ${record.port}.`,
+			}
+		: { resource: "debug-port", state: "already-gone" };
 }
 
-function summarizeCleanup(launchId: string, steps: ElectronCleanupStep[]): { partial: boolean; remainingResources: string[]; summary: string } {
+function summarizeCleanup(
+	launchId: string,
+	steps: ElectronCleanupStep[],
+): { partial: boolean; remainingResources: string[]; summary: string } {
 	const remainingResources = steps
-		.filter((step) => step.state === "failed" || (step.resource === "user-data-dir" && step.state === "skipped" && step.error))
+		.filter(
+			(step) =>
+				step.state === "failed" ||
+				(step.resource === "user-data-dir" && step.state === "skipped" && step.error),
+		)
 		.map((step) => step.resource);
 	const partial = remainingResources.length > 0;
 	return {
@@ -227,15 +347,20 @@ export async function cleanupElectronLaunchResources(options: {
 	record: ElectronLaunchRecord;
 	timeoutMs?: number;
 }): Promise<ElectronCleanupResult> {
-	const timeoutMs = Number.isSafeInteger(options.timeoutMs) && (options.timeoutMs ?? 0) > 0
-		? options.timeoutMs as number
-		: ELECTRON_CLEANUP_DEFAULT_TIMEOUT_MS;
+	const timeoutMs =
+		Number.isSafeInteger(options.timeoutMs) && (options.timeoutMs ?? 0) > 0
+			? (options.timeoutMs as number)
+			: ELECTRON_CLEANUP_DEFAULT_TIMEOUT_MS;
 	const deadlineMs = Date.now() + timeoutMs;
 	const processStep = await cleanupProcess(options.record, options.child, deadlineMs);
 	const debugPortStep = await cleanupDebugPort(options.record);
 	const userDataDirSkipReason = shouldSkipUserDataDirCleanup(processStep, debugPortStep);
 	const userDataDirStep = userDataDirSkipReason
-		? { error: userDataDirSkipReason, resource: "user-data-dir" as const, state: "skipped" as const }
+		? {
+				error: userDataDirSkipReason,
+				resource: "user-data-dir" as const,
+				state: "skipped" as const,
+			}
 		: await cleanupUserDataDir(options.record);
 	const steps = [processStep, debugPortStep, userDataDirStep];
 	const summary = summarizeCleanup(options.record.launchId, steps);

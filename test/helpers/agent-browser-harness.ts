@@ -121,7 +121,9 @@ export async function startAgentBrowserContractFixtureServer(): Promise<FixtureS
 		}
 
 		if (url.pathname === "/browser-regressions") {
-			sendFixtureHtml(response, `<!doctype html><title>Browser regression fixture</title>
+			sendFixtureHtml(
+				response,
+				`<!doctype html><title>Browser regression fixture</title>
 				<style>#panel { width:400px; height:200px; overflow:auto; scroll-behavior:smooth } #rows { height:2000px }</style>
 				<a id="export" href="#" download="report.csv">Export report</a>
 				<a id="static-download" href="/download-file" download="static.txt">Static report</a>
@@ -141,7 +143,8 @@ export async function startAgentBrowserContractFixtureServer(): Promise<FixtureS
 					});
 					fetch('/browser-regression-api?access_token=fixture-url-secret', {headers:{Authorization:'Bearer fixture-header-secret'}})
 						.then(r=>r.json()).then(()=>document.body.dataset.ready='yes');
-				</script>`);
+				</script>`,
+			);
 			return;
 		}
 		if (url.pathname === "/browser-download-redirect") {
@@ -156,7 +159,9 @@ export async function startAgentBrowserContractFixtureServer(): Promise<FixtureS
 		}
 
 		if (url.pathname === "/qa-error-residue") {
-			sendFixtureHtml(response, `<!doctype html><title>Repeated error fixture</title>
+			sendFixtureHtml(
+				response,
+				`<!doctype html><title>Repeated error fixture</title>
 				<h1>Repeated error fixture</h1><script>
 				window.qaErrorsThrown = 0;
 				const requested = sessionStorage.getItem("qa-error-count");
@@ -166,19 +171,26 @@ export async function startAgentBrowserContractFixtureServer(): Promise<FixtureS
 					throw new Error("qa-repeat-error");
 				}
 				for (let i = 0; i < count; i++) setTimeout(raiseError, 0);
-			</script>`);
+			</script>`,
+			);
 			return;
 		}
 
 		if (url.pathname === "/duplicate-buttons") {
-			sendFixtureHtml(response, `<!doctype html><title>Duplicate buttons</title>
+			sendFixtureHtml(
+				response,
+				`<!doctype html><title>Duplicate buttons</title>
 				<button id="first" onclick="this.dataset.clicks = String(Number(this.dataset.clicks || 0) + 1); this.dataset.trusted = String(event.isTrusted); this.textContent = 'Remove';">Add to cart</button>
-				<button id="second" onclick="this.dataset.clicks = String(Number(this.dataset.clicks || 0) + 1); this.dataset.trusted = String(event.isTrusted); this.textContent = 'Remove';">Add to cart</button>`);
+				<button id="second" onclick="this.dataset.clicks = String(Number(this.dataset.clicks || 0) + 1); this.dataset.trusted = String(event.isTrusted); this.textContent = 'Remove';">Add to cart</button>`,
+			);
 			return;
 		}
 
 		if (url.pathname === "/headers") {
-			sendFixtureHtml(response, `<title>Header Fixture</title><input id="header-value" value="${request.headers["x-fixture"] === "batch-fidelity" ? "present" : "missing"}" />`);
+			sendFixtureHtml(
+				response,
+				`<title>Header Fixture</title><input id="header-value" value="${request.headers["x-fixture"] === "batch-fidelity" ? "present" : "missing"}" />`,
+			);
 			return;
 		}
 
@@ -322,7 +334,10 @@ export function buildUserBranch(prompt = ""): unknown[] {
 		: [{ type: "message", message: { role: "user", content: [{ type: "text", text: prompt }] } }];
 }
 
-export function createToolBranchEntry(options: { details: Record<string, unknown>; isError?: boolean }): unknown {
+export function createToolBranchEntry(options: {
+	details: Record<string, unknown>;
+	isError?: boolean;
+}): unknown {
 	return {
 		type: "message",
 		message: {
@@ -349,7 +364,18 @@ export type AgentBrowserToolParams = {
 	};
 	job?: {
 		steps: Array<{
-			action: "open" | "click" | "fill" | "type" | "select" | "wait" | "assertText" | "assertUrl" | "waitForDownload" | "screenshot" | "snapshot";
+			action:
+				| "open"
+				| "click"
+				| "fill"
+				| "type"
+				| "select"
+				| "wait"
+				| "assertText"
+				| "assertUrl"
+				| "waitForDownload"
+				| "screenshot"
+				| "snapshot";
 			url?: string;
 			loadState?: "domcontentloaded" | "load" | "networkidle";
 			selector?: string;
@@ -365,24 +391,26 @@ export type AgentBrowserToolParams = {
 			milliseconds?: number;
 		}>;
 	};
-	qa?: ({
-		attached: true;
-		expectedText?: string | string[];
-		expectedSelector?: string;
-		screenshotPath?: string;
-		checkConsole?: boolean;
-		checkErrors?: boolean;
-		checkNetwork?: boolean;
-	} | {
-		attached?: false;
-		url: string;
-		expectedText?: string | string[];
-		expectedSelector?: string;
-		screenshotPath?: string;
-		checkConsole?: boolean;
-		checkErrors?: boolean;
-		checkNetwork?: boolean;
-	});
+	qa?:
+		| {
+				attached: true;
+				expectedText?: string | string[];
+				expectedSelector?: string;
+				screenshotPath?: string;
+				checkConsole?: boolean;
+				checkErrors?: boolean;
+				checkNetwork?: boolean;
+		  }
+		| {
+				attached?: false;
+				url: string;
+				expectedText?: string | string[];
+				expectedSelector?: string;
+				screenshotPath?: string;
+				checkConsole?: boolean;
+				checkErrors?: boolean;
+				checkNetwork?: boolean;
+		  };
 	sourceLookup?: {
 		selector?: string;
 		reactFiberId?: string;
@@ -450,7 +478,11 @@ export type RegisteredTool = {
 	name: string;
 	promptGuidelines: string[];
 	promptSnippet: string;
-	renderCall?: (args: AgentBrowserToolParams, theme: Theme, context: AgentBrowserToolRenderContext) => Component;
+	renderCall?: (
+		args: AgentBrowserToolParams,
+		theme: Theme,
+		context: AgentBrowserToolRenderContext,
+	) => Component;
 	renderResult?: (
 		result: AgentToolResult<unknown>,
 		options: ToolRenderResultOptions,
@@ -483,18 +515,25 @@ function adaptRegisteredTool<TParams extends TSchema, TDetails, TState>(
 		parameters: tool.parameters,
 		promptGuidelines: tool.promptGuidelines ?? [],
 		promptSnippet: tool.promptSnippet ?? "",
-		renderCall: sourceRenderCall === undefined
-			? undefined
-			: (args, theme, context) => {
-				type RenderCallArgs = Parameters<typeof sourceRenderCall>;
-				return sourceRenderCall(args as RenderCallArgs[0], theme, context as RenderCallArgs[2]);
-			},
-		renderResult: sourceRenderResult === undefined
-			? undefined
-			: (result, options, theme, context) => {
-				type RenderResultArgs = Parameters<typeof sourceRenderResult>;
-				return sourceRenderResult(result as RenderResultArgs[0], options, theme, context as RenderResultArgs[3]);
-			},
+		renderCall:
+			sourceRenderCall === undefined
+				? undefined
+				: (args, theme, context) => {
+						type RenderCallArgs = Parameters<typeof sourceRenderCall>;
+						return sourceRenderCall(args as RenderCallArgs[0], theme, context as RenderCallArgs[2]);
+					},
+		renderResult:
+			sourceRenderResult === undefined
+				? undefined
+				: (result, options, theme, context) => {
+						type RenderResultArgs = Parameters<typeof sourceRenderResult>;
+						return sourceRenderResult(
+							result as RenderResultArgs[0],
+							options,
+							theme,
+							context as RenderResultArgs[3],
+						);
+					},
 	};
 }
 
@@ -515,61 +554,137 @@ export function createExtensionHarness(options: {
 	const appendedEntries: Array<{ customType: string; data: unknown }> = [];
 	const events = new EventEmitter();
 	const sessionId = options.sessionId ?? TEST_SESSION_ID;
-	const sessionFile = options.sessionFile === null ? undefined : options.sessionFile ?? join(journalFixtures, `${randomUUID()}.jsonl`);
-	const header = { type: "session", version: 3, id: sessionId, cwd: options.cwd, timestamp: new Date().toISOString() };
+	const sessionFile =
+		options.sessionFile === null
+			? undefined
+			: (options.sessionFile ?? join(journalFixtures, `${randomUUID()}.jsonl`));
+	const header = {
+		type: "session",
+		version: 3,
+		id: sessionId,
+		cwd: options.cwd,
+		timestamp: new Date().toISOString(),
+	};
 	const normalizeBranch = (entries: unknown[]) => {
 		let parentId: string | null = null;
-		const normalized = convertBrowserEntries(entries.map(value => {
-			if (typeof value !== "object" || value === null) return value;
-			const entry = { ...value, id: "id" in value && typeof value.id === "string" ? value.id : randomUUID(),
-				parentId: "parentId" in value ? value.parentId : parentId, timestamp: "timestamp" in value ? value.timestamp : new Date().toISOString() };
-			parentId = entry.id;
-			return entry;
-		}), sessionId);
+		const normalized = convertBrowserEntries(
+			entries.map((value) => {
+				if (typeof value !== "object" || value === null) {
+					return value;
+				}
+				const entry = {
+					...value,
+					id: "id" in value && typeof value.id === "string" ? value.id : randomUUID(),
+					parentId: "parentId" in value ? value.parentId : parentId,
+					timestamp: "timestamp" in value ? value.timestamp : new Date().toISOString(),
+				};
+				parentId = entry.id;
+				return entry;
+			}),
+			sessionId,
+		);
 		entries.length = 0;
-		for (const entry of normalized) entries.push(entry);
+		for (const entry of normalized) {
+			entries.push(entry);
+		}
 		return entries;
 	};
 	let branch = normalizeBranch(options.branch ?? buildUserBranch(options.prompt));
 	const entries = [...branch];
 	if (sessionFile) {
 		mkdirSync(dirname(sessionFile), { recursive: true });
-		writeFileSync(sessionFile, [header, ...entries].map(entry => JSON.stringify(entry)).join("\n") + "\n", { mode: 0o600 });
+		writeFileSync(
+			sessionFile,
+			[header, ...entries].map((entry) => JSON.stringify(entry)).join("\n") + "\n",
+			{ mode: 0o600 },
+		);
 	}
 	const syncFixtureEntries = () => {
-		const ids = new Set(entries.map(entry => (entry as { id?: string }).id));
-		if (!branch.some(entry => !ids.has((entry as { id?: string }).id))) return;
+		const ids = new Set(entries.map((entry) => (entry as { id?: string }).id));
+		if (!branch.some((entry) => !ids.has((entry as { id?: string }).id))) {
+			return;
+		}
 		normalizeBranch(branch);
-		for (const entry of branch) if (!ids.has((entry as { id: string }).id)) {
-			ids.add((entry as { id: string }).id);
-			entries.push(entry);
-			if (sessionFile) appendFileSync(sessionFile, `${JSON.stringify(entry)}\n`);
+		for (const entry of branch) {
+			if (!ids.has((entry as { id: string }).id)) {
+				ids.add((entry as { id: string }).id);
+				entries.push(entry);
+				if (sessionFile) appendFileSync(sessionFile, `${JSON.stringify(entry)}\n`);
+			}
 		}
 	};
 
-	const pi: Pick<Parameters<typeof agentBrowserExtension>[0], "events" | "appendEntry" | "getActiveTools" | "getAllTools" | "getCommands" | "on" | "registerTool" | "setActiveTools"> = {
+	const pi: Pick<
+		Parameters<typeof agentBrowserExtension>[0],
+		| "events"
+		| "appendEntry"
+		| "getActiveTools"
+		| "getAllTools"
+		| "getCommands"
+		| "on"
+		| "registerTool"
+		| "setActiveTools"
+	> = {
 		events: {
-			emit(channel, request) { options.onBusEvent?.(channel, request); events.emit(channel, request); },
-			on(channel, handler) { events.on(channel, handler); return () => { events.off(channel, handler); }; },
+			emit(channel, request) {
+				options.onBusEvent?.(channel, request);
+				events.emit(channel, request);
+			},
+			on(channel, handler) {
+				events.on(channel, handler);
+				return () => {
+					events.off(channel, handler);
+				};
+			},
 		},
 		getCommands: () => [],
-		getActiveTools() { return [...activeTools]; },
-		getAllTools() { return [...registeredTools.values()].map(tool => ({ ...tool, id: tool.name, exposure: "direct" as const, sourceInfo: { path: "test", source: "test", scope: "temporary" as const, origin: "top-level" as const } })); },
-		setActiveTools(names) { activeTools = [...names]; },
+		getActiveTools() {
+			return [...activeTools];
+		},
+		getAllTools() {
+			return [...registeredTools.values()].map((tool) => ({
+				...tool,
+				id: tool.name,
+				exposure: "direct" as const,
+				sourceInfo: {
+					path: "test",
+					source: "test",
+					scope: "temporary" as const,
+					origin: "top-level" as const,
+				},
+			}));
+		},
+		setActiveTools(names) {
+			activeTools = [...names];
+		},
 		appendEntry(customType, data) {
 			syncFixtureEntries();
 			appendedEntries.push({ customType, data });
-			const entry = { type: "custom", customType, data, id: randomUUID(), parentId: (branch.at(-1) as { id?: string } | undefined)?.id ?? null, timestamp: new Date().toISOString() };
+			const entry = {
+				type: "custom",
+				customType,
+				data,
+				id: randomUUID(),
+				parentId: (branch.at(-1) as { id?: string } | undefined)?.id ?? null,
+				timestamp: new Date().toISOString(),
+			};
 			branch.push(entry);
 			entries.push(entry);
 			options.onAppendEntry?.(customType, data);
-			if (sessionFile) appendFileSync(sessionFile, `${JSON.stringify(entry)}\n`);
+			if (sessionFile) {
+				appendFileSync(sessionFile, `${JSON.stringify(entry)}\n`);
+			}
 		},
 		on(event, handler) {
 			const existingHandlers = handlers.get(event) ?? [];
 			existingHandlers.push(handler as (...args: unknown[]) => unknown);
 			handlers.set(event, existingHandlers);
-			return () => { handlers.set(event, existingHandlers.filter(candidate => candidate !== handler)); };
+			return () => {
+				handlers.set(
+					event,
+					existingHandlers.filter((candidate) => candidate !== handler),
+				);
+			};
 		},
 		registerTool(tool) {
 			const registeredTool = adaptRegisteredTool(tool);
@@ -582,17 +697,43 @@ export function createExtensionHarness(options: {
 	const registeredTool = registeredTools.get("agent_browser");
 	assert.ok(registeredTool, "expected the extension to register the agent_browser tool");
 
-	const sessionDir = options.sessionDir ?? (options.sessionFile ? dirname(options.sessionFile) : undefined);
+	const sessionDir =
+		options.sessionDir ?? (options.sessionFile ? dirname(options.sessionFile) : undefined);
 	const ctx = {
 		cwd: options.cwd,
 		isProjectTrusted: () => options.projectTrusted ?? true,
 		sessionManager: {
-			getBranch: () => { syncFixtureEntries(); return branch; },
-			getEntries: () => { syncFixtureEntries(); return entries; },
-			getEntry: (id: string) => { syncFixtureEntries(); return entries.find(entry => typeof entry === "object" && entry !== null && "id" in entry && entry.id === id); },
+			getBranch: () => {
+				syncFixtureEntries();
+				return branch;
+			},
+			getEntries: () => {
+				syncFixtureEntries();
+				return entries;
+			},
+			getEntry: (id: string) => {
+				syncFixtureEntries();
+				return entries.find(
+					(entry) =>
+						typeof entry === "object" && entry !== null && "id" in entry && entry.id === id,
+				);
+			},
 			getHeader: () => header,
-			getLeafId: () => { syncFixtureEntries(); return (branch.at(-1) as { id?: string } | undefined)?.id ?? null; },
-			buildSessionProjection: () => ({ messages: branch.flatMap(entry => typeof entry === "object" && entry !== null && "type" in entry && entry.type === "message" && "message" in entry ? [entry.message] : []) }),
+			getLeafId: () => {
+				syncFixtureEntries();
+				return (branch.at(-1) as { id?: string } | undefined)?.id ?? null;
+			},
+			buildSessionProjection: () => ({
+				messages: branch.flatMap((entry) =>
+					typeof entry === "object" &&
+					entry !== null &&
+					"type" in entry &&
+					entry.type === "message" &&
+					"message" in entry
+						? [entry.message]
+						: [],
+				),
+			}),
 			getSessionDir: () => sessionDir,
 			getSessionFile: () => sessionFile,
 			getSessionId: () => sessionId,
@@ -627,8 +768,13 @@ export async function runExtensionEvent(
 	}
 }
 
-export async function getBrowserInstructions(harness: ReturnType<typeof createExtensionHarness>): Promise<string> {
-	const event = { prompt: "Please continue.", systemPromptOptions: { sections: {} as Record<string, string> } };
+export async function getBrowserInstructions(
+	harness: ReturnType<typeof createExtensionHarness>,
+): Promise<string> {
+	const event = {
+		prompt: "Please continue.",
+		systemPromptOptions: { sections: {} as Record<string, string> },
+	};
 	await runExtensionEvent(harness.handlers, "before_agent_start", event, harness.ctx);
 	return event.systemPromptOptions.sections.agent_browser ?? "";
 }
@@ -665,13 +811,20 @@ export async function executeRegisteredTool(
 const patchedEnvScope = new AsyncLocalStorage<boolean>();
 let patchedEnvQueue: Promise<void> = Promise.resolve();
 
-async function runWithPatchedEnv<T>(patch: Record<string, string | undefined>, run: () => Promise<T>): Promise<T> {
+async function runWithPatchedEnv<T>(
+	patch: Record<string, string | undefined>,
+	run: () => Promise<T>,
+): Promise<T> {
 	const previousValues = new Map<string, string | undefined>();
 	for (const [name, value] of Object.entries(patch)) {
 		previousValues.set(name, process.env[name]);
 		if (value === undefined) {
 			delete process.env[name];
-		} else if (processPlatform === "win32" && name.toLowerCase() === "path" && previousValues.get(name)) {
+		} else if (
+			processPlatform === "win32" &&
+			name.toLowerCase() === "path" &&
+			previousValues.get(name)
+		) {
 			const previousPath = previousValues.get(name) ?? "";
 			const posixStyleSuffix = `:${previousPath}`;
 			process.env[name] = value.endsWith(posixStyleSuffix)
@@ -695,7 +848,10 @@ async function runWithPatchedEnv<T>(patch: Record<string, string | undefined>, r
 	}
 }
 
-export async function withPatchedEnv<T>(patch: Record<string, string | undefined>, run: () => Promise<T>): Promise<T> {
+export async function withPatchedEnv<T>(
+	patch: Record<string, string | undefined>,
+	run: () => Promise<T>,
+): Promise<T> {
 	if (patchedEnvScope.getStore()) {
 		return await runWithPatchedEnv(patch, run);
 	}
@@ -703,7 +859,10 @@ export async function withPatchedEnv<T>(patch: Record<string, string | undefined
 	const queuedRun = patchedEnvQueue
 		.catch(() => undefined)
 		.then(() => patchedEnvScope.run(true, () => runWithPatchedEnv(patch, run)));
-	patchedEnvQueue = queuedRun.then(() => undefined, () => undefined);
+	patchedEnvQueue = queuedRun.then(
+		() => undefined,
+		() => undefined,
+	);
 	return await queuedRun;
 }
 
@@ -824,7 +983,10 @@ export async function readInvocationLog(logPath: string): Promise<InvocationLogE
 	}
 }
 
-export async function readChildStdoutJsonLine<T>(child: ReturnType<typeof spawn>, timeoutMs = 15_000): Promise<T> {
+export async function readChildStdoutJsonLine<T>(
+	child: ReturnType<typeof spawn>,
+	timeoutMs = 15_000,
+): Promise<T> {
 	assert.ok(child.stdout, "expected child stdout pipe");
 	assert.ok(child.stderr, "expected child stderr pipe");
 	let stdout = "";
@@ -835,13 +997,19 @@ export async function readChildStdoutJsonLine<T>(child: ReturnType<typeof spawn>
 	});
 	return await new Promise<T>((resolve, reject) => {
 		const timeout = setTimeout(() => {
-			reject(new Error(`Timed out waiting for child stdout JSON line. stdout=${stdout} stderr=${stderr}`));
+			reject(
+				new Error(
+					`Timed out waiting for child stdout JSON line. stdout=${stdout} stderr=${stderr}`,
+				),
+			);
 		}, timeoutMs);
 		child.stdout?.setEncoding("utf8");
 		child.stdout?.on("data", (chunk: string) => {
 			stdout += chunk;
 			const firstLine = stdout.split("\n").find((line) => line.trim().length > 0);
-			if (!firstLine) return;
+			if (!firstLine) {
+				return;
+			}
 			clearTimeout(timeout);
 			try {
 				resolve(JSON.parse(firstLine) as T);
@@ -851,7 +1019,11 @@ export async function readChildStdoutJsonLine<T>(child: ReturnType<typeof spawn>
 		});
 		child.once("exit", (code, signal) => {
 			clearTimeout(timeout);
-			reject(new Error(`Child exited before stdout JSON line: code=${code} signal=${signal} stdout=${stdout} stderr=${stderr}`));
+			reject(
+				new Error(
+					`Child exited before stdout JSON line: code=${code} signal=${signal} stdout=${stdout} stderr=${stderr}`,
+				),
+			);
 		});
 		child.once("error", (error) => {
 			clearTimeout(timeout);
@@ -861,7 +1033,9 @@ export async function readChildStdoutJsonLine<T>(child: ReturnType<typeof spawn>
 }
 
 export async function stopChildProcess(child: ReturnType<typeof spawn>): Promise<void> {
-	if (child.exitCode !== null || child.signalCode !== null) return;
+	if (child.exitCode !== null || child.signalCode !== null) {
+		return;
+	}
 	child.kill("SIGTERM");
 	const timeout = setTimeout(() => child.kill("SIGKILL"), 2_000);
 	try {
@@ -870,4 +1044,3 @@ export async function stopChildProcess(child: ReturnType<typeof spawn>): Promise
 		clearTimeout(timeout);
 	}
 }
-

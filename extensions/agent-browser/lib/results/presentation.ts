@@ -2,7 +2,12 @@ import { getScreenshotCapture } from "../orchestration/browser-run/screenshot-ob
 import type { CompiledAgentBrowserSemanticAction } from "../input-modes/types.js";
 import { isRecord } from "../parsing.js";
 import { buildReadConfirmationNextActions, nextReadConfirmation } from "../read-confirmation.js";
-import { extractUpstreamCommandTokens, parseCommandInfo, redactInvocationArgs, type CommandInfo } from "../runtime.js";
+import {
+	extractUpstreamCommandTokens,
+	parseCommandInfo,
+	redactInvocationArgs,
+	type CommandInfo,
+} from "../runtime.js";
 import type { PersistentSessionArtifactStore } from "../temp.js";
 import { buildAgentBrowserNextActions } from "./action-recommendations.js";
 import { buildAgentBrowserResultCategoryDetails } from "./categories.js";
@@ -33,7 +38,11 @@ import {
 	isManifestFileArtifact,
 	type ArtifactRequestContext,
 } from "./presentation/artifacts.js";
-import { buildBatchPresentation, isAgentBrowserBatchResultArray, redactBatchStepErrorData } from "./presentation/batch.js";
+import {
+	buildBatchPresentation,
+	isAgentBrowserBatchResultArray,
+	redactBatchStepErrorData,
+} from "./presentation/batch.js";
 import { getPresentationPaths, isStringArray } from "./presentation/content.js";
 import {
 	buildNetworkRequestsNextActions,
@@ -45,29 +54,41 @@ import {
 import { buildErrorPresentation, isOverlayBlockedClickError } from "./presentation/errors.js";
 import { compactLargePresentationOutput } from "./presentation/large-output.js";
 import { buildPageChangeSummary } from "./presentation/navigation.js";
-import { formatPresentationContentText, formatPresentationSummary } from "./presentation/registry.js";
+import {
+	formatPresentationContentText,
+	formatPresentationSummary,
+} from "./presentation/registry.js";
 import { resolvePresentationCommandInfo } from "./presentation/semantic-action.js";
 
 function sanitizeModelFacingPresentation(presentation: ToolPresentation): ToolPresentation {
 	presentation.content = presentation.content.map((item) => {
-		if (item.type !== "text") return item;
+		if (item.type !== "text") {
+			return item;
+		}
 		return { ...item, text: redactModelFacingText(item.text) };
 	});
 	presentation.summary = redactModelFacingText(presentation.summary);
 	return presentation;
 }
 
-function mergeNextActions(...groups: Array<AgentBrowserNextAction[] | undefined>): AgentBrowserNextAction[] | undefined {
+function mergeNextActions(
+	...groups: Array<AgentBrowserNextAction[] | undefined>
+): AgentBrowserNextAction[] | undefined {
 	const merged = groups.flatMap((group) => group ?? []);
 	return merged.length > 0 ? merged : undefined;
 }
 
-function shouldAddAnnotatedScreenshotGuidance(commandInfo: CommandInfo, args: string[] | undefined): boolean {
+function shouldAddAnnotatedScreenshotGuidance(
+	commandInfo: CommandInfo,
+	args: string[] | undefined,
+): boolean {
 	return commandInfo.command === "screenshot" && (args?.includes("--annotate") ?? false);
 }
 
 function getKeyboardInsertTextWarning(commandInfo: CommandInfo): string | undefined {
-	if (commandInfo.command !== "keyboard" || commandInfo.subcommand !== "inserttext") return undefined;
+	if (commandInfo.command !== "keyboard" || commandInfo.subcommand !== "inserttext") {
+		return undefined;
+	}
 	return "Input dispatch warning: keyboard inserttext skips key events. A DOM value change does not prove a framework-controlled editor accepted it; verify application state before saving, or use keyboard type when real key events are required.";
 }
 
@@ -79,7 +100,8 @@ function redactBatchSpillData(data: AgentBrowserBatchResult[]): AgentBrowserBatc
 			...row,
 			command: command ? redactInvocationArgs(command) : row.command,
 			error: row.error === undefined ? undefined : redactBatchStepErrorData(command, row.error),
-			result: row.result === undefined ? undefined : redactPresentationData(commandInfo, row.result),
+			result:
+				row.result === undefined ? undefined : redactPresentationData(commandInfo, row.result),
 		};
 	});
 }
@@ -123,27 +145,61 @@ export async function buildToolPresentation(options: {
 		persistentArtifactStore,
 		sessionName,
 	} = options;
-	const commandInfoWithTokens = commandInfo.commandTokens || !args ? commandInfo : { ...commandInfo, commandTokens: extractUpstreamCommandTokens(args) };
-	const presentationCommandInfo = resolvePresentationCommandInfo(commandInfoWithTokens, compiledSemanticAction);
+	const commandInfoWithTokens =
+		commandInfo.commandTokens || !args
+			? commandInfo
+			: { ...commandInfo, commandTokens: extractUpstreamCommandTokens(args) };
+	const presentationCommandInfo = resolvePresentationCommandInfo(
+		commandInfoWithTokens,
+		compiledSemanticAction,
+	);
 	if (options.textOutput) {
-		const text = String(redactPresentationData(commandInfoWithTokens, typeof envelope?.data === "string" ? envelope.data : "", options.stdin));
-		const failure = errorText ? buildErrorPresentation({ args, commandInfo, errorText, sessionName }) : undefined;
+		const text = String(
+			redactPresentationData(
+				commandInfoWithTokens,
+				typeof envelope?.data === "string" ? envelope.data : "",
+				options.stdin,
+			),
+		);
+		const failure = errorText
+			? buildErrorPresentation({ args, commandInfo, errorText, sessionName })
+			: undefined;
 		const presentation: ToolPresentation = {
 			...failure,
-			content: options.modelVisible === false ? [] : [{ type: "text", text: [errorText, text].filter(Boolean).join("\n\n") }],
+			content:
+				options.modelVisible === false
+					? []
+					: [{ type: "text", text: [errorText, text].filter(Boolean).join("\n\n") }],
 			data: text,
 			summary: failure?.summary ?? (text.split("\n", 1)[0] || "Native text command completed."),
 		};
-		return sanitizeModelFacingPresentation(options.modelVisible === false ? presentation : await compactLargePresentationOutput({
-			artifactManifest, commandInfo, data: presentation.data, persistentArtifactStore, presentation,
-		}));
+		return sanitizeModelFacingPresentation(
+			options.modelVisible === false
+				? presentation
+				: await compactLargePresentationOutput({
+						artifactManifest,
+						commandInfo,
+						data: presentation.data,
+						persistentArtifactStore,
+						presentation,
+					}),
+		);
 	}
 
 	const recordingCommand = commandInfo.command === "record";
-	const recordingBatch = commandInfo.command === "batch" && isAgentBrowserBatchResultArray(envelope?.data)
-		&& envelope.data.some((row) => row.command?.[0] === "record");
+	const recordingBatch =
+		commandInfo.command === "batch" &&
+		isAgentBrowserBatchResultArray(envelope?.data) &&
+		envelope.data.some((row) => row.command?.[0] === "record");
 	if (errorText && !recordingCommand && !recordingBatch) {
-		return { ...buildErrorPresentation({ args, commandInfo, errorText, presentationCommand: presentationCommandInfo.command, sessionName }),
+		return {
+			...buildErrorPresentation({
+				args,
+				commandInfo,
+				errorText,
+				presentationCommand: presentationCommandInfo.command,
+				sessionName,
+			}),
 			data: redactPresentationData(commandInfoWithTokens, envelope?.data),
 		};
 	}
@@ -152,16 +208,39 @@ export async function buildToolPresentation(options: {
 	if (commandInfo.command === "session" && commandInfo.subcommand === "info" && isRecord(data)) {
 		data = { ...data, piCleanupOwnership: options.piCleanupOwnership ?? "unknown" };
 	}
-	const readConfirmation = nextReadConfirmation({ commandTokens: commandInfoWithTokens.commandTokens ?? [], data, namespace, sessionName: sessionName ?? "default", succeeded: envelope?.success !== false });
+	const readConfirmation = nextReadConfirmation({
+		commandTokens: commandInfoWithTokens.commandTokens ?? [],
+		data,
+		namespace,
+		sessionName: sessionName ?? "default",
+		succeeded: envelope?.success !== false,
+	});
 	const confirmationRequired = detectConfirmationRequired(data);
-	const presentationData = commandInfo.command === "batch" && isAgentBrowserBatchResultArray(data)
-		? redactBatchSpillData(data)
-		: redactPresentationData(commandInfoWithTokens, data);
-	const artifacts = await extractFileArtifacts({ artifactManifest, artifactMaxUpdatedAtMs: options.artifactMaxUpdatedAtMs, artifactMinUpdatedAtMs: options.artifactMinUpdatedAtMs, artifactRequest, commandInfo: presentationCommandInfo, cwd, data, namespace, recordingOutcome: recordingCommand ? envelope?.success : undefined, recordingPending: options.recordingPending, previousRecordingContactSheetPath: options.previousRecordingContactSheetPath, sessionName });
+	const presentationData =
+		commandInfo.command === "batch" && isAgentBrowserBatchResultArray(data)
+			? redactBatchSpillData(data)
+			: redactPresentationData(commandInfoWithTokens, data);
+	const artifacts = await extractFileArtifacts({
+		artifactManifest,
+		artifactMaxUpdatedAtMs: options.artifactMaxUpdatedAtMs,
+		artifactMinUpdatedAtMs: options.artifactMinUpdatedAtMs,
+		artifactRequest,
+		commandInfo: presentationCommandInfo,
+		cwd,
+		data,
+		namespace,
+		recordingOutcome: recordingCommand ? envelope?.success : undefined,
+		recordingPending: options.recordingPending,
+		previousRecordingContactSheetPath: options.previousRecordingContactSheetPath,
+		sessionName,
+	});
 	const artifactVerification = buildArtifactVerificationSummary(artifacts);
 	const artifactSummary = formatArtifactSummary(artifacts);
-	const summary = artifactSummary ?? formatPresentationSummary(commandInfoWithTokens, data, compiledSemanticAction);
-	const artifactText = artifacts.length > 0 ? formatArtifactMetadataLines(artifacts).join("\n") : undefined;
+	const summary =
+		artifactSummary ??
+		formatPresentationSummary(commandInfoWithTokens, data, compiledSemanticAction);
+	const artifactText =
+		artifacts.length > 0 ? formatArtifactMetadataLines(artifacts).join("\n") : undefined;
 
 	let presentation: ToolPresentation;
 	if (commandInfo.command === "batch" && isAgentBrowserBatchResultArray(data)) {
@@ -181,28 +260,71 @@ export async function buildToolPresentation(options: {
 			sessionName,
 			summary,
 		});
-	} else if (options.modelVisible !== false && commandInfo.command === "snapshot" && isRecord(data) && !confirmationRequired) {
+	} else if (
+		options.modelVisible !== false &&
+		commandInfo.command === "snapshot" &&
+		isRecord(data) &&
+		!confirmationRequired
+	) {
 		presentation = await buildSnapshotPresentation(data, persistentArtifactStore, artifactManifest);
 	} else {
 		presentation = {
 			artifactVerification,
 			artifacts: artifacts.length > 0 ? artifacts : undefined,
-			content: options.modelVisible === false ? [] : [{ type: "text", text: artifactText ?? formatPresentationContentText(commandInfoWithTokens, data, compiledSemanticAction) }],
+			content:
+				options.modelVisible === false
+					? []
+					: [
+							{
+								type: "text",
+								text:
+									artifactText ??
+									formatPresentationContentText(
+										commandInfoWithTokens,
+										data,
+										compiledSemanticAction,
+									),
+							},
+						],
 			data: presentationData,
 			summary,
 		};
 	}
 
 	if (errorText && (recordingCommand || recordingBatch)) {
-		const errorPresentation = buildErrorPresentation({ args, commandInfo, errorText, presentationCommand: presentationCommandInfo.command, sessionName });
-		presentation = { ...presentation, resultCategory: "failure", failureCategory: errorPresentation.failureCategory, summary: errorPresentation.summary,
-			content: [{ type: "text", text: `${errorPresentation.content[0]?.type === "text" ? errorPresentation.content[0].text : errorText}\n\n${presentation.content[0]?.type === "text" ? presentation.content[0].text : ""}` }],
+		const errorPresentation = buildErrorPresentation({
+			args,
+			commandInfo,
+			errorText,
+			presentationCommand: presentationCommandInfo.command,
+			sessionName,
+		});
+		presentation = {
+			...presentation,
+			resultCategory: "failure",
+			failureCategory: errorPresentation.failureCategory,
+			summary: errorPresentation.summary,
+			content: [
+				{
+					type: "text",
+					text: `${errorPresentation.content[0]?.type === "text" ? errorPresentation.content[0].text : errorText}\n\n${presentation.content[0]?.type === "text" ? presentation.content[0].text : ""}`,
+				},
+			],
 		};
 	}
 
-	if (networkRouteDiagnostics && networkRouteDiagnostics.length > 0 && presentation.content[0]?.type === "text") {
+	if (
+		networkRouteDiagnostics &&
+		networkRouteDiagnostics.length > 0 &&
+		presentation.content[0]?.type === "text"
+	) {
 		const diagnosticText = formatNetworkRouteDiagnosticsText(networkRouteDiagnostics);
-		if (diagnosticText) presentation.content[0] = { ...presentation.content[0], text: `${diagnosticText}\n\n${presentation.content[0].text}` };
+		if (diagnosticText) {
+			presentation.content[0] = {
+				...presentation.content[0],
+				text: `${diagnosticText}\n\n${presentation.content[0].text}`,
+			};
+		}
 		presentation.networkRouteDiagnostics = networkRouteDiagnostics;
 	}
 	if (artifacts.length > 0 && !presentation.artifacts) {
@@ -217,62 +339,116 @@ export async function buildToolPresentation(options: {
 		}
 	}
 
-	if (isRecord(presentationData) && isRecord(presentationData.webmcp) && (Array.isArray(presentationData.webmcp.tools) || presentationData.webmcp.status === "unavailable") && presentation.content[0]?.type === "text") {
-		presentation.content[0] = { ...presentation.content[0], text: `${presentation.content[0].text}\n\n${formatWebMcpCatalogUpdate(presentationData.webmcp)}` };
+	if (
+		isRecord(presentationData) &&
+		isRecord(presentationData.webmcp) &&
+		(Array.isArray(presentationData.webmcp.tools) ||
+			presentationData.webmcp.status === "unavailable") &&
+		presentation.content[0]?.type === "text"
+	) {
+		presentation.content[0] = {
+			...presentation.content[0],
+			text: `${presentation.content[0].text}\n\n${formatWebMcpCatalogUpdate(presentationData.webmcp)}`,
+		};
 	}
 
-	if (shouldAddAnnotatedScreenshotGuidance(commandInfo, args) && presentation.content[0]?.type === "text") {
-		const guidance = "Annotated screenshot note: dense pages can produce overlapping labels. If the labels are noisy, capture a scoped element screenshot, take a non-annotated screenshot, or use snapshot -i high-value refs as the machine-readable map.";
-		presentation.content[0] = { ...presentation.content[0], text: `${presentation.content[0].text}\n\n${guidance}` };
+	if (
+		shouldAddAnnotatedScreenshotGuidance(commandInfo, args) &&
+		presentation.content[0]?.type === "text"
+	) {
+		const guidance =
+			"Annotated screenshot note: dense pages can produce overlapping labels. If the labels are noisy, capture a scoped element screenshot, take a non-annotated screenshot, or use snapshot -i high-value refs as the machine-readable map.";
+		presentation.content[0] = {
+			...presentation.content[0],
+			text: `${presentation.content[0].text}\n\n${guidance}`,
+		};
 	}
 	const keyboardInsertTextWarning = getKeyboardInsertTextWarning(commandInfoWithTokens);
 	if (keyboardInsertTextWarning && presentation.content[0]?.type === "text") {
-		presentation.content[0] = { ...presentation.content[0], text: `${presentation.content[0].text}\n\n${keyboardInsertTextWarning}` };
+		presentation.content[0] = {
+			...presentation.content[0],
+			text: `${presentation.content[0].text}\n\n${keyboardInsertTextWarning}`,
+		};
 	}
 
-	const imagePath = artifactRequest?.absolutePath ?? extractImagePath(commandInfo, cwd, data)
-		?? (recordingCommand ? artifacts.find((artifact) => artifact.kind === "image" && artifact.status === "saved")?.absolutePath : undefined);
-	const attachImage = imagePath && !(isRecord(data) && data.changed === false) && !artifacts.some(artifact => artifact.absolutePath === imagePath && ["missing", "stale", "failed"].includes(artifact.status ?? ""));
-	const presentationWithImage = attachImage ? await attachInlineImage(presentation, imagePath, options.modelVisible) : presentation;
+	const imagePath =
+		artifactRequest?.absolutePath ??
+		extractImagePath(commandInfo, cwd, data) ??
+		(recordingCommand
+			? artifacts.find((artifact) => artifact.kind === "image" && artifact.status === "saved")
+					?.absolutePath
+			: undefined);
+	const attachImage =
+		imagePath &&
+		!(isRecord(data) && data.changed === false) &&
+		!artifacts.some(
+			(artifact) =>
+				artifact.absolutePath === imagePath &&
+				["missing", "stale", "failed"].includes(artifact.status ?? ""),
+		);
+	const presentationWithImage = attachImage
+		? await attachInlineImage(presentation, imagePath, options.modelVisible)
+		: presentation;
 	if (commandInfo.command === "screenshot" && presentationWithImage.imageObservations) {
-		for (const image of presentationWithImage.imageObservations) image.capture = getScreenshotCapture(commandInfoWithTokens.commandTokens ?? []).kind;
+		for (const image of presentationWithImage.imageObservations) {
+			image.capture = getScreenshotCapture(commandInfoWithTokens.commandTokens ?? []).kind;
+		}
 	}
-	const compactedPresentation = options.modelVisible === false ? presentationWithImage : await compactLargePresentationOutput({
-		artifactManifest,
-		commandInfo,
-		data: presentationData,
-		persistentArtifactStore,
-		presentation: presentationWithImage,
-	});
+	const compactedPresentation =
+		options.modelVisible === false
+			? presentationWithImage
+			: await compactLargePresentationOutput({
+					artifactManifest,
+					commandInfo,
+					data: presentationData,
+					persistentArtifactStore,
+					presentation: presentationWithImage,
+				});
 	const presentationWithManifest = applyArtifactManifest(
 		compactedPresentation,
 		compactedPresentation.artifactManifest ?? artifactManifest,
 		buildManifestEntriesForFileArtifacts(artifacts.filter(isManifestFileArtifact)),
 	);
-	const currentSpillPaths = new Set(getPresentationPaths({
-		primaryPath: presentationWithManifest.fullOutputPath,
-		secondaryPaths: presentationWithManifest.fullOutputPaths,
-	}));
-	presentationWithManifest.artifactVerification = buildArtifactVerificationSummary(
-		artifacts,
-		presentationWithManifest.artifactManifest,
-		currentSpillPaths,
-	) ?? presentationWithManifest.artifactVerification;
+	const currentSpillPaths = new Set(
+		getPresentationPaths({
+			primaryPath: presentationWithManifest.fullOutputPath,
+			secondaryPaths: presentationWithManifest.fullOutputPaths,
+		}),
+	);
+	presentationWithManifest.artifactVerification =
+		buildArtifactVerificationSummary(
+			artifacts,
+			presentationWithManifest.artifactManifest,
+			currentSpillPaths,
+		) ?? presentationWithManifest.artifactVerification;
 
-	const missingArtifactFailureText = formatMissingArtifactFailureText(presentationWithManifest.artifacts);
-	if (!errorText && missingArtifactFailureText && hasMissingFileArtifact(presentationWithManifest.artifacts)) {
+	const missingArtifactFailureText = formatMissingArtifactFailureText(
+		presentationWithManifest.artifacts,
+	);
+	if (
+		!errorText &&
+		missingArtifactFailureText &&
+		hasMissingFileArtifact(presentationWithManifest.artifacts)
+	) {
 		presentationWithManifest.resultCategory = "failure";
 		presentationWithManifest.failureCategory = "artifact-missing";
 		presentationWithManifest.successCategory = undefined;
 		presentationWithManifest.summary = missingArtifactFailureText;
 		if (presentationWithManifest.content[0]?.type === "text") {
-			presentationWithManifest.content[0] = { ...presentationWithManifest.content[0], text: `${missingArtifactFailureText}\n\n${presentationWithManifest.content[0].text}` };
+			presentationWithManifest.content[0] = {
+				...presentationWithManifest.content[0],
+				text: `${missingArtifactFailureText}\n\n${presentationWithManifest.content[0].text}`,
+			};
 		} else {
 			presentationWithManifest.content.unshift({ type: "text", text: missingArtifactFailureText });
 		}
 	}
 
-	const failedRecording = presentationWithManifest.artifacts?.find((artifact) => artifact.recording?.success === false || artifact.recording?.output.encoderSucceeded === false);
+	const failedRecording = presentationWithManifest.artifacts?.find(
+		(artifact) =>
+			artifact.recording?.success === false ||
+			artifact.recording?.output.encoderSucceeded === false,
+	);
 	if (failedRecording && !errorText) {
 		const failure = `Recording failed: ${failedRecording.recording?.error ?? "native capture/encoder failure"}`;
 		presentationWithManifest.resultCategory = "failure";
@@ -299,13 +475,14 @@ export async function buildToolPresentation(options: {
 			succeeded: envelope?.success !== false && confirmationRequired === undefined,
 		});
 		presentationWithManifest.resultCategory = categoryDetails.resultCategory;
-		presentationWithManifest.successCategory = categoryDetails.resultCategory === "success"
-			? classifyPresentationSuccessCategory({
-				artifactVerification: presentationWithManifest.artifactVerification,
-				artifacts: presentationWithManifest.artifacts,
-				savedFile: presentationWithManifest.savedFile,
-			})
-			: categoryDetails.successCategory;
+		presentationWithManifest.successCategory =
+			categoryDetails.resultCategory === "success"
+				? classifyPresentationSuccessCategory({
+						artifactVerification: presentationWithManifest.artifactVerification,
+						artifacts: presentationWithManifest.artifacts,
+						savedFile: presentationWithManifest.savedFile,
+					})
+				: categoryDetails.successCategory;
 		presentationWithManifest.failureCategory = categoryDetails.failureCategory;
 	}
 	if (presentationWithManifest.resultCategory === "success") {
@@ -316,40 +493,69 @@ export async function buildToolPresentation(options: {
 		});
 	}
 
-	const genericNextActions = presentationWithManifest.nextActions ? undefined : buildAgentBrowserNextActions({
-		artifacts: presentationWithManifest.artifacts,
-		args,
-		command: presentationCommandInfo.command,
-		confirmationId: confirmationRequired?.id,
-		failureCategory: presentationWithManifest.failureCategory,
-		overlayBlockedClick: isOverlayBlockedClickError(presentationCommandInfo.command, envelope?.success === false ? presentationWithManifest.summary : undefined, args ?? presentationCommandInfo.commandTokens),
-		resultCategory: presentationWithManifest.resultCategory ?? "success",
-		savedFilePath: presentationWithManifest.savedFilePath,
-		sessionName,
-		subcommand: presentationCommandInfo.subcommand,
-		successCategory: presentationWithManifest.successCategory,
-	});
-	const networkNextActions = commandInfoWithTokens.command === "network" && commandInfoWithTokens.subcommand === "requests" && presentationWithManifest.resultCategory === "success"
-		? buildNetworkRequestsNextActions(data, sessionName, presentationWithManifest.networkRouteDiagnostics)
-		: undefined;
-	const streamNextActions = presentationWithManifest.resultCategory === "success" ? buildStreamNextActions(commandInfoWithTokens, data, sessionName) : undefined;
-	presentationWithManifest.nextActions = readConfirmation ? buildReadConfirmationNextActions(readConfirmation, true) : mergeNextActions(
-		presentationWithManifest.nextActions,
-		genericNextActions,
-		networkNextActions,
-		streamNextActions,
-	);
-	presentationWithManifest.pageChangeSummary = presentationWithManifest.pageChangeSummary ?? buildPageChangeSummary({
-		artifacts: presentationWithManifest.artifacts,
-		commandInfo: presentationCommandInfo,
-		data,
-		nextActions: presentationWithManifest.nextActions,
-		savedFilePath: presentationWithManifest.savedFilePath,
-		summary: presentationWithManifest.summary,
-	});
-	if (presentationWithManifest.pageChangeSummary?.observed === false && presentationCommandInfo.command !== "batch" && presentationWithManifest.content[0]?.type === "text") {
-		presentationWithManifest.content[0] = { ...presentationWithManifest.content[0], text: `${presentationWithManifest.content[0].text}\n\nAction dispatched; application change unverified. Verify the expected URL, text, state, or external receipt before relying on it.` };
+	const genericNextActions = presentationWithManifest.nextActions
+		? undefined
+		: buildAgentBrowserNextActions({
+				artifacts: presentationWithManifest.artifacts,
+				args,
+				command: presentationCommandInfo.command,
+				confirmationId: confirmationRequired?.id,
+				failureCategory: presentationWithManifest.failureCategory,
+				overlayBlockedClick: isOverlayBlockedClickError(
+					presentationCommandInfo.command,
+					envelope?.success === false ? presentationWithManifest.summary : undefined,
+					args ?? presentationCommandInfo.commandTokens,
+				),
+				resultCategory: presentationWithManifest.resultCategory ?? "success",
+				savedFilePath: presentationWithManifest.savedFilePath,
+				sessionName,
+				subcommand: presentationCommandInfo.subcommand,
+				successCategory: presentationWithManifest.successCategory,
+			});
+	const networkNextActions =
+		commandInfoWithTokens.command === "network" &&
+		commandInfoWithTokens.subcommand === "requests" &&
+		presentationWithManifest.resultCategory === "success"
+			? buildNetworkRequestsNextActions(
+					data,
+					sessionName,
+					presentationWithManifest.networkRouteDiagnostics,
+				)
+			: undefined;
+	const streamNextActions =
+		presentationWithManifest.resultCategory === "success"
+			? buildStreamNextActions(commandInfoWithTokens, data, sessionName)
+			: undefined;
+	presentationWithManifest.nextActions = readConfirmation
+		? buildReadConfirmationNextActions(readConfirmation, true)
+		: mergeNextActions(
+				presentationWithManifest.nextActions,
+				genericNextActions,
+				networkNextActions,
+				streamNextActions,
+			);
+	presentationWithManifest.pageChangeSummary =
+		presentationWithManifest.pageChangeSummary ??
+		buildPageChangeSummary({
+			artifacts: presentationWithManifest.artifacts,
+			commandInfo: presentationCommandInfo,
+			data,
+			nextActions: presentationWithManifest.nextActions,
+			savedFilePath: presentationWithManifest.savedFilePath,
+			summary: presentationWithManifest.summary,
+		});
+	if (
+		presentationWithManifest.pageChangeSummary?.observed === false &&
+		presentationCommandInfo.command !== "batch" &&
+		presentationWithManifest.content[0]?.type === "text"
+	) {
+		presentationWithManifest.content[0] = {
+			...presentationWithManifest.content[0],
+			text: `${presentationWithManifest.content[0].text}\n\nAction dispatched; application change unverified. Verify the expected URL, text, state, or external receipt before relying on it.`,
+		};
 	}
-	if (options.modelVisible === false) presentationWithManifest.content = [];
+	if (options.modelVisible === false) {
+		presentationWithManifest.content = [];
+	}
 	return sanitizeModelFacingPresentation(presentationWithManifest);
 }

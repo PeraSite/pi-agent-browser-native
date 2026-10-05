@@ -1,6 +1,7 @@
 # Architecture
 
 Related docs:
+
 - [`../README.md`](../README.md)
 - [`../AGENTS.md`](https://github.com/fitchmultz/pi-agent-browser-native/blob/main/AGENTS.md) (maintainer workflows, including upstream capability baseline)
 - [`REQUIREMENTS.md`](REQUIREMENTS.md)
@@ -30,6 +31,7 @@ The collector's dynamic `isManaged()` decides ownership. Managed Pi delivers ful
 ### Direct subprocess execution
 
 The extension should:
+
 - resolve `agent-browser` from `PATH`
 - invoke it with native Node `spawn` on POSIX and `cross-spawn` on Windows. For the recognized global npm CMD template, public `which`/`path-key` resolution selects the same launcher and Node invokes its exact adjacent native executable directly, preserving literal CR/LF. Recognition requires the stock template, package identity and executable; custom launchers, other layouts, ambiguous search environments and worker-thread calls retain `cross-spawn`. No later installation is substituted. Custom or unrecognized batch files can still truncate literal newlines. Caller commands and helper probes retain empty operands, literal doublequotes, command/subcommand adjacency and explicit default `--namespace ""`. Keep piped stdin/stdout/stderr and await full Windows process-tree termination with `taskkill /T /F` on timeout or abort before falling back to the direct child signal. Missing commands use the spawner's `ENOENT`
 - bound native process-identity queries at ten seconds on Windows, including PowerShell startup, and five seconds on POSIX. These probes preserve PID/start-time comparison and fail closed when identity is unavailable; their budget is separate from lock contention and browser command watchdogs
@@ -73,6 +75,7 @@ Artifact directory preparation has one filesystem-error boundary inside the exis
 The primary UX is the agent calling the tool directly.
 
 That means:
+
 - no command-heavy slash-command interface
 - no manual user orchestration as the main workflow
 - any future slash commands should be minimal and secondary
@@ -119,6 +122,7 @@ Local checkout validation has two intentional modes:
 The repo should not add a repo-local `.pi/extensions/` autoload shim as the documented checkout path.
 
 Why:
+
 - avoids duplicate `agent_browser` registrations when the package is also installed globally
 - keeps the product contract centered on the package manifest instead of repo-local autoload wiring
 - keeps reload and exact-session relaunch validation tied to Pi's configured-source lifecycle instead of an explicit-extension quick-test path, while `session_tree` state changes stay covered by focused extension harness tests
@@ -141,6 +145,7 @@ An explicit native `session` default (user/project JSON or `AGENT_BROWSER_SESSIO
 When no native session, attachment, or explicit fresh launch is selected, `sessionMode: "auto"` uses `pi-root-<sha256(root Pi ID)[0:24]>` through the existing caller-owned named-session path. Descendants receive `PI_SUBAGENT_ROOT_SESSION_ID` from pi-subagents; root processes use `ctx.sessionManager.getSessionId()`. No cwd, human fork ancestry, run registry, or process-global assignment participates. The same name is the default native restore key. Existing native daemon inspection runs inside the existing identity queue: inactive roots receive bootstrap defaults, while active roots retain native launch settings and their current restore key. Scoped subprocess environment keeps helper settings consistent; no launch-settings journal is added. Root-name explicit follow-ups retain those defaults; unrelated explicit names do not. Global/override package `browser.defaultProfile` with `policy: "always"` supplies native Chrome profile names only, plus the configured executable, only when the effective engine is Chrome. Paths and project-only profile settings stay advisory. Native config/environment and explicit launch settings win. The communal source is copied by native Chrome launch, never by the wrapper, and each root's restore writes remain separate. Native JSON restore omits IndexedDB, service workers, and page-memory credentials; application-level restart verification is required. Parent and child quit leave the root browser alive; shared execution locks coordinate updated cooperating processes without a broker. An active older/fresh managed session keeps its existing lifecycle. A configured session has the same precedence over `fresh` as a literal `--session`; code follows the selected ordinary browser lifecycle; Electron launch retains its owned lifecycle. Electron launch suppresses the native session environment default only while allocating its generated session; ordinary browser follow-ups still honor the configured native default, so use the returned Electron session explicitly.
 
 Why:
+
 - works out of the box
 - gives continuity across calls
 - avoids forcing the agent to invent session names for basic browsing
@@ -168,6 +173,7 @@ The tool should also expose a first-class `sessionMode: "fresh"` escape hatch so
 ### Ownership
 
 Ownership rule:
+
 - automatic root sessions use native caller-owned lifecycle; group members coordinate and close them explicitly
 - older implicit auto-generated sessions are extension-managed convenience sessions
 - unnamed `sessionMode: "fresh"` launches rotate that extension-managed session to a new upstream browser
@@ -175,6 +181,7 @@ Ownership rule:
 - extension-managed sessions should be reusable during an active `pi` session and across `/reload`, exact-session relaunch, `/resume`, and Pi branch-tree transitions, while still being cleaned up predictably
 
 Practical policy:
+
 - preserve the current branch-visible extension-managed session across `/reload`, exact-session relaunch, `/resume`, and Pi 1.0.0+ `session_tree` branch transitions so persisted sessions can keep following the live browser after lifecycle changes
 - close the active extension-managed session when the originating `pi` process quits, while leaving explicit caller-provided sessions alone
 - after branch restore, use the existing locked daemon inspection to distinguish a confirmed inactive wrapper-owned daemon from a live, unknown, or unavailable one. For compatible automatic managed restore only, keep the pending reopen in ordered session page state and persist it as `sessionTabReopenPending`. Non-page calls such as `tab list` can start a daemon without fulfilling it; explicit HTTP reads leave the managed browser and pending reopen untouched, including across branch/reload replay. Before the first current-page operation (`get url`, history commands and relative `pushstate` included), reopen the complete recorded URL with native `open`, invalidate old refs with the existing `page-transition` state, and verify the actual tab. Explicit URL reads and all-read batches skip managed ownership changes and browser helpers entirely; native owns their HTTP fetch and validation. Native `open` resets frame scope. Consume the obligation on that attempt or an executed explicit context/navigation/close command, not an unreached batch row; a failed open does not permit repeated navigation of a now-live browser. After the reopen CLI starts, cancellation returns a structured `aborted` result through the ordinary result path with the exact namespace/session, consumed marker and ref invalidation; it does not throw away replay state or run later browser helpers. Cancellation before the CLI starts does not consume the pending reopen. Internal URLs retain their fragments while tab/ref comparisons remain fragment-insensitive and presentation keeps normal redaction. Older transcripts cannot recover a fragment they did not record. Caller-owned/attached browsers and restore-disabled sessions do not take this path; live wrong-tab recovery still only selects an existing target. Reopening reloads the URL, not unsaved forms, JavaScript memory, or history. There is no second restore store or lifecycle lock.
@@ -252,6 +259,7 @@ When a managed implicit or fresh `--session` plan reaches process execution, `de
 ## Preferring the native tool
 
 Keep the handling simple:
+
 - prefer the native tool through extension guidance and tool-call guards
 - do not rely on package skill overrides as the primary solution
 
@@ -296,6 +304,7 @@ This mirrors the playbook contract pattern described in [`TOOL_CONTRACT.md`](TOO
 ## Not the right design
 
 Avoid:
+
 - duplicating native CLI semantics in bespoke tools
 - compatibility layers for old `agent-browser` versions
 - deep embedded SDK-style integration
@@ -322,6 +331,7 @@ Avoid:
 ## Summary
 
 The architecture should stay:
+
 - thin
 - aligned to the recommended upstream release and stable support floor
 - close to upstream

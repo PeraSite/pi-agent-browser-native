@@ -80,7 +80,9 @@ export function parseDogfoodArgs(argv: string[]): DogfoodOptions & { help: boole
 		}
 		if (arg === "--artifact-dir") {
 			const value = argv[index + 1];
-			if (!value || value.startsWith("-")) throw new UsageError("--artifact-dir requires a path.");
+			if (!value || value.startsWith("-")) {
+				throw new UsageError("--artifact-dir requires a path.");
+			}
 			options.artifactDir = value;
 			index += 1;
 			continue;
@@ -92,7 +94,10 @@ export function parseDogfoodArgs(argv: string[]): DogfoodOptions & { help: boole
 
 function textPreview(result: Awaited<ReturnType<typeof executeRegisteredTool>>): string {
 	return (result.content ?? [])
-		.filter((part): part is { text: string; type: "text" } => part.type === "text" && typeof part.text === "string")
+		.filter(
+			(part): part is { text: string; type: "text" } =>
+				part.type === "text" && typeof part.text === "string",
+		)
 		.map((part) => part.text)
 		.join("\n")
 		.slice(0, 500);
@@ -105,40 +110,59 @@ async function verifiedArtifactSize(path: string): Promise<number> {
 	return stats.size;
 }
 
-function getArtifactVerification(result: Awaited<ReturnType<typeof executeRegisteredTool>>): { verified?: boolean } | undefined {
+function getArtifactVerification(
+	result: Awaited<ReturnType<typeof executeRegisteredTool>>,
+): { verified?: boolean } | undefined {
 	const value = result.details?.artifactVerification;
-	return typeof value === "object" && value !== null ? value as { verified?: boolean } : undefined;
+	return typeof value === "object" && value !== null
+		? (value as { verified?: boolean })
+		: undefined;
 }
 
-async function startDogfoodFixture(): Promise<{ close: () => Promise<void>; helpUrl: string; origin: string }> {
+async function startDogfoodFixture(): Promise<{
+	close: () => Promise<void>;
+	helpUrl: string;
+	origin: string;
+}> {
 	const server = createServer((request, response) => {
 		response.setHeader("content-type", "text/html; charset=utf-8");
 		if (request.url === "/script-a") {
-			response.end("<!doctype html><html lang=\"en\"><head><title>Script A</title></head><body><div role=\"dialog\"><button id=\"dismiss\" onclick=\"this.parentElement.remove()\">Dismiss</button></div><ul><li data-value=\"a1\">A1</li><li data-value=\"a2\">A2</li></ul></body></html>");
+			response.end(
+				'<!doctype html><html lang="en"><head><title>Script A</title></head><body><div role="dialog"><button id="dismiss" onclick="this.parentElement.remove()">Dismiss</button></div><ul><li data-value="a1">A1</li><li data-value="a2">A2</li></ul></body></html>',
+			);
 			return;
 		}
 		if (request.url === "/script-b") {
-			response.end("<!doctype html><html lang=\"en\"><head><title>Script B</title></head><body><ul><li data-value=\"b1\">B1</li><li data-value=\"b2\">B2</li></ul></body></html>");
+			response.end(
+				'<!doctype html><html lang="en"><head><title>Script B</title></head><body><ul><li data-value="b1">B1</li><li data-value="b2">B2</li></ul></body></html>',
+			);
 			return;
 		}
 		if (request.url === "/example-domains.html") {
-			response.end("<!doctype html><html lang=\"en\"><head><title>Example Domain Help</title></head><body><h1>Example Domain Help</h1><p>Learn more target reached.</p></body></html>");
+			response.end(
+				'<!doctype html><html lang="en"><head><title>Example Domain Help</title></head><body><h1>Example Domain Help</h1><p>Learn more target reached.</p></body></html>',
+			);
 			return;
 		}
-		response.end("<!doctype html><html lang=\"en\"><head><title>Example Domain</title></head><body><main><h1>Example Domain</h1><p>This loopback fixture is reserved for deterministic platform smoke tests.</p><a href=\"/example-domains.html\">Learn more</a></main></body></html>");
+		response.end(
+			'<!doctype html><html lang="en"><head><title>Example Domain</title></head><body><main><h1>Example Domain</h1><p>This loopback fixture is reserved for deterministic platform smoke tests.</p><a href="/example-domains.html">Learn more</a></main></body></html>',
+		);
 	});
 	await new Promise<void>((resolve, reject) => {
 		server.once("error", reject);
 		server.listen(0, "127.0.0.1", resolve);
 	});
 	const address = server.address();
-	if (!address || typeof address === "string") throw new Error("Loopback dogfood server did not expose a TCP port.");
+	if (!address || typeof address === "string") {
+		throw new Error("Loopback dogfood server did not expose a TCP port.");
+	}
 	const origin = `http://127.0.0.1:${address.port}/`;
 	return {
-		close: async () => await new Promise<void>((resolve, reject) => {
-			server.close((error) => error ? reject(error) : resolve());
-			server.closeAllConnections();
-		}),
+		close: async () =>
+			await new Promise<void>((resolve, reject) => {
+				server.close((error) => (error ? reject(error) : resolve()));
+				server.closeAllConnections();
+			}),
 		helpUrl: `${origin}example-domains.html`,
 		origin,
 	};
@@ -154,9 +178,15 @@ async function assertSuccessfulStep(options: {
 }): Promise<DogfoodStepReport> {
 	const { artifactPath, id, result, textPattern } = options;
 	assert.equal(result.isError, false, `${id} should succeed: ${JSON.stringify(result.details)}`);
-	assert.equal(result.details?.resultCategory, "success", `${id} should report resultCategory=success`);
+	assert.equal(
+		result.details?.resultCategory,
+		"success",
+		`${id} should report resultCategory=success`,
+	);
 	const preview = textPreview(result);
-	if (textPattern) assert.match(preview, textPattern, `${id} should show expected page/action evidence`);
+	if (textPattern) {
+		assert.match(preview, textPattern, `${id} should show expected page/action evidence`);
+	}
 	let artifactSizeBytes: number | undefined;
 	let verifiedArtifact: boolean | undefined;
 	if (artifactPath) {
@@ -177,13 +207,21 @@ async function assertSuccessfulStep(options: {
 	};
 }
 
-export async function runAgentBrowserDogfood(options: DogfoodOptions = {}): Promise<DogfoodStepReport[]> {
+export async function runAgentBrowserDogfood(
+	options: DogfoodOptions = {},
+): Promise<DogfoodStepReport[]> {
 	const cwd = options.cwd ?? process.cwd();
-	const artifactDir = resolve(options.artifactDir ?? await mkdtemp(join(tmpdir(), "pi-agent-browser-dogfood-")));
+	const artifactDir = resolve(
+		options.artifactDir ?? (await mkdtemp(join(tmpdir(), "pi-agent-browser-dogfood-"))),
+	);
 	const shouldRemoveArtifacts = !options.keepArtifacts && !options.artifactDir;
 	await mkdir(artifactDir, { recursive: true });
 	const batchScreenshotPath = join(artifactDir, "batch.png");
-	const harness = createExtensionHarness({ cwd, sessionFile: join(artifactDir, "dogfood-session.jsonl"), sessionId: randomUUID() });
+	const harness = createExtensionHarness({
+		cwd,
+		sessionFile: join(artifactDir, "dogfood-session.jsonl"),
+		sessionId: randomUUID(),
+	});
 	const fixture = await startDogfoodFixture();
 	const reports: DogfoodStepReport[] = [];
 	let closed = false;
@@ -191,16 +229,26 @@ export async function runAgentBrowserDogfood(options: DogfoodOptions = {}): Prom
 	try {
 		await runExtensionEvent(harness.handlers, "session_start", { reason: "new" }, harness.ctx);
 
-		reports.push(await assertSuccessfulStep({
-			id: "qa-url",
-			textPattern: /Example Domain/,
-			result: await executeRegisteredTool(harness.getTool("agent_browser_qa")!, harness.ctx, {
-				sessionMode: "fresh", checkConsole: false, checkErrors: false, checkNetwork: false, expectedText: "Example Domain", url: fixture.origin,
+		reports.push(
+			await assertSuccessfulStep({
+				id: "qa-url",
+				textPattern: /Example Domain/,
+				result: await executeRegisteredTool(harness.getTool("agent_browser_qa")!, harness.ctx, {
+					sessionMode: "fresh",
+					checkConsole: false,
+					checkErrors: false,
+					checkNetwork: false,
+					expectedText: "Example Domain",
+					url: fixture.origin,
+				}),
 			}),
-		}));
+		);
 
-		const scriptResult = await executeRegisteredTool(harness.getTool("agent_browser_code")!, harness.ctx, {
-			code: `const values = [];
+		const scriptResult = await executeRegisteredTool(
+			harness.getTool("agent_browser_code")!,
+			harness.ctx,
+			{
+				code: `const values = [];
 for (const url of ${JSON.stringify([`${fixture.origin}script-a`, `${fixture.origin}script-b`])}) {
   const opened = await browser({ args: ["open", url] });
   if (!opened.success) throw new Error(opened.error);
@@ -213,60 +261,99 @@ for (const url of ${JSON.stringify([`${fixture.origin}script-a`, `${fixture.orig
   values.push(...probe.data.result.values);
 }
 emit(values);`,
-		});
+			},
+		);
 		assert.deepEqual(scriptResult.details?.data, ["a1", "a2", "b1", "b2"]);
-		const afterCode = await executeRegisteredTool(harness.tool, harness.ctx, { args: ["get", "url"] });
+		const afterCode = await executeRegisteredTool(harness.tool, harness.ctx, {
+			args: ["get", "url"],
+		});
 		assert.equal(afterCode.details?.sessionName, scriptResult.details?.sessionName);
 		assert.match(JSON.stringify(afterCode.details?.data), /script-b/);
-		reports.push(await assertSuccessfulStep({ id: "code-branch-and-aggregate", result: scriptResult, textPattern: /a1/ }));
-
-		reports.push(await assertSuccessfulStep({
-			id: "open-fresh-example",
-			textPattern: new RegExp(fixture.origin.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
-			result: await executeRegisteredTool(harness.tool, harness.ctx, {
-				args: ["open", fixture.origin],
-				sessionMode: "fresh",
+		reports.push(
+			await assertSuccessfulStep({
+				id: "code-branch-and-aggregate",
+				result: scriptResult,
+				textPattern: /a1/,
 			}),
-		}));
+		);
 
-		reports.push(await assertSuccessfulStep({
-			id: "semantic-click-learn-more",
-			textPattern: /clicked/i,
-			result: await executeRegisteredTool(harness.getTool("agent_browser_action")!, harness.ctx, { action: "click", selector: "a" }),
-		}));
-		reports.push(await assertSuccessfulStep({
-			id: "semantic-click-url",
-			textPattern: /example-domains\.html/,
-			result: await executeRegisteredTool(harness.tool, harness.ctx, { args: ["get", "url"] }),
-		}));
-
-		reports.push(await assertSuccessfulStep({
-			id: "open-current-example",
-			textPattern: /Example Domain/,
-			result: await executeRegisteredTool(harness.tool, harness.ctx, {
-				args: ["open", fixture.origin],
+		reports.push(
+			await assertSuccessfulStep({
+				id: "open-fresh-example",
+				textPattern: new RegExp(fixture.origin.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
+				result: await executeRegisteredTool(harness.tool, harness.ctx, {
+					args: ["open", fixture.origin],
+					sessionMode: "fresh",
+				}),
 			}),
-		}));
+		);
 
-
-		reports.push(await assertSuccessfulStep({
-			artifactPath: batchScreenshotPath,
-			id: "batch-open-assert-screenshot",
-			textPattern: /Step 2[\s\S]*Example Domain/,
-			result: await executeRegisteredTool(harness.tool, harness.ctx, {
-				args: ["batch", "--bail"], stdin: JSON.stringify([["open", fixture.origin], ["wait", "--text", "Example Domain"], ["screenshot", batchScreenshotPath]]),
+		reports.push(
+			await assertSuccessfulStep({
+				id: "semantic-click-learn-more",
+				textPattern: /clicked/i,
+				result: await executeRegisteredTool(harness.getTool("agent_browser_action")!, harness.ctx, {
+					action: "click",
+					selector: "a",
+				}),
 			}),
-		}));
+		);
+		reports.push(
+			await assertSuccessfulStep({
+				id: "semantic-click-url",
+				textPattern: /example-domains\.html/,
+				result: await executeRegisteredTool(harness.tool, harness.ctx, { args: ["get", "url"] }),
+			}),
+		);
+
+		reports.push(
+			await assertSuccessfulStep({
+				id: "open-current-example",
+				textPattern: /Example Domain/,
+				result: await executeRegisteredTool(harness.tool, harness.ctx, {
+					args: ["open", fixture.origin],
+				}),
+			}),
+		);
+
+		reports.push(
+			await assertSuccessfulStep({
+				artifactPath: batchScreenshotPath,
+				id: "batch-open-assert-screenshot",
+				textPattern: /Step 2[\s\S]*Example Domain/,
+				result: await executeRegisteredTool(harness.tool, harness.ctx, {
+					args: ["batch", "--bail"],
+					stdin: JSON.stringify([
+						["open", fixture.origin],
+						["wait", "--text", "Example Domain"],
+						["screenshot", batchScreenshotPath],
+					]),
+				}),
+			}),
+		);
 
 		const closeResult = await executeRegisteredTool(harness.tool, harness.ctx, { args: ["close"] });
 		closed = closeResult.isError !== true;
-		reports.push(await assertSuccessfulStep({ id: "close-session", result: closeResult, textPattern: /closed/ }));
+		reports.push(
+			await assertSuccessfulStep({
+				id: "close-session",
+				result: closeResult,
+				textPattern: /closed/,
+			}),
+		);
 		return reports;
 	} finally {
 		if (!closed) {
-			await executeRegisteredTool(harness.tool, harness.ctx, { args: ["close"] }).catch(() => undefined);
+			await executeRegisteredTool(harness.tool, harness.ctx, { args: ["close"] }).catch(
+				() => undefined,
+			);
 		}
-		await runExtensionEvent(harness.handlers, "session_shutdown", { reason: "quit" }, harness.ctx).catch(() => undefined);
+		await runExtensionEvent(
+			harness.handlers,
+			"session_shutdown",
+			{ reason: "quit" },
+			harness.ctx,
+		).catch(() => undefined);
 		await fixture.close();
 		if (shouldRemoveArtifacts) {
 			await rm(artifactDir, { force: true, recursive: true });
@@ -276,10 +363,16 @@ emit(values);`,
 
 function printReport(reports: DogfoodStepReport[], artifactDir: string | undefined) {
 	console.log("agent_browser dogfood smoke passed");
-	if (artifactDir) console.log(`Artifacts: ${resolve(artifactDir)}`);
+	if (artifactDir) {
+		console.log(`Artifacts: ${resolve(artifactDir)}`);
+	}
 	for (const report of reports) {
-		const artifact = report.artifactPath ? ` artifact=${report.verifiedArtifact ? "verified" : "missing"} size=${report.artifactSizeBytes ?? 0}` : "";
-		console.log(`- ${report.id}: ${report.resultCategory}/${report.successCategory ?? "completed"}${artifact}`);
+		const artifact = report.artifactPath
+			? ` artifact=${report.verifiedArtifact ? "verified" : "missing"} size=${report.artifactSizeBytes ?? 0}`
+			: "";
+		console.log(
+			`- ${report.id}: ${report.resultCategory}/${report.successCategory ?? "completed"}${artifact}`,
+		);
 	}
 }
 
@@ -291,14 +384,20 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
 			return 0;
 		}
 		const reports = await runAgentBrowserDogfood(options);
-		if (options.json) console.log(JSON.stringify({ reports }, null, 2));
-		else {
+		if (options.json) {
+			console.log(JSON.stringify({ reports }, null, 2));
+		} else {
 			const retainedArtifactDir = options.artifactDir
 				? resolve(options.artifactDir)
 				: options.keepArtifacts
 					? reports.find((report) => report.artifactPath)?.artifactPath
 					: undefined;
-			printReport(reports, retainedArtifactDir && !options.artifactDir ? dirname(retainedArtifactDir) : retainedArtifactDir);
+			printReport(
+				reports,
+				retainedArtifactDir && !options.artifactDir
+					? dirname(retainedArtifactDir)
+					: retainedArtifactDir,
+			);
 		}
 		return 0;
 	} catch (error) {
@@ -307,7 +406,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
 			console.error(usage());
 			return 2;
 		}
-		console.error(error instanceof Error ? error.stack ?? error.message : String(error));
+		console.error(error instanceof Error ? (error.stack ?? error.message) : String(error));
 		return 1;
 	}
 }

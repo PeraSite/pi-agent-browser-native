@@ -7,7 +7,11 @@ import { env as processEnv, platform as processPlatform } from "node:process";
 import { spawn as crossSpawn } from "cross-spawn";
 
 import { parseArgvDescriptor } from "./argv-descriptor.js";
-import { extractExplicitSessionName, resolveAgentBrowserNamespace, scanUpstreamGlobalFlagOccurrences } from "./argv-grammar.js";
+import {
+	extractExplicitSessionName,
+	resolveAgentBrowserNamespace,
+	scanUpstreamGlobalFlagOccurrences,
+} from "./argv-grammar.js";
 import {
 	commitManagedSessionRestoreSuppression,
 	getManagedSessionRestoreEnv,
@@ -19,11 +23,12 @@ import {
 	type ManagedSessionRestoreEnvOptions,
 	type ManagedSessionRestoreState,
 } from "./managed-session-restore.js";
-import {
-	getPageTargetValidationError,
-} from "./page-target-validation.js";
+import { getPageTargetValidationError } from "./page-target-validation.js";
 import { getImplicitSessionIdleTimeoutMs } from "./runtime.js";
-import { getAgentBrowserProcessArgs, getAgentBrowserProcessEnvironment } from "./process-environment.js";
+import {
+	getAgentBrowserProcessArgs,
+	getAgentBrowserProcessEnvironment,
+} from "./process-environment.js";
 import { openSecureTempFile, writeSecureTempChunk } from "./temp.js";
 import { resolveWindowsStockLauncher } from "./windows-stock-launcher.js";
 
@@ -45,12 +50,21 @@ const EXIT_STDIO_GRACE_MS = 100;
 const attachedBrowserSessionContext = new AsyncLocalStorage<boolean>();
 const chromeStartupArgsContext = new AsyncLocalStorage<string | undefined>();
 
-export function withChromeStartupArgs<T>(args: string | undefined, run: () => Promise<T>): Promise<T> {
+export function withChromeStartupArgs<T>(
+	args: string | undefined,
+	run: () => Promise<T>,
+): Promise<T> {
 	return chromeStartupArgsContext.run(args ?? chromeStartupArgsContext.getStore(), run);
 }
 
-export function withAttachedBrowserSessionContext<T>(preserve: boolean, run: () => Promise<T>): Promise<T> {
-	return attachedBrowserSessionContext.run(preserve || attachedBrowserSessionContext.getStore() === true, run);
+export function withAttachedBrowserSessionContext<T>(
+	preserve: boolean,
+	run: () => Promise<T>,
+): Promise<T> {
+	return attachedBrowserSessionContext.run(
+		preserve || attachedBrowserSessionContext.getStore() === true,
+		run,
+	);
 }
 
 export interface ProcessRunResult {
@@ -71,28 +85,48 @@ function appendTail(text: string, addition: string, maxChars: number): string {
 	return combined.length <= maxChars ? combined : combined.slice(combined.length - maxChars);
 }
 
-export function prepareAgentBrowserSpawnArgs(args: string[], wrapperCompatibilityUserAgent?: string, preserveAttachedBrowserSession = false, startupArgs?: string): string[] {
-	if (preserveAttachedBrowserSession) return args;
+export function prepareAgentBrowserSpawnArgs(
+	args: string[],
+	wrapperCompatibilityUserAgent?: string,
+	preserveAttachedBrowserSession = false,
+	startupArgs?: string,
+): string[] {
+	if (preserveAttachedBrowserSession) {
+		return args;
+	}
 	const occurrence = scanUpstreamGlobalFlagOccurrences(args, "--args").at(-1);
-	const customArgs = wrapperCompatibilityUserAgent && !occurrence
-		? `${startupArgs ?? "--no-startup-window"},--user-agent=${wrapperCompatibilityUserAgent.replaceAll(/[\r\n,]/g, "")}` : startupArgs;
-	if (customArgs === undefined) return args;
-	if (!occurrence) return ["--args", customArgs, ...args];
+	const customArgs =
+		wrapperCompatibilityUserAgent && !occurrence
+			? `${startupArgs ?? "--no-startup-window"},--user-agent=${wrapperCompatibilityUserAgent.replaceAll(/[\r\n,]/g, "")}`
+			: startupArgs;
+	if (customArgs === undefined) {
+		return args;
+	}
+	if (!occurrence) {
+		return ["--args", customArgs, ...args];
+	}
 	const normalized = [...args];
 	normalized[occurrence.index + 1] = customArgs;
 	return normalized;
 }
 
-async function terminateSpawnedChild(child: ChildProcessWithoutNullStreams, signal: NodeJS.Signals): Promise<void> {
+async function terminateSpawnedChild(
+	child: ChildProcessWithoutNullStreams,
+	signal: NodeJS.Signals,
+): Promise<void> {
 	if (processPlatform === "win32" && child.pid) {
 		// Keep the shell alive until taskkill has traversed its descendants, and
 		// observe the killer before allowing the browser call to finish.
 		const killed = await new Promise<boolean>((resolve) => {
-			const killer = spawn("taskkill.exe", ["/PID", String(child.pid), "/T", "/F"], { stdio: "ignore" });
+			const killer = spawn("taskkill.exe", ["/PID", String(child.pid), "/T", "/F"], {
+				stdio: "ignore",
+			});
 			killer.once("error", () => resolve(false));
 			killer.once("close", (code) => resolve(code === 0));
 		});
-		if (killed) return;
+		if (killed) {
+			return;
+		}
 	}
 	child.kill(signal);
 }
@@ -138,7 +172,9 @@ function watchSpawnedChildCompletion(
 	let completed = false;
 
 	const complete = (closeCode?: number | null) => {
-		if (completed) return;
+		if (completed) {
+			return;
+		}
 		completed = true;
 		if (postExitTimer) {
 			clearTimeout(postExitTimer);
@@ -195,13 +231,19 @@ function parsePositiveIntegerEnv(value: string | undefined): number | undefined 
 
 function clampUpstreamDefaultTimeout(childEnv: NodeJS.ProcessEnv): void {
 	const requestedTimeout = parsePositiveIntegerEnv(childEnv[AGENT_BROWSER_DEFAULT_TIMEOUT_ENV]);
-	if (requestedTimeout === undefined || requestedTimeout > SAFE_AGENT_BROWSER_OPERATION_TIMEOUT_MS) {
+	if (
+		requestedTimeout === undefined ||
+		requestedTimeout > SAFE_AGENT_BROWSER_OPERATION_TIMEOUT_MS
+	) {
 		childEnv[AGENT_BROWSER_DEFAULT_TIMEOUT_ENV] = String(SAFE_AGENT_BROWSER_OPERATION_TIMEOUT_MS);
 	}
 }
 
 export function getAgentBrowserProcessTimeoutMs(env: NodeJS.ProcessEnv = processEnv): number {
-	return parsePositiveIntegerEnv(env[PI_AGENT_BROWSER_PROCESS_TIMEOUT_ENV]) ?? DEFAULT_AGENT_BROWSER_PROCESS_TIMEOUT_MS;
+	return (
+		parsePositiveIntegerEnv(env[PI_AGENT_BROWSER_PROCESS_TIMEOUT_ENV]) ??
+		DEFAULT_AGENT_BROWSER_PROCESS_TIMEOUT_MS
+	);
 }
 
 export function getAgentBrowserSocketDir(
@@ -212,23 +254,33 @@ export function getAgentBrowserSocketDir(
 	if (platform === "win32") {
 		return undefined;
 	}
-	const termuxAppRoot = platform === "android" && termuxPackageName && TERMUX_PACKAGE_NAME_PATTERN.test(termuxPackageName);
-	const prefix = platform === "darwin"
-		? "/private/tmp/piab"
-		: termuxAppRoot
-			? `/data/data/${termuxPackageName}/piab`
-			: DEFAULT_AGENT_BROWSER_SOCKET_DIR_PREFIX;
+	const termuxAppRoot =
+		platform === "android" &&
+		termuxPackageName &&
+		TERMUX_PACKAGE_NAME_PATTERN.test(termuxPackageName);
+	const prefix =
+		platform === "darwin"
+			? "/private/tmp/piab"
+			: termuxAppRoot
+				? `/data/data/${termuxPackageName}/piab`
+				: DEFAULT_AGENT_BROWSER_SOCKET_DIR_PREFIX;
 	return `${prefix}${!termuxAppRoot && typeof uid === "number" ? `-${uid}` : ""}`;
 }
 
-export function resolveAgentBrowserSocketDir(options: {
-	env?: NodeJS.ProcessEnv;
-	ownedManagedSession?: boolean;
-	parentEnv?: NodeJS.ProcessEnv;
-} = {}): string | undefined {
+export function resolveAgentBrowserSocketDir(
+	options: {
+		env?: NodeJS.ProcessEnv;
+		ownedManagedSession?: boolean;
+		parentEnv?: NodeJS.ProcessEnv;
+	} = {},
+): string | undefined {
 	const parentEnv = options.parentEnv ?? getAgentBrowserProcessEnvironment();
-	return options.env?.[AGENT_BROWSER_SOCKET_DIR_ENV] ?? parentEnv[PI_AGENT_BROWSER_SOCKET_DIR_ENV]
-		?? (!options.ownedManagedSession ? parentEnv[AGENT_BROWSER_SOCKET_DIR_ENV] : undefined) ?? getAgentBrowserSocketDir();
+	return (
+		options.env?.[AGENT_BROWSER_SOCKET_DIR_ENV] ??
+		parentEnv[PI_AGENT_BROWSER_SOCKET_DIR_ENV] ??
+		(!options.ownedManagedSession ? parentEnv[AGENT_BROWSER_SOCKET_DIR_ENV] : undefined) ??
+		getAgentBrowserSocketDir()
+	);
 }
 
 export function isTrustedAndroidAppDataRoot(
@@ -237,62 +289,114 @@ export function isTrustedAndroidAppDataRoot(
 	uid: number,
 	platform: NodeJS.Platform = processPlatform,
 ): boolean {
-	if (platform !== "android" || metadata.uid !== uid || metadata.isSymbolicLink() || !metadata.isDirectory() || (metadata.mode & 0o777) !== 0o700) return false;
+	if (
+		platform !== "android" ||
+		metadata.uid !== uid ||
+		metadata.isSymbolicLink() ||
+		!metadata.isDirectory() ||
+		(metadata.mode & 0o777) !== 0o700
+	) {
+		return false;
+	}
 	const parent = dirname(path);
 	return parent === "/data/data" || /^\/data\/user\/\d+$/.test(parent);
 }
 
 export function isTrustedSocketDirAncestor(
-	metadata: { gid: number; isDirectory(): boolean; isSymbolicLink(): boolean; mode: number; uid: number },
+	metadata: {
+		gid: number;
+		isDirectory(): boolean;
+		isSymbolicLink(): boolean;
+		mode: number;
+		uid: number;
+	},
 	uid: number,
 	platform: NodeJS.Platform = processPlatform,
 ): boolean {
-	if (metadata.isSymbolicLink()) return metadata.uid === 0;
-	if (!metadata.isDirectory()) return false;
+	if (metadata.isSymbolicLink()) {
+		return metadata.uid === 0;
+	}
+	if (!metadata.isDirectory()) {
+		return false;
+	}
 	const mode = metadata.mode & 0o7777;
-	if (platform === "android" && uid !== 0 && metadata.uid === uid && metadata.gid === uid) return (mode & 0o002) === 0;
-	if (metadata.uid === uid && uid !== 0) return (mode & 0o022) === 0;
+	if (platform === "android" && uid !== 0 && metadata.uid === uid && metadata.gid === uid) {
+		return (mode & 0o002) === 0;
+	}
+	if (metadata.uid === uid && uid !== 0) {
+		return (mode & 0o022) === 0;
+	}
 	return metadata.uid === 0 && ((mode & 0o022) === 0 || (mode & 0o1000) !== 0);
 }
 
-async function hasTrustedSocketDirAncestry(socketDir: string, uid: number, visited = new Set<string>()): Promise<boolean> {
-	for (let current = dirname(socketDir);;) {
+async function hasTrustedSocketDirAncestry(
+	socketDir: string,
+	uid: number,
+	visited = new Set<string>(),
+): Promise<boolean> {
+	for (let current = dirname(socketDir); ;) {
 		current = current.replace(/\/+$/, "") || "/";
-		if (visited.has(current)) return true;
+		if (visited.has(current)) {
+			return true;
+		}
 		visited.add(current);
 		const metadata = await lstat(current);
 		// The operating environment supplies /; its reported owner may be unmapped in a user namespace.
-		if (current === "/" && metadata.isDirectory() && (metadata.mode & 0o022) === 0) return true;
-		if (isTrustedAndroidAppDataRoot(current, metadata, uid)) return true;
-		if (!isTrustedSocketDirAncestor(metadata, uid)) return false;
+		if (current === "/" && metadata.isDirectory() && (metadata.mode & 0o022) === 0) {
+			return true;
+		}
+		if (isTrustedAndroidAppDataRoot(current, metadata, uid)) {
+			return true;
+		}
+		if (!isTrustedSocketDirAncestor(metadata, uid)) {
+			return false;
+		}
 		if (metadata.isSymbolicLink()) {
 			// Native stat rejects broken/cyclic links before walking their destination ancestry.
-			if (!isTrustedSocketDirAncestor(await stat(current), uid)) return false;
+			if (!isTrustedSocketDirAncestor(await stat(current), uid)) {
+				return false;
+			}
 			const target = await readlink(current);
 			const targetPath = isAbsolute(target) ? target : `${dirname(current)}/${target}`;
 			// Keep '..' after symlinks intact; '/.' includes the target itself in the parent walk.
-			if (!await hasTrustedSocketDirAncestry(`${targetPath}/.`, uid, visited)) return false;
+			if (!(await hasTrustedSocketDirAncestry(`${targetPath}/.`, uid, visited))) {
+				return false;
+			}
 		}
 		const parent = dirname(current);
-		if (parent === current) return true;
+		if (parent === current) {
+			return true;
+		}
 		current = parent;
 	}
 }
 
-async function socketDirEntriesAreOwned(socketDir: string, uid: number, visited = { count: 0 }): Promise<boolean> {
+async function socketDirEntriesAreOwned(
+	socketDir: string,
+	uid: number,
+	visited = { count: 0 },
+): Promise<boolean> {
 	for (const name of await readdir(socketDir)) {
-		if ((visited.count += 1) > 16_384) return false;
+		if ((visited.count += 1) > 16_384) {
+			return false;
+		}
 		try {
 			const path = join(socketDir, name);
 			const metadata = await lstat(path);
-			if (metadata.uid !== uid || metadata.isSymbolicLink()) return false;
+			if (metadata.uid !== uid || metadata.isSymbolicLink()) {
+				return false;
+			}
 			if (metadata.isDirectory()) {
-				if (!await socketDirEntriesAreOwned(path, uid, visited)) return false;
+				if (!(await socketDirEntriesAreOwned(path, uid, visited))) {
+					return false;
+				}
 			} else if (!metadata.isFile() && !metadata.isSocket()) {
 				return false;
 			}
 		} catch (error) {
-			if ((error as NodeJS.ErrnoException).code !== "ENOENT") return false;
+			if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+				return false;
+			}
 		}
 	}
 	return true;
@@ -303,36 +407,62 @@ export async function getAgentBrowserSocketDirValidationError(
 	uid: number | undefined = typeof process.getuid === "function" ? process.getuid() : undefined,
 	platform: NodeJS.Platform = processPlatform,
 ): Promise<string | undefined> {
-	if (!isAbsolute(socketDir)) return "the path is not absolute";
+	if (!isAbsolute(socketDir)) {
+		return "the path is not absolute";
+	}
 	// Windows uses native ACLs and named pipes, not POSIX uid/mode metadata.
 	// Still require a real directory; never accept a file or a redirected root.
 	if (platform === "win32") {
 		try {
-			try { await mkdir(socketDir); } catch (error) {
-				if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+			try {
+				await mkdir(socketDir);
+			} catch (error) {
+				if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
+					throw error;
+				}
 			}
 			const metadata = await lstat(socketDir);
-			if (metadata.isSymbolicLink()) return "the directory is a symlink";
+			if (metadata.isSymbolicLink()) {
+				return "the directory is a symlink";
+			}
 			return metadata.isDirectory() ? undefined : "the path is not a directory";
 		} catch (error) {
 			return `the directory could not be inspected (${(error as NodeJS.ErrnoException).code ?? "unknown error"})`;
 		}
 	}
-	if (typeof uid !== "number") return "POSIX ownership metadata is unavailable";
+	if (typeof uid !== "number") {
+		return "POSIX ownership metadata is unavailable";
+	}
 	try {
-		if (!await hasTrustedSocketDirAncestry(socketDir, uid)) return "an ancestor is writable, foreign-owned, a non-directory, or an untrusted symlink";
+		if (!(await hasTrustedSocketDirAncestry(socketDir, uid))) {
+			return "an ancestor is writable, foreign-owned, a non-directory, or an untrusted symlink";
+		}
 		try {
 			await mkdir(socketDir, { mode: 0o700 });
 		} catch (error) {
-			if ((error as NodeJS.ErrnoException).code !== "EEXIST") return `the directory could not be created (${(error as NodeJS.ErrnoException).code ?? "unknown error"})`;
+			if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
+				return `the directory could not be created (${(error as NodeJS.ErrnoException).code ?? "unknown error"})`;
+			}
 		}
 		const metadata = await lstat(socketDir);
-		if (!metadata.isDirectory()) return "the path is not a directory";
-		if (metadata.isSymbolicLink()) return "the directory is a symlink";
-		if (metadata.uid !== uid) return `the directory is owned by uid ${metadata.uid}, not uid ${uid}`;
-		if ((metadata.mode & 0o777) !== 0o700) return `the directory mode is ${(metadata.mode & 0o777).toString(8)}, not 700`;
-		if (!await hasTrustedSocketDirAncestry(socketDir, uid)) return "an ancestor became untrusted during validation";
-		if (!await socketDirEntriesAreOwned(socketDir, uid)) return "the directory contains a foreign-owned, symlink, special, or excessively deep entry";
+		if (!metadata.isDirectory()) {
+			return "the path is not a directory";
+		}
+		if (metadata.isSymbolicLink()) {
+			return "the directory is a symlink";
+		}
+		if (metadata.uid !== uid) {
+			return `the directory is owned by uid ${metadata.uid}, not uid ${uid}`;
+		}
+		if ((metadata.mode & 0o777) !== 0o700) {
+			return `the directory mode is ${(metadata.mode & 0o777).toString(8)}, not 700`;
+		}
+		if (!(await hasTrustedSocketDirAncestry(socketDir, uid))) {
+			return "an ancestor became untrusted during validation";
+		}
+		if (!(await socketDirEntriesAreOwned(socketDir, uid))) {
+			return "the directory contains a foreign-owned, symlink, special, or excessively deep entry";
+		}
 		return undefined;
 	} catch (error) {
 		return `the directory could not be inspected (${(error as NodeJS.ErrnoException).code ?? "unknown error"})`;
@@ -345,20 +475,33 @@ export function getAgentBrowserSocketPathValidationError(options: {
 	platform?: NodeJS.Platform;
 	socketDir: string;
 }): string | undefined {
-	if ((options.platform ?? processPlatform) === "win32") return undefined;
+	if ((options.platform ?? processPlatform) === "win32") {
+		return undefined;
+	}
 	const descriptor = parseArgvDescriptor(options.args);
 	const { command } = descriptor.commandInfo;
 	// Preflight commands that can start or navigate a browser. Follow-up reads and
 	// cleanup may target a daemon created by an earlier wrapper version, so let
 	// upstream inspect those identities instead of rejecting them from path math.
-	if (!command || !["batch", "connect", "goto", "navigate", "open", "visit"].includes(command)) return undefined;
+	if (!command || !["batch", "connect", "goto", "navigate", "open", "visit"].includes(command)) {
+		return undefined;
+	}
 	const sessionName = extractExplicitSessionName(options.args);
-	if (!sessionName) return undefined;
-	const namespace = resolveAgentBrowserNamespace(options.args, options.env?.AGENT_BROWSER_NAMESPACE);
-	const socketRoot = namespace ? join(options.socketDir, "namespaces", namespace, "run") : options.socketDir;
+	if (!sessionName) {
+		return undefined;
+	}
+	const namespace = resolveAgentBrowserNamespace(
+		options.args,
+		options.env?.AGENT_BROWSER_NAMESPACE,
+	);
+	const socketRoot = namespace
+		? join(options.socketDir, "namespaces", namespace, "run")
+		: options.socketDir;
 	const socketPath = join(socketRoot, `${sessionName}.sock`);
 	const pathBytes = Buffer.byteLength(socketPath);
-	if (pathBytes <= 103) return undefined;
+	if (pathBytes <= 103) {
+		return undefined;
+	}
 	return `Agent-browser Unix socket path would be ${pathBytes} bytes (max 103) for session ${JSON.stringify(sessionName)} under ${JSON.stringify(options.socketDir)}. Set PI_AGENT_BROWSER_SOCKET_DIR to a shorter absolute private directory such as /tmp/piab-<uid> with mode 0700; retrying sessionMode \"fresh\" cannot shorten this configured root.`;
 }
 
@@ -368,7 +511,9 @@ export function buildAgentBrowserProcessEnv(
 ): NodeJS.ProcessEnv {
 	const childEnv: NodeJS.ProcessEnv = {};
 	for (const [name, value] of Object.entries(baseEnv)) {
-		if (value !== undefined) childEnv[name] = value;
+		if (value !== undefined) {
+			childEnv[name] = value;
+		}
 	}
 
 	for (const [name, value] of Object.entries(overrides ?? {})) {
@@ -391,7 +536,9 @@ function getManagedPreSpawnPolicyError(
 	if (!validateManagedSessionRestoreContextForSpawn(options)) {
 		return "Managed session restore policy, storage, or checkout identity changed after planning; refusing to start agent-browser.";
 	}
-	if (nativeConfirmationDecision) return undefined;
+	if (nativeConfirmationDecision) {
+		return undefined;
+	}
 	return getPageTargetValidationError({
 		args: options.args,
 		currentPageUrl,
@@ -414,14 +561,36 @@ export async function runAgentBrowserProcess(options: {
 	stdin?: string;
 	timeoutMs?: number;
 }): Promise<ProcessRunResult> {
-	const { cwd, env, managedSessionRestoreState, managedStateCurrentPageUrl, managedStatePageUrlUnknown, signal, stdin } = options;
-	const preserveAttachedBrowserSession = options.preserveAttachedBrowserSession === true || attachedBrowserSessionContext.getStore() === true;
-	const ownedManagedSession = options.ownedManagedSession === true || isOwnedManagedSessionTarget(options.args);
+	const {
+		cwd,
+		env,
+		managedSessionRestoreState,
+		managedStateCurrentPageUrl,
+		managedStatePageUrlUnknown,
+		signal,
+		stdin,
+	} = options;
+	const preserveAttachedBrowserSession =
+		options.preserveAttachedBrowserSession === true ||
+		attachedBrowserSessionContext.getStore() === true;
+	const ownedManagedSession =
+		options.ownedManagedSession === true || isOwnedManagedSessionTarget(options.args);
 	const args = options.args;
 	const timeoutMs = options.timeoutMs ?? getAgentBrowserProcessTimeoutMs();
-	const deadlineExpired = () => signal?.reason instanceof Error && signal.reason.name === "TimeoutError";
-	const cancelledResult = (): ProcessRunResult => ({ aborted: !deadlineExpired(), agentBrowserStarted: false, exitCode: deadlineExpired() ? 124 : 1, stderr: "", stdout: "", timedOut: deadlineExpired(), timeoutMs: deadlineExpired() ? timeoutMs : undefined });
-	if (signal?.aborted) return cancelledResult();
+	const deadlineExpired = () =>
+		signal?.reason instanceof Error && signal.reason.name === "TimeoutError";
+	const cancelledResult = (): ProcessRunResult => ({
+		aborted: !deadlineExpired(),
+		agentBrowserStarted: false,
+		exitCode: deadlineExpired() ? 124 : 1,
+		stderr: "",
+		stdout: "",
+		timedOut: deadlineExpired(),
+		timeoutMs: deadlineExpired() ? timeoutMs : undefined,
+	});
+	if (signal?.aborted) {
+		return cancelledResult();
+	}
 	const parentEnv = getAgentBrowserProcessEnvironment();
 	const managedSessionRestoreOptions = {
 		args,
@@ -432,7 +601,12 @@ export async function runAgentBrowserProcess(options: {
 		restoreState: managedSessionRestoreState,
 		stdin,
 	};
-	const planningPolicyError = getManagedPreSpawnPolicyError(managedSessionRestoreOptions, managedStateCurrentPageUrl, managedStatePageUrlUnknown, options.nativeConfirmationDecision);
+	const planningPolicyError = getManagedPreSpawnPolicyError(
+		managedSessionRestoreOptions,
+		managedStateCurrentPageUrl,
+		managedStatePageUrlUnknown,
+		options.nativeConfirmationDecision,
+	);
 	if (planningPolicyError) {
 		return {
 			aborted: false,
@@ -445,9 +619,13 @@ export async function runAgentBrowserProcess(options: {
 		};
 	}
 	const managedSessionRestoreEnv = getManagedSessionRestoreEnv(managedSessionRestoreOptions);
-	const ownedManagedSessionCompatibilityEnv = getOwnedManagedSessionCompatibilityEnv(managedSessionRestoreOptions);
+	const ownedManagedSessionCompatibilityEnv = getOwnedManagedSessionCompatibilityEnv(
+		managedSessionRestoreOptions,
+	);
 	const processOverrides: NodeJS.ProcessEnv = {
-		...(ownedManagedSession ? { [AGENT_BROWSER_IDLE_TIMEOUT_ENV]: String(getImplicitSessionIdleTimeoutMs()) } : {}),
+		...(ownedManagedSession
+			? { [AGENT_BROWSER_IDLE_TIMEOUT_ENV]: String(getImplicitSessionIdleTimeoutMs()) }
+			: {}),
 		...managedSessionRestoreEnv,
 		...env,
 		...getManagedSessionRestoreProtectedEnv(managedSessionRestoreOptions, managedSessionRestoreEnv),
@@ -455,20 +633,39 @@ export async function runAgentBrowserProcess(options: {
 		...ownedManagedSessionCompatibilityEnv,
 	};
 	const explicitSocketDir = processOverrides[AGENT_BROWSER_SOCKET_DIR_ENV];
-	let effectiveEnv = explicitSocketDir === undefined ? { ...processOverrides, [AGENT_BROWSER_SOCKET_DIR_ENV]: undefined } : processOverrides;
-	const requestedSocketDir = resolveAgentBrowserSocketDir({ env: processOverrides, ownedManagedSession, parentEnv });
+	let effectiveEnv =
+		explicitSocketDir === undefined
+			? { ...processOverrides, [AGENT_BROWSER_SOCKET_DIR_ENV]: undefined }
+			: processOverrides;
+	const requestedSocketDir = resolveAgentBrowserSocketDir({
+		env: processOverrides,
+		ownedManagedSession,
+		parentEnv,
+	});
 	if (requestedSocketDir !== undefined) {
-		const socketDirError = requestedSocketDir.length > 0
-			? await getAgentBrowserSocketDirValidationError(requestedSocketDir)
-			: "the configured path is empty";
-		if (signal?.aborted) return cancelledResult();
-		const socketPathError = socketDirError ? undefined : getAgentBrowserSocketPathValidationError({ args, env: effectiveEnv, socketDir: requestedSocketDir });
+		const socketDirError =
+			requestedSocketDir.length > 0
+				? await getAgentBrowserSocketDirValidationError(requestedSocketDir)
+				: "the configured path is empty";
+		if (signal?.aborted) {
+			return cancelledResult();
+		}
+		const socketPathError = socketDirError
+			? undefined
+			: getAgentBrowserSocketPathValidationError({
+					args,
+					env: effectiveEnv,
+					socketDir: requestedSocketDir,
+				});
 		if (socketDirError || socketPathError) {
 			return {
 				aborted: false,
 				agentBrowserStarted: false,
 				exitCode: 1,
-				spawnError: new Error(socketPathError ?? `Agent-browser socket storage ${JSON.stringify(requestedSocketDir)} is unusable: ${socketDirError}. Use an absolute directory owned by the current uid with mode 0700 and remove foreign, symlink, or special entries.`),
+				spawnError: new Error(
+					socketPathError ??
+						`Agent-browser socket storage ${JSON.stringify(requestedSocketDir)} is unusable: ${socketDirError}. Use an absolute directory owned by the current uid with mode 0700 and remove foreign, symlink, or special entries.`,
+				),
 				stderr: "",
 				stdout: "",
 				timedOut: false,
@@ -478,7 +675,9 @@ export async function runAgentBrowserProcess(options: {
 	}
 	const childEnv = buildAgentBrowserProcessEnv(parentEnv, effectiveEnv);
 	const stockLauncher = resolveWindowsStockLauncher(cwd, childEnv);
-	if (signal?.aborted) return cancelledResult();
+	if (signal?.aborted) {
+		return cancelledResult();
+	}
 	return await new Promise<ProcessRunResult>((resolve) => {
 		let aborted = false;
 		let agentBrowserStarted = false;
@@ -502,8 +701,14 @@ export async function runAgentBrowserProcess(options: {
 
 		const queueStdoutChunk = (buffer: Buffer) => {
 			stdoutTail = appendTail(stdoutTail, buffer.toString("utf8"), MAX_BUFFERED_STDOUT_TAIL_CHARS);
-			if (stdoutSpillError) return;
-			if (!stdoutSpillPending && !stdoutSpillPath && stdoutBufferedBytes + buffer.length <= MAX_BUFFERED_STDOUT_BYTES) {
+			if (stdoutSpillError) {
+				return;
+			}
+			if (
+				!stdoutSpillPending &&
+				!stdoutSpillPath &&
+				stdoutBufferedBytes + buffer.length <= MAX_BUFFERED_STDOUT_BYTES
+			) {
 				stdoutBuffers.push(buffer);
 				stdoutBufferedBytes += buffer.length;
 				return;
@@ -512,7 +717,9 @@ export async function runAgentBrowserProcess(options: {
 			stdoutSpillPending = true;
 			pendingStdoutWrite = pendingStdoutWrite
 				.then(async () => {
-					if (stdoutSpillError) return;
+					if (stdoutSpillError) {
+						return;
+					}
 					if (!stdoutSpillHandle || !stdoutSpillPath) {
 						const tempFile = await openSecureTempFile(PROCESS_STDOUT_SPILL_FILE_PREFIX, ".json");
 						stdoutSpillHandle = tempFile.fileHandle;
@@ -527,7 +734,11 @@ export async function runAgentBrowserProcess(options: {
 							stdoutBufferedBytes = 0;
 						}
 					}
-					await writeSecureTempChunk({ content: buffer, fileHandle: stdoutSpillHandle, path: stdoutSpillPath });
+					await writeSecureTempChunk({
+						content: buffer,
+						fileHandle: stdoutSpillHandle,
+						path: stdoutSpillPath,
+					});
 				})
 				.catch((error) => {
 					stdoutSpillError = error instanceof Error ? error : new Error(String(error));
@@ -535,13 +746,17 @@ export async function runAgentBrowserProcess(options: {
 		};
 
 		const removeAbortListener = () => {
-			if (!signal || !abortListener) return;
+			if (!signal || !abortListener) {
+				return;
+			}
 			signal.removeEventListener("abort", abortListener);
 			abortListener = undefined;
 		};
 
 		const finish = (exitCode: number) => {
-			if (settled) return;
+			if (settled) {
+				return;
+			}
 			settled = true;
 			removeAbortListener();
 			if (killTimer) {
@@ -579,17 +794,39 @@ export async function runAgentBrowserProcess(options: {
 			});
 		};
 
-		const spawnPolicyError = getManagedPreSpawnPolicyError(managedSessionRestoreOptions, managedStateCurrentPageUrl, managedStatePageUrlUnknown, options.nativeConfirmationDecision);
+		const spawnPolicyError = getManagedPreSpawnPolicyError(
+			managedSessionRestoreOptions,
+			managedStateCurrentPageUrl,
+			managedStatePageUrlUnknown,
+			options.nativeConfirmationDecision,
+		);
 		if (spawnPolicyError) {
-			resolve({ aborted: false, agentBrowserStarted: false, exitCode: 1, spawnError: new Error(spawnPolicyError), stderr: "", stdout: "", timedOut: false });
+			resolve({
+				aborted: false,
+				agentBrowserStarted: false,
+				exitCode: 1,
+				spawnError: new Error(spawnPolicyError),
+				stderr: "",
+				stdout: "",
+				timedOut: false,
+			});
 			return;
 		}
 		const spawnBrowser = processPlatform === "win32" && !stockLauncher ? crossSpawn : spawn;
-		const child = spawnBrowser(stockLauncher ?? "agent-browser", prepareAgentBrowserSpawnArgs(getAgentBrowserProcessArgs(args), ownedManagedSessionCompatibilityEnv.AGENT_BROWSER_USER_AGENT, preserveAttachedBrowserSession, chromeStartupArgsContext.getStore()), {
-			cwd,
-			env: childEnv,
-			stdio: ["pipe", "pipe", "pipe"],
-		});
+		const child = spawnBrowser(
+			stockLauncher ?? "agent-browser",
+			prepareAgentBrowserSpawnArgs(
+				getAgentBrowserProcessArgs(args),
+				ownedManagedSessionCompatibilityEnv.AGENT_BROWSER_USER_AGENT,
+				preserveAttachedBrowserSession,
+				chromeStartupArgsContext.getStore(),
+			),
+			{
+				cwd,
+				env: childEnv,
+				stdio: ["pipe", "pipe", "pipe"],
+			},
+		);
 		if (processPlatform !== "win32") {
 			child.once("spawn", () => {
 				agentBrowserStarted = true;
@@ -598,13 +835,17 @@ export async function runAgentBrowserProcess(options: {
 		}
 
 		const terminateChild = (reason: "abort" | "timeout") => {
-			if (settled) return;
+			if (settled) {
+				return;
+			}
 			if (reason === "abort") {
 				aborted = true;
 			} else {
 				timedOut = true;
 			}
-			if (pendingTermination) return;
+			if (pendingTermination) {
+				return;
+			}
 			pendingTermination = terminateSpawnedChild(child, "SIGTERM");
 			// Windows taskkill already forces the entire tree. A concurrent direct
 			// kill would remove its root before traversal finishes.
@@ -671,7 +912,9 @@ export async function runAgentBrowserProcess(options: {
 		if (signal) {
 			abortListener = () => terminateChild(deadlineExpired() ? "timeout" : "abort");
 			signal.addEventListener("abort", abortListener, { once: true });
-			if (signal.aborted) abortListener();
+			if (signal.aborted) {
+				abortListener();
+			}
 		}
 
 		writeChildStdin();

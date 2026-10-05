@@ -16,7 +16,13 @@ test("buildToolPresentation redacts scalar extraction results for eval and get c
 	const evalPresentation = await buildToolPresentation({
 		commandInfo: { command: "eval", subcommand: "--stdin" },
 		cwd: process.cwd(),
-		envelope: { success: true, data: { origin: "https://example.com/?token=origin-secret", result: '{"token":"scalar-secret","ok":true}' } },
+		envelope: {
+			success: true,
+			data: {
+				origin: "https://example.com/?token=origin-secret",
+				result: '{"token":"scalar-secret","ok":true}',
+			},
+		},
 	});
 	const evalText = (evalPresentation.content[0] as { text: string }).text;
 	assert.doesNotMatch(evalText, /scalar-secret|origin-secret/);
@@ -73,7 +79,10 @@ test("buildToolPresentation formats scalar extraction results for eval and get c
 		},
 	});
 	assert.equal(evalPresentation.content[0]?.type, "text");
-	assert.equal((evalPresentation.content[0] as { text: string }).text, "Example Domain\n\nOrigin: https://example.com/");
+	assert.equal(
+		(evalPresentation.content[0] as { text: string }).text,
+		"Example Domain\n\nOrigin: https://example.com/",
+	);
 	assert.equal(evalPresentation.summary, "Eval result: Example Domain");
 
 	const getPresentation = await buildToolPresentation({
@@ -89,32 +98,96 @@ test("buildToolPresentation formats scalar extraction results for eval and get c
 		},
 	});
 	assert.equal(getPresentation.content[0]?.type, "text");
-	assert.equal((getPresentation.content[0] as { text: string }).text, "Example Domain\n\nOrigin: https://example.com/");
+	assert.equal(
+		(getPresentation.content[0] as { text: string }).text,
+		"Example Domain\n\nOrigin: https://example.com/",
+	);
 	assert.equal(getPresentation.summary, "Title: Example Domain");
 
 	const getTextPresentation = await buildToolPresentation({
 		commandInfo: { command: "get", subcommand: "text" },
 		cwd: process.cwd(),
-		envelope: { success: true, data: { lifecycle: { reused: true }, origin: "https://example.com/", text: "Visible body text" } },
+		envelope: {
+			success: true,
+			data: {
+				lifecycle: { reused: true },
+				origin: "https://example.com/",
+				text: "Visible body text",
+			},
+		},
 	});
-	assert.equal((getTextPresentation.content[0] as { text: string }).text, "Visible body text\n\nOrigin: https://example.com/");
-	assert.doesNotMatch((getTextPresentation.content[0] as { text: string }).text, /lifecycle|reused/);
+	assert.equal(
+		(getTextPresentation.content[0] as { text: string }).text,
+		"Visible body text\n\nOrigin: https://example.com/",
+	);
+	assert.doesNotMatch(
+		(getTextPresentation.content[0] as { text: string }).text,
+		/lifecycle|reused/,
+	);
 });
 
 test("buildToolPresentation compacts common action, wait, close, tab-close, and diagnostic reset results", async () => {
-	const cases: Array<{ commandInfo: { command: string; commandTokens?: string[]; subcommand?: string }; data: Record<string, unknown>; expected: string }> = [
-		{ commandInfo: { command: "fill" }, data: { filled: "#email", lifecycle: { reused: true } }, expected: "Filled: #email\n\nAction dispatched; application change unverified. Verify the expected URL, text, state, or external receipt before relying on it." },
-		{ commandInfo: { command: "wait" }, data: { selector: "#ready", waited: "selector", lifecycle: { reused: true } }, expected: "Wait completed: #ready" },
-		{ commandInfo: { command: "wait" }, data: { waited: "timeout", lifecycle: { reused: true } }, expected: "Fixed wait elapsed; no page condition was verified." },
-		{ commandInfo: { command: "close" }, data: { closed: true, lifecycle: { reused: false }, statePath: "/private/state" }, expected: "Browser session closed." },
-		{ commandInfo: { command: "tab", subcommand: "close" }, data: { closed: true, tabId: "t1", lifecycle: { reused: true } }, expected: "Tab closed: t1" },
-		{ commandInfo: { command: "network", commandTokens: ["network", "requests", "--clear"], subcommand: "requests" }, data: { cleared: true, lifecycle: { reused: true } }, expected: "Network request buffer cleared." },
-		{ commandInfo: { command: "console", commandTokens: ["console", "--clear"], subcommand: "--clear" }, data: { cleared: true, lifecycle: { reused: true } }, expected: "Console buffer cleared." },
+	const cases: Array<{
+		commandInfo: { command: string; commandTokens?: string[]; subcommand?: string };
+		data: Record<string, unknown>;
+		expected: string;
+	}> = [
+		{
+			commandInfo: { command: "fill" },
+			data: { filled: "#email", lifecycle: { reused: true } },
+			expected:
+				"Filled: #email\n\nAction dispatched; application change unverified. Verify the expected URL, text, state, or external receipt before relying on it.",
+		},
+		{
+			commandInfo: { command: "wait" },
+			data: { selector: "#ready", waited: "selector", lifecycle: { reused: true } },
+			expected: "Wait completed: #ready",
+		},
+		{
+			commandInfo: { command: "wait" },
+			data: { waited: "timeout", lifecycle: { reused: true } },
+			expected: "Fixed wait elapsed; no page condition was verified.",
+		},
+		{
+			commandInfo: { command: "close" },
+			data: { closed: true, lifecycle: { reused: false }, statePath: "/private/state" },
+			expected: "Browser session closed.",
+		},
+		{
+			commandInfo: { command: "tab", subcommand: "close" },
+			data: { closed: true, tabId: "t1", lifecycle: { reused: true } },
+			expected: "Tab closed: t1",
+		},
+		{
+			commandInfo: {
+				command: "network",
+				commandTokens: ["network", "requests", "--clear"],
+				subcommand: "requests",
+			},
+			data: { cleared: true, lifecycle: { reused: true } },
+			expected: "Network request buffer cleared.",
+		},
+		{
+			commandInfo: {
+				command: "console",
+				commandTokens: ["console", "--clear"],
+				subcommand: "--clear",
+			},
+			data: { cleared: true, lifecycle: { reused: true } },
+			expected: "Console buffer cleared.",
+		},
 	];
 	for (const { commandInfo, data, expected } of cases) {
-		const presentation = await buildToolPresentation({ commandInfo, cwd: process.cwd(), envelope: { success: true, data } });
+		const presentation = await buildToolPresentation({
+			commandInfo,
+			cwd: process.cwd(),
+			envelope: { success: true, data },
+		});
 		assert.equal((presentation.content[0] as { text: string }).text, expected);
-		assert.doesNotMatch((presentation.content[0] as { text: string }).text, /lifecycle|statePath|reused/);
+		assert.doesNotMatch(
+			(presentation.content[0] as { text: string }).text,
+			/lifecycle|statePath|reused/,
+		);
 	}
 });
 
@@ -131,7 +204,10 @@ test("buildToolPresentation makes unverified batch mutations prominent", async (
 		},
 	});
 	const text = (presentation.content[0] as { text: string }).text;
-	assert.match(text, /^Mutation evidence: 1 action result proves dispatch only, not application state change\./);
+	assert.match(
+		text,
+		/^Mutation evidence: 1 action result proves dispatch only, not application state change\./,
+	);
 	assert.match(text, /fixed waits are not postconditions/);
 	assert.equal(presentation.pageChangeSummary?.observed, false);
 	assert.match(presentation.pageChangeSummary?.summary ?? "", /application change unverified/);
@@ -154,7 +230,15 @@ test("artifact cleanup guidance ignores wrapper-managed spills", async () => {
 		command: "close",
 		cwd: process.cwd(),
 		manifest: {
-			entries: [{ createdAtMs: 1, kind: "spill", path: "/tmp/internal-spill.json", retentionState: "live", storageScope: "persistent-session" }],
+			entries: [
+				{
+					createdAtMs: 1,
+					kind: "spill",
+					path: "/tmp/internal-spill.json",
+					retentionState: "live",
+					storageScope: "persistent-session",
+				},
+			],
 			evictedCount: 0,
 			liveCount: 1,
 			maxEntries: 10,
@@ -183,7 +267,12 @@ test("buildToolPresentation formats session status and session list", async () =
 			data: {
 				sessions: [
 					{ active: true, name: "piab-foreign", title: "Private", url: "https://private.example" },
-					{ active: true, name: "PIAB-case-alias", title: "Private Alias", url: "https://alias.private.example" },
+					{
+						active: true,
+						name: "PIAB-case-alias",
+						title: "Private Alias",
+						url: "https://alias.private.example",
+					},
 					{ active: true, name: "work", title: "Example", url: "https://example.com" },
 				],
 			},
@@ -200,38 +289,83 @@ test("buildToolPresentation exposes native session-info liveness and runtime ide
 	for (const status of [
 		{ active: false, pid: null, version: null, runtime: null, runtimeError: null },
 		{ active: true, pid: 1234, version: "0.37.1", runtime: null, runtimeError: null },
-		{ active: true, pid: 1234, version: "0.37.1", runtime: null, runtimeError: "Runtime info unavailable" },
-		{ active: true, pid: 1234, version: "0.37.1", runtime: {
-			session: "shared", namespace: null, socketDir: identity.socketDir, backgroundPid: 1234,
-			browserLaunched: false, pageCount: 0, engine: "chromium", launchHash: null,
-			compatibilityStatus: "current", restoreKey: null, restoreStatus: "disabled",
-			restoreValidationPending: false, restoreSave: false, saveStatus: "disabled",
-		}, runtimeError: null },
+		{
+			active: true,
+			pid: 1234,
+			version: "0.37.1",
+			runtime: null,
+			runtimeError: "Runtime info unavailable",
+		},
+		{
+			active: true,
+			pid: 1234,
+			version: "0.37.1",
+			runtime: {
+				session: "shared",
+				namespace: null,
+				socketDir: identity.socketDir,
+				backgroundPid: 1234,
+				browserLaunched: false,
+				pageCount: 0,
+				engine: "chromium",
+				launchHash: null,
+				compatibilityStatus: "current",
+				restoreKey: null,
+				restoreStatus: "disabled",
+				restoreValidationPending: false,
+				restoreSave: false,
+				saveStatus: "disabled",
+			},
+			runtimeError: null,
+		},
 	]) {
 		const data = { ...identity, ...status };
 		const result = await buildToolPresentation({
 			commandInfo: { command: "session", subcommand: "info" },
-			cwd: process.cwd(), envelope: { success: true, data },
+			cwd: process.cwd(),
+			envelope: { success: true, data },
 		});
-		assert.deepEqual(JSON.parse((result.content[0] as { text: string }).text.split("\n\n").slice(1).join("\n\n")), data);
+		assert.deepEqual(
+			JSON.parse((result.content[0] as { text: string }).text.split("\n\n").slice(1).join("\n\n")),
+			data,
+		);
 	}
 });
 
 test("buildToolPresentation limits native session-info text to redacted status metadata", async () => {
 	const runtime = {
-		browserLaunched: true, pageCount: 2, engine: "chromium", launchHash: "launch-identity",
-		restoreKey: "shared-auth", restoreStatus: "loaded", restoreLoadedPath: "/tmp/shared-auth.json",
-		saveStatus: "saved", restoreSavedPath: "/tmp/shared-auth.json",
+		browserLaunched: true,
+		pageCount: 2,
+		engine: "chromium",
+		launchHash: "launch-identity",
+		restoreKey: "shared-auth",
+		restoreStatus: "loaded",
+		restoreLoadedPath: "/tmp/shared-auth.json",
+		saveStatus: "saved",
+		restoreSavedPath: "/tmp/shared-auth.json",
 	};
 	const result = await buildToolPresentation({
-		commandInfo: { command: "session", subcommand: "info" }, cwd: process.cwd(),
-		envelope: { success: true, data: {
-			session: "shared", namespace: "team", active: true, pid: 1234,
-			runtimeError: "Authorization: Bearer runtime-secret",
-			runtime: { ...runtime, restoreCheckUrl: "https://private.test/path", restoreCheckText: "private-text",
-				restoreCheckFn: "private-function", restoreStatusDetail: "private-detail",
-				password: "private-password", cdpUrl: "ws://private.test/control" },
-		} },
+		commandInfo: { command: "session", subcommand: "info" },
+		cwd: process.cwd(),
+		envelope: {
+			success: true,
+			data: {
+				session: "shared",
+				namespace: "team",
+				active: true,
+				pid: 1234,
+				runtimeError: "Authorization: Bearer runtime-secret",
+				runtime: {
+					...runtime,
+					restoreCheckUrl: "https://private.test/path",
+					restoreCheckText: "private-text",
+					restoreCheckFn: "private-function",
+					restoreStatusDetail: "private-detail",
+					password: "private-password",
+					cdpUrl: "ws://private.test/control",
+				},
+			},
+		},
 	});
 	const text = (result.content[0] as { text: string }).text;
 	const visible = JSON.parse(text.split("\n\n").slice(1).join("\n\n"));
@@ -271,7 +405,13 @@ test("buildToolPresentation formats auth profile lists and show output without e
 		cwd: process.cwd(),
 		envelope: {
 			success: true,
-			data: { name: "prod", password: "secret", token: "bearer-token", url: "https://example.com", username: "user@example.com" },
+			data: {
+				name: "prod",
+				password: "secret",
+				token: "bearer-token",
+				url: "https://example.com",
+				username: "user@example.com",
+			},
 		},
 	});
 	assert.equal(show.summary, "Auth profile: prod");
@@ -286,7 +426,17 @@ test("buildToolPresentation formats stateful browser-context results without lea
 	const cases = [
 		{
 			commandInfo: { command: "cookies", subcommand: "get" },
-			data: { cookies: [{ domain: "example.test", httpOnly: true, name: "session_id", path: "/", value: "cookie-secret" }] },
+			data: {
+				cookies: [
+					{
+						domain: "example.test",
+						httpOnly: true,
+						name: "session_id",
+						path: "/",
+						value: "cookie-secret",
+					},
+				],
+			},
 			summary: "Cookies: 1",
 			matches: [/session_id/, /example\.test/],
 			missing: /cookie-secret/,
@@ -300,7 +450,14 @@ test("buildToolPresentation formats stateful browser-context results without lea
 		},
 		{
 			commandInfo: { command: "storage", subcommand: "local" },
-			data: { entries: [{ key: "theme", value: "dark" }, { key: "jwt", value: "eyJhbGciOiJIUzI1NiJ9.supersecret.signature" }, { key: "authToken", value: "storage-secret-token" }], type: "local" },
+			data: {
+				entries: [
+					{ key: "theme", value: "dark" },
+					{ key: "jwt", value: "eyJhbGciOiJIUzI1NiJ9.supersecret.signature" },
+					{ key: "authToken", value: "storage-secret-token" },
+				],
+				type: "local",
+			},
 			summary: "Storage entries: 3",
 			matches: [/theme: dark/, /jwt: \[REDACTED\]/, /authToken: \[REDACTED\]/],
 			missing: /supersecret|storage-secret-token|eyJhbGci/,
@@ -335,7 +492,9 @@ test("buildToolPresentation formats stateful browser-context results without lea
 		},
 		{
 			commandInfo: { command: "state", subcommand: "list" },
-			data: { states: [{ name: "prod-state.json", url: "https://example.test/?token=state-secret" }] },
+			data: {
+				states: [{ name: "prod-state.json", url: "https://example.test/?token=state-secret" }],
+			},
 			summary: "States: 1",
 			matches: [/prod-state\.json/, /REDACTED/],
 			missing: /state-secret/,
@@ -348,12 +507,19 @@ test("buildToolPresentation formats stateful browser-context results without lea
 				size: 512,
 				state: {
 					cookies: [{ domain: "example.test", name: "sid", value: "v1x9p3" }],
-					origins: [{ localStorage: [{ name: "theme", value: "l7q2z8" }], origin: "https://example.test" }],
+					origins: [
+						{ localStorage: [{ name: "theme", value: "l7q2z8" }], origin: "https://example.test" },
+					],
 				},
 				summary: "1 cookies, 1 origins",
 			},
 			summary: "State show: prod-state.json",
-			matches: [/Saved state: prod-state\.json/, /Summary: 1 cookies, 1 origins/, /Encrypted: no/, /Size: 512 bytes/],
+			matches: [
+				/Saved state: prod-state\.json/,
+				/Summary: 1 cookies, 1 origins/,
+				/Encrypted: no/,
+				/Size: 512 bytes/,
+			],
 			missing: /v1x9p3|l7q2z8/,
 		},
 	] as const;
@@ -366,7 +532,9 @@ test("buildToolPresentation formats stateful browser-context results without lea
 		});
 		assert.equal(presentation.summary, testCase.summary);
 		const text = (presentation.content[0] as { text: string }).text;
-		for (const pattern of testCase.matches) assert.match(text, pattern);
+		for (const pattern of testCase.matches) {
+			assert.match(text, pattern);
+		}
 		if (testCase.missing) {
 			assert.doesNotMatch(text, testCase.missing);
 			assert.doesNotMatch(JSON.stringify(presentation.data), testCase.missing);
@@ -383,7 +551,11 @@ test("buildToolPresentation preserves managed restore capabilities and state-lis
 			success: true,
 			data: {
 				files: [
-					{ filename: `${restoreKey}-managed.json`, path: `/tmp/${restoreKey}-managed.json`, url: "https://private.example" },
+					{
+						filename: `${restoreKey}-managed.json`,
+						path: `/tmp/${restoreKey}-managed.json`,
+						url: "https://private.example",
+					},
 					{ filename: "caller-owned.json", path: "/tmp/caller-owned.json" },
 				],
 			},
@@ -392,8 +564,16 @@ test("buildToolPresentation preserves managed restore capabilities and state-lis
 	const listSerialized = JSON.stringify(list);
 	assert.equal(list.summary, "States: 2");
 	assert.match((list.content[0] as { text: string }).text, /caller-owned\.json/);
-	assert.match(listSerialized, new RegExp(restoreKey), "state list keeps the wrapper restore key visible");
-	assert.match(listSerialized, /private\.example/, "state list keeps the restore-check URL visible");
+	assert.match(
+		listSerialized,
+		new RegExp(restoreKey),
+		"state list keeps the wrapper restore key visible",
+	);
+	assert.match(
+		listSerialized,
+		/private\.example/,
+		"state list keeps the restore-check URL visible",
+	);
 	assert.doesNotMatch(listSerialized, /REDACTED MANAGED STATE/);
 
 	const sessionInfo = await buildToolPresentation({
@@ -401,7 +581,12 @@ test("buildToolPresentation preserves managed restore capabilities and state-lis
 		cwd: process.cwd(),
 		envelope: {
 			success: true,
-			data: { active: true, runtime: { restoreKey }, unrelatedStatePath: `/tmp/piab-r-${"b".repeat(32)}-managed.json`, statePath: `/tmp/${restoreKey}-managed.json` },
+			data: {
+				active: true,
+				runtime: { restoreKey },
+				unrelatedStatePath: `/tmp/piab-r-${"b".repeat(32)}-managed.json`,
+				statePath: `/tmp/${restoreKey}-managed.json`,
+			},
 		},
 	});
 	const infoSerialized = JSON.stringify(sessionInfo);
@@ -447,8 +632,14 @@ test("buildToolPresentation keeps benign storage values visible while redacting 
 	assert.match(details, /"value":"grid"/);
 	assert.match(details, /"value":true/);
 	assert.match(details, /"value":"qa"/);
-	assert.doesNotMatch(text, /abc123|plain-session-value|user@example|token=secret|userId=12345|session\/abc123|secret-token/);
-	assert.doesNotMatch(details, /abc123|plain-session-value|user@example|token=secret|userId=12345|session\/abc123|secret-token/);
+	assert.doesNotMatch(
+		text,
+		/abc123|plain-session-value|user@example|token=secret|userId=12345|session\/abc123|secret-token/,
+	);
+	assert.doesNotMatch(
+		details,
+		/abc123|plain-session-value|user@example|token=secret|userId=12345|session\/abc123|secret-token/,
+	);
 	assert.match(details, /valueRedacted/);
 });
 
@@ -456,9 +647,15 @@ test("buildToolPresentation redacts native all-entry storage maps, including bat
 	const data = { data: { refresh: "opaque-credential", theme: "dark", locale: "en-US" } };
 	for (const batch of [false, true]) {
 		const presentation = await buildToolPresentation({
-			commandInfo: { command: batch ? "batch" : "storage", subcommand: batch ? undefined : "local" },
+			commandInfo: {
+				command: batch ? "batch" : "storage",
+				subcommand: batch ? undefined : "local",
+			},
 			cwd: process.cwd(),
-			envelope: { success: true, data: batch ? [{ command: ["storage", "local"], success: true, result: data }] : data },
+			envelope: {
+				success: true,
+				data: batch ? [{ command: ["storage", "local"], success: true, result: data }] : data,
+			},
 		});
 		assert.doesNotMatch(JSON.stringify(presentation), /opaque-credential/);
 		assert.match(JSON.stringify(presentation.data), /refresh/);
@@ -472,18 +669,48 @@ test("buildToolPresentation adds routed pending network diagnostics", async () =
 		cwd: process.cwd(),
 		envelope: {
 			success: true,
-			data: { requests: [{ method: "GET", requestId: "r1", resourceType: "fetch", url: "https://example.test/api/items" }] },
+			data: {
+				requests: [
+					{
+						method: "GET",
+						requestId: "r1",
+						resourceType: "fetch",
+						url: "https://example.test/api/items",
+					},
+				],
+			},
 		},
-		networkRouteDiagnostics: [{ mode: "body", reason: "pending-routed-request", requestId: "r1", requestUrl: "https://example.test/api/items", routePattern: "**/api/**", summary: "pending" }],
+		networkRouteDiagnostics: [
+			{
+				mode: "body",
+				reason: "pending-routed-request",
+				requestId: "r1",
+				requestUrl: "https://example.test/api/items",
+				routePattern: "**/api/**",
+				summary: "pending",
+			},
+		],
 		sessionName: "pi-agent-browser-test",
 	});
 
 	const text = (presentation.content[0] as { text: string }).text;
 	assert.match(text, /Network route diagnostics/);
 	assert.match(text, /pending-routed-request/);
-	assert.deepEqual(presentation.networkRouteDiagnostics?.map((item) => item.reason), ["pending-routed-request"]);
-	assert.deepEqual(presentation.nextActions?.slice(0, 2).map((action) => action.id), ["inspect-routed-network-request", "start-network-har-capture-for-route-mock"]);
-	assert.deepEqual(presentation.nextActions?.[0]?.params?.args, ["--session", "pi-agent-browser-test", "network", "request", "r1"]);
+	assert.deepEqual(
+		presentation.networkRouteDiagnostics?.map((item) => item.reason),
+		["pending-routed-request"],
+	);
+	assert.deepEqual(
+		presentation.nextActions?.slice(0, 2).map((action) => action.id),
+		["inspect-routed-network-request", "start-network-har-capture-for-route-mock"],
+	);
+	assert.deepEqual(presentation.nextActions?.[0]?.params?.args, [
+		"--session",
+		"pi-agent-browser-test",
+		"network",
+		"request",
+		"r1",
+	]);
 });
 
 test("buildToolPresentation flags routed requests that return failed statuses", async () => {
@@ -492,17 +719,42 @@ test("buildToolPresentation flags routed requests that return failed statuses", 
 		cwd: process.cwd(),
 		envelope: {
 			success: true,
-			data: { requests: [{ method: "GET", requestId: "r404", resourceType: "fetch", status: 404, url: "https://example.test/api/stress" }] },
+			data: {
+				requests: [
+					{
+						method: "GET",
+						requestId: "r404",
+						resourceType: "fetch",
+						status: 404,
+						url: "https://example.test/api/stress",
+					},
+				],
+			},
 		},
-		networkRouteDiagnostics: [{ mode: "body", reason: "unfulfilled-routed-request", requestId: "r404", requestUrl: "https://example.test/api/stress", routePattern: "**/api/stress", summary: "failed" }],
+		networkRouteDiagnostics: [
+			{
+				mode: "body",
+				reason: "unfulfilled-routed-request",
+				requestId: "r404",
+				requestUrl: "https://example.test/api/stress",
+				routePattern: "**/api/stress",
+				summary: "failed",
+			},
+		],
 		sessionName: "pi-agent-browser-test",
 	});
 
 	const text = (presentation.content[0] as { text: string }).text;
 	assert.match(text, /unfulfilled-routed-request/);
 	assert.match(text, /treat failed, pending, or CORS-looking rows as unfulfilled/);
-	assert.deepEqual(presentation.networkRouteDiagnostics?.map((item) => item.reason), ["unfulfilled-routed-request"]);
-	assert.deepEqual(presentation.nextActions?.slice(0, 2).map((action) => action.id), ["inspect-routed-network-request", "start-network-har-capture-for-route-mock"]);
+	assert.deepEqual(
+		presentation.networkRouteDiagnostics?.map((item) => item.reason),
+		["unfulfilled-routed-request"],
+	);
+	assert.deepEqual(
+		presentation.nextActions?.slice(0, 2).map((action) => action.id),
+		["inspect-routed-network-request", "start-network-har-capture-for-route-mock"],
+	);
 });
 
 test("buildToolPresentation hides data image network noise from preview while preserving raw details", async () => {
@@ -513,8 +765,20 @@ test("buildToolPresentation hides data image network noise from preview while pr
 			success: true,
 			data: {
 				requests: [
-					{ method: "GET", requestId: "img-1", resourceType: "Image", status: 500, url: "data:image/png;base64,abcdef" },
-					{ method: "GET", requestId: "api-1", resourceType: "fetch", status: 200, url: "https://example.test/api/items" },
+					{
+						method: "GET",
+						requestId: "img-1",
+						resourceType: "Image",
+						status: 500,
+						url: "data:image/png;base64,abcdef",
+					},
+					{
+						method: "GET",
+						requestId: "api-1",
+						resourceType: "fetch",
+						status: 200,
+						url: "https://example.test/api/items",
+					},
 				],
 			},
 		},
@@ -526,7 +790,15 @@ test("buildToolPresentation hides data image network noise from preview while pr
 	assert.doesNotMatch(text, /data:image\/png/);
 	assert.doesNotMatch(text, /Network failure summary/);
 	assert.match(JSON.stringify(presentation.data), /data:image\/png/);
-	assert.deepEqual(presentation.nextActions?.map((action) => action.id), ["inspect-network-request", "filter-network-requests-by-path", "clear-network-requests-before-repro", "start-network-har-capture"]);
+	assert.deepEqual(
+		presentation.nextActions?.map((action) => action.id),
+		[
+			"inspect-network-request",
+			"filter-network-requests-by-path",
+			"clear-network-requests-before-repro",
+			"start-network-har-capture",
+		],
+	);
 });
 
 test("buildToolPresentation treats stream enable already-enabled as idempotent", async () => {
@@ -539,7 +811,10 @@ test("buildToolPresentation treats stream enable already-enabled as idempotent",
 
 	assert.equal(presentation.summary, "Stream already enabled");
 	assert.match((presentation.content[0] as { text: string }).text, /idempotent no-op/);
-	assert.deepEqual(presentation.nextActions?.map((action) => action.id), ["check-stream-status-after-noop", "disable-existing-stream-when-done"]);
+	assert.deepEqual(
+		presentation.nextActions?.map((action) => action.id),
+		["check-stream-status-after-noop", "disable-existing-stream-when-done"],
+	);
 });
 
 test("buildToolPresentation redacts stateful batch details", async () => {
@@ -563,8 +838,14 @@ test("buildToolPresentation redacts stateful batch details", async () => {
 		},
 	});
 
-	const serialized = JSON.stringify({ batchSteps: presentation.batchSteps, data: presentation.data });
-	assert.doesNotMatch((presentation.content[0] as { text: string }).text, /cookie-secret|storage-secret/);
+	const serialized = JSON.stringify({
+		batchSteps: presentation.batchSteps,
+		data: presentation.data,
+	});
+	assert.doesNotMatch(
+		(presentation.content[0] as { text: string }).text,
+		/cookie-secret|storage-secret/,
+	);
 	assert.doesNotMatch(serialized, /cookie-secret|storage-secret/);
 	assert.match(serialized, /\[REDACTED\]/);
 });
@@ -590,11 +871,20 @@ test("buildToolPresentation redacts failed stateful batch details", async () => 
 		},
 	});
 
-	const serialized = JSON.stringify({ batchFailure: presentation.batchFailure, batchSteps: presentation.batchSteps, data: presentation.data });
+	const serialized = JSON.stringify({
+		batchFailure: presentation.batchFailure,
+		batchSteps: presentation.batchSteps,
+		data: presentation.data,
+	});
 	assert.doesNotMatch((presentation.content[0] as { text: string }).text, /cookie-secret/);
 	assert.doesNotMatch(serialized, /cookie-secret/);
 	assert.match(serialized, /\[REDACTED\]/);
-	assert.deepEqual(presentation.batchSteps?.[1].command, ["cookies", "set", "--curl", "/tmp/cookies.txt"]);
+	assert.deepEqual(presentation.batchSteps?.[1].command, [
+		"cookies",
+		"set",
+		"--curl",
+		"/tmp/cookies.txt",
+	]);
 	assert.match(presentation.batchSteps?.[1].text ?? "", /cannot read '\/tmp\/cookies\.txt'/);
 });
 
@@ -608,11 +898,22 @@ test("buildToolPresentation formats redacted network payload, response, and erro
 			success: true,
 			data: {
 				requests: [
-					{ headers: { "User-Agent": "secret-agent" }, method: "GET", requestId: "req-1", resourceType: "Document", status: 200, url: "https://example.com/" },
+					{
+						headers: { "User-Agent": "secret-agent" },
+						method: "GET",
+						requestId: "req-1",
+						resourceType: "Document",
+						status: 200,
+						url: "https://example.com/",
+					},
 					{
 						error: "net::ERR_FAILED Authorization: Bearer error-secret",
 						method: "POST",
-						postData: { name: "demo", token: "body-secret", url: "https://api.example.test/callback?token=nested-url-secret" },
+						postData: {
+							name: "demo",
+							token: "body-secret",
+							url: "https://api.example.test/callback?token=nested-url-secret",
+						},
 						requestId: "req-2",
 						resourceType: "Fetch",
 						responseBody: longResponse,
@@ -628,7 +929,10 @@ test("buildToolPresentation formats redacted network payload, response, and erro
 	assert.equal(presentation.summary, "Network requests: 2");
 	const text = (presentation.content[0] as { text: string }).text;
 	assert.match(text, /Network failure summary: 1 actionable, 0 benign low-impact \(1 total\)\./);
-	assert.match(text, /2\. 201 POST https:\/\/api\.example\.test\/items\?token=%5BREDACTED%5D&sentry_key=%5BREDACTED%5D&writeKey=%5BREDACTED%5D \(Fetch\) \[req-2\] \[actionable: document, script, API, or non-benign request failure\]/);
+	assert.match(
+		text,
+		/2\. 201 POST https:\/\/api\.example\.test\/items\?token=%5BREDACTED%5D&sentry_key=%5BREDACTED%5D&writeKey=%5BREDACTED%5D \(Fetch\) \[req-2\] \[actionable: document, script, API, or non-benign request failure\]/,
+	);
 	assert.match(text, /1\. 200 GET https:\/\/example.com\/ \(Document\) \[req-1\]/);
 	assert.ok(text.indexOf("2. 201 POST") < text.indexOf("1. 200 GET"));
 	assert.match(text, /Payload: .*name.*demo/);
@@ -637,20 +941,54 @@ test("buildToolPresentation formats redacted network payload, response, and erro
 	assert.match(text, /Response: /);
 	assert.match(text, /Response: .*…/);
 	assert.match(text, /Error: net::ERR_FAILED Authorization: Bearer \[REDACTED\]/);
-	assert.doesNotMatch(text, /User-Agent|secret-agent|body-secret|response-secret|header-secret|url-secret|nested-url-secret|error-secret|sentry-secret|write-secret|Set-Cookie/);
-	assert.deepEqual(presentation.nextActions?.map((action) => action.id), [
-		"inspect-actionable-network-request",
-		"trace-actionable-network-source",
-		"filter-network-requests-by-path",
-		"clear-network-requests-before-repro",
-		"start-network-har-capture",
+	assert.doesNotMatch(
+		text,
+		/User-Agent|secret-agent|body-secret|response-secret|header-secret|url-secret|nested-url-secret|error-secret|sentry-secret|write-secret|Set-Cookie/,
+	);
+	assert.deepEqual(
+		presentation.nextActions?.map((action) => action.id),
+		[
+			"inspect-actionable-network-request",
+			"trace-actionable-network-source",
+			"filter-network-requests-by-path",
+			"clear-network-requests-before-repro",
+			"start-network-har-capture",
+		],
+	);
+	assert.deepEqual(presentation.nextActions?.[0]?.params?.args, [
+		"--session",
+		"work",
+		"network",
+		"request",
+		"req-2",
 	]);
-	assert.deepEqual(presentation.nextActions?.[0]?.params?.args, ["--session", "work", "network", "request", "req-2"]);
 	assert.deepEqual(presentation.nextActions?.[1]?.params, { requestId: "req-2", session: "work" });
-	assert.deepEqual(presentation.nextActions?.[2]?.params?.args, ["--session", "work", "network", "requests", "--filter", "/items"]);
-	assert.deepEqual(presentation.nextActions?.[3]?.params?.args, ["--session", "work", "network", "requests", "--clear"]);
-	assert.deepEqual(presentation.nextActions?.[4]?.params?.args, ["--session", "work", "network", "har", "start"]);
-	assert.doesNotMatch(JSON.stringify(presentation.nextActions), /url-secret|nested-url-secret|error-secret|sentry-secret|write-secret/);
+	assert.deepEqual(presentation.nextActions?.[2]?.params?.args, [
+		"--session",
+		"work",
+		"network",
+		"requests",
+		"--filter",
+		"/items",
+	]);
+	assert.deepEqual(presentation.nextActions?.[3]?.params?.args, [
+		"--session",
+		"work",
+		"network",
+		"requests",
+		"--clear",
+	]);
+	assert.deepEqual(presentation.nextActions?.[4]?.params?.args, [
+		"--session",
+		"work",
+		"network",
+		"har",
+		"start",
+	]);
+	assert.doesNotMatch(
+		JSON.stringify(presentation.nextActions),
+		/url-secret|nested-url-secret|error-secret|sentry-secret|write-secret/,
+	);
 });
 
 test("buildToolPresentation returns bounded network request next actions for benign and successful API rows", async () => {
@@ -661,19 +999,36 @@ test("buildToolPresentation returns bounded network request next actions for ben
 			success: true,
 			data: {
 				requests: [
-					{ method: "GET", mimeType: "image/x-icon", requestId: "icon-1", resourceType: "image", status: 404, url: "https://example.test/favicon.ico" },
+					{
+						method: "GET",
+						mimeType: "image/x-icon",
+						requestId: "icon-1",
+						resourceType: "image",
+						status: 404,
+						url: "https://example.test/favicon.ico",
+					},
 				],
 			},
 		},
 	});
-	assert.deepEqual(benignPresentation.nextActions?.map((action) => action.id), [
-		"inspect-benign-network-request",
-		"filter-network-requests-by-path",
-		"clear-network-requests-before-repro",
-		"start-network-har-capture",
+	assert.deepEqual(
+		benignPresentation.nextActions?.map((action) => action.id),
+		[
+			"inspect-benign-network-request",
+			"filter-network-requests-by-path",
+			"clear-network-requests-before-repro",
+			"start-network-har-capture",
+		],
+	);
+	assert.deepEqual(benignPresentation.nextActions?.[0]?.params?.args, [
+		"network",
+		"request",
+		"icon-1",
 	]);
-	assert.deepEqual(benignPresentation.nextActions?.[0]?.params?.args, ["network", "request", "icon-1"]);
-	assert.equal(benignPresentation.nextActions?.some((action) => action.id.includes("source")), false);
+	assert.equal(
+		benignPresentation.nextActions?.some((action) => action.id.includes("source")),
+		false,
+	);
 
 	const apiPresentation = await buildToolPresentation({
 		commandInfo: { command: "network", subcommand: "requests" },
@@ -682,34 +1037,103 @@ test("buildToolPresentation returns bounded network request next actions for ben
 			success: true,
 			data: {
 				requests: [
-					{ method: "GET", requestId: "api-1", resourceType: "fetch", status: 200, url: "https://example.test/api/items?token=url-secret" },
+					{
+						method: "GET",
+						requestId: "api-1",
+						resourceType: "fetch",
+						status: 200,
+						url: "https://example.test/api/items?token=url-secret",
+					},
 				],
 			},
 		},
 		sessionName: "work",
 	});
-	assert.deepEqual(apiPresentation.nextActions?.map((action) => action.id), [
-		"inspect-network-request",
-		"filter-network-requests-by-path",
-		"clear-network-requests-before-repro",
-		"start-network-har-capture",
+	assert.deepEqual(
+		apiPresentation.nextActions?.map((action) => action.id),
+		[
+			"inspect-network-request",
+			"filter-network-requests-by-path",
+			"clear-network-requests-before-repro",
+			"start-network-har-capture",
+		],
+	);
+	assert.deepEqual(apiPresentation.nextActions?.[0]?.params?.args, [
+		"--session",
+		"work",
+		"network",
+		"request",
+		"api-1",
 	]);
-	assert.deepEqual(apiPresentation.nextActions?.[0]?.params?.args, ["--session", "work", "network", "request", "api-1"]);
-	assert.deepEqual(apiPresentation.nextActions?.[1]?.params?.args, ["--session", "work", "network", "requests", "--filter", "/api/items"]);
-	assert.deepEqual(apiPresentation.nextActions?.[2]?.params?.args, ["--session", "work", "network", "requests", "--clear"]);
-	assert.deepEqual(apiPresentation.nextActions?.[3]?.params?.args, ["--session", "work", "network", "har", "start"]);
-	assert.equal(apiPresentation.nextActions?.some((action) => action.id.includes("source")), false);
+	assert.deepEqual(apiPresentation.nextActions?.[1]?.params?.args, [
+		"--session",
+		"work",
+		"network",
+		"requests",
+		"--filter",
+		"/api/items",
+	]);
+	assert.deepEqual(apiPresentation.nextActions?.[2]?.params?.args, [
+		"--session",
+		"work",
+		"network",
+		"requests",
+		"--clear",
+	]);
+	assert.deepEqual(apiPresentation.nextActions?.[3]?.params?.args, [
+		"--session",
+		"work",
+		"network",
+		"har",
+		"start",
+	]);
+	assert.equal(
+		apiPresentation.nextActions?.some((action) => action.id.includes("source")),
+		false,
+	);
 	assert.doesNotMatch(JSON.stringify(apiPresentation.nextActions), /url-secret/);
 
 	for (const [requestId, url, forbiddenPattern] of [
-		["reset-1", "https://example.test/reset/token/abc123?code=url-secret", /reset\/token|abc123|url-secret/],
-		["reset-2", "https://example.test/reset-password/abc123?code=url-secret", /reset-password|abc123|url-secret/],
-		["session-1", "https://example.test/accounts/session-id/abc123?code=url-secret", /session-id|abc123|url-secret/],
-		["camel-1", "https://example.test/account/passwordReset/abc123?code=url-secret", /passwordReset|abc123|url-secret/],
-		["camel-2", "https://example.test/account/resetToken/abc123?code=url-secret", /resetToken|abc123|url-secret/],
-		["camel-3", "https://example.test/account/sessionId/abc123?code=url-secret", /sessionId|abc123|url-secret/],
-		["camel-4", "https://example.test/account/apiKey/abc123?code=url-secret", /apiKey|abc123|url-secret/],
-		["opaque-1", "https://example.test/files/0123456789abcdef?code=url-secret", /0123456789abcdef|url-secret/],
+		[
+			"reset-1",
+			"https://example.test/reset/token/abc123?code=url-secret",
+			/reset\/token|abc123|url-secret/,
+		],
+		[
+			"reset-2",
+			"https://example.test/reset-password/abc123?code=url-secret",
+			/reset-password|abc123|url-secret/,
+		],
+		[
+			"session-1",
+			"https://example.test/accounts/session-id/abc123?code=url-secret",
+			/session-id|abc123|url-secret/,
+		],
+		[
+			"camel-1",
+			"https://example.test/account/passwordReset/abc123?code=url-secret",
+			/passwordReset|abc123|url-secret/,
+		],
+		[
+			"camel-2",
+			"https://example.test/account/resetToken/abc123?code=url-secret",
+			/resetToken|abc123|url-secret/,
+		],
+		[
+			"camel-3",
+			"https://example.test/account/sessionId/abc123?code=url-secret",
+			/sessionId|abc123|url-secret/,
+		],
+		[
+			"camel-4",
+			"https://example.test/account/apiKey/abc123?code=url-secret",
+			/apiKey|abc123|url-secret/,
+		],
+		[
+			"opaque-1",
+			"https://example.test/files/0123456789abcdef?code=url-secret",
+			/0123456789abcdef|url-secret/,
+		],
 	] as const) {
 		const sensitivePathPresentation = await buildToolPresentation({
 			commandInfo: { command: "network", subcommand: "requests" },
@@ -717,15 +1141,28 @@ test("buildToolPresentation returns bounded network request next actions for ben
 			envelope: {
 				success: true,
 				data: {
-					requests: [
-						{ method: "GET", requestId, status: 200, url },
-					],
+					requests: [{ method: "GET", requestId, status: 200, url }],
 				},
 			},
 		});
-		assert.deepEqual(sensitivePathPresentation.nextActions?.map((action) => action.id), ["inspect-network-request", "clear-network-requests-before-repro", "start-network-har-capture"]);
-		assert.deepEqual(sensitivePathPresentation.nextActions?.[0]?.params?.args, ["network", "request", requestId]);
-		assert.deepEqual(sensitivePathPresentation.nextActions?.[1]?.params?.args, ["network", "requests", "--clear"]);
+		assert.deepEqual(
+			sensitivePathPresentation.nextActions?.map((action) => action.id),
+			[
+				"inspect-network-request",
+				"clear-network-requests-before-repro",
+				"start-network-har-capture",
+			],
+		);
+		assert.deepEqual(sensitivePathPresentation.nextActions?.[0]?.params?.args, [
+			"network",
+			"request",
+			requestId,
+		]);
+		assert.deepEqual(sensitivePathPresentation.nextActions?.[1]?.params?.args, [
+			"network",
+			"requests",
+			"--clear",
+		]);
 		assert.doesNotMatch(JSON.stringify(sensitivePathPresentation.nextActions), forbiddenPattern);
 	}
 });
@@ -752,7 +1189,10 @@ test("buildToolPresentation keeps failed network rows visible when successful ro
 	});
 
 	const text = (presentation.content[0] as { text: string }).text;
-	assert.match(text, /46\. 404 GET https:\/\/example\.test\/missing\.js \(Script\) \[late-failure\] \[actionable: document, script, API, or non-benign request failure\]/);
+	assert.match(
+		text,
+		/46\. 404 GET https:\/\/example\.test\/missing\.js \(Script\) \[late-failure\] \[actionable: document, script, API, or non-benign request failure\]/,
+	);
 	assert.ok(text.indexOf("46. 404 GET") < text.indexOf("1. 200 GET"));
 	assert.match(text, /failed requests are shown first when present/);
 });
@@ -761,26 +1201,47 @@ test("buildToolPresentation formats vitals metrics and unavailable results", asy
 	const metricsPresentation = await buildToolPresentation({
 		commandInfo: { command: "vitals" },
 		cwd: process.cwd(),
-		envelope: { success: true, data: { cls: 0.01, fcp: 234.4, lcp: 1234.2, ttfb: 45.8, url: "https://example.test/" } },
+		envelope: {
+			success: true,
+			data: { cls: 0.01, fcp: 234.4, lcp: 1234.2, ttfb: 45.8, url: "https://example.test/" },
+		},
 	});
-	assert.equal(metricsPresentation.summary, "Vitals: LCP: 1234ms, FCP: 234ms, TTFB: 46ms, CLS: 0.01");
-	assert.match((metricsPresentation.content[0] as { text: string }).text, /Vitals for https:\/\/example\.test\//);
+	assert.equal(
+		metricsPresentation.summary,
+		"Vitals: LCP: 1234ms, FCP: 234ms, TTFB: 46ms, CLS: 0.01",
+	);
+	assert.match(
+		(metricsPresentation.content[0] as { text: string }).text,
+		/Vitals for https:\/\/example\.test\//,
+	);
 	assert.match((metricsPresentation.content[0] as { text: string }).text, /LCP: 1234ms/);
 
 	const nestedPresentation = await buildToolPresentation({
 		commandInfo: { command: "web-vitals" },
 		cwd: process.cwd(),
-		envelope: { success: true, data: { metrics: { LCP: { value: 987.6 }, FCP: 101.2, CLS: { value: 0.02 } }, url: "https://example.test/" } },
+		envelope: {
+			success: true,
+			data: {
+				metrics: { LCP: { value: 987.6 }, FCP: 101.2, CLS: { value: 0.02 } },
+				url: "https://example.test/",
+			},
+		},
 	});
 	assert.equal(nestedPresentation.summary, "Vitals: LCP: 988ms, FCP: 101ms, CLS: 0.02");
 
 	const unavailablePresentation = await buildToolPresentation({
 		commandInfo: { command: "vitals" },
 		cwd: process.cwd(),
-		envelope: { success: true, data: { message: "No performance entries yet", url: "https://example.test/" } },
+		envelope: {
+			success: true,
+			data: { message: "No performance entries yet", url: "https://example.test/" },
+		},
 	});
 	assert.equal(unavailablePresentation.summary, "Vitals: metrics unavailable");
-	assert.match((unavailablePresentation.content[0] as { text: string }).text, /Metrics unavailable: No performance entries yet/);
+	assert.match(
+		(unavailablePresentation.content[0] as { text: string }).text,
+		/Metrics unavailable: No performance entries yet/,
+	);
 });
 
 test("buildToolPresentation formats singular network request details without expanding headers", async () => {
@@ -793,10 +1254,10 @@ test("buildToolPresentation formats singular network request details without exp
 				headers: { Authorization: "Bearer header-secret" },
 				method: "POST",
 				mimeType: "application/json",
-				postData: "{\"name\":\"demo\",\"token\":\"payload-secret\"}",
+				postData: '{"name":"demo","token":"payload-secret"}',
 				requestId: "detail-1",
 				resourceType: "Fetch",
-				responseBody: "{\"ok\":true,\"secret\":\"response-secret\"}",
+				responseBody: '{"ok":true,"secret":"response-secret"}',
 				responseHeaders: { "Set-Cookie": "session=header-secret" },
 				status: 200,
 				url: "https://api.example.test/items?token=url-secret",
@@ -805,10 +1266,16 @@ test("buildToolPresentation formats singular network request details without exp
 	});
 
 	const text = (presentation.content[0] as { text: string }).text;
-	assert.match(text, /1\. 200 POST https:\/\/api\.example\.test\/items\?token=%5BREDACTED%5D \(Fetch\) \[detail-1\]/);
+	assert.match(
+		text,
+		/1\. 200 POST https:\/\/api\.example\.test\/items\?token=%5BREDACTED%5D \(Fetch\) \[detail-1\]/,
+	);
 	assert.match(text, /Payload: .*\[REDACTED\]/);
 	assert.match(text, /Response: .*\[REDACTED\]/);
-	assert.doesNotMatch(text, /Authorization|Set-Cookie|header-secret|payload-secret|response-secret|url-secret/);
+	assert.doesNotMatch(
+		text,
+		/Authorization|Set-Cookie|header-secret|payload-secret|response-secret|url-secret/,
+	);
 });
 
 test("buildToolPresentation formats console and errors previews", async () => {
@@ -817,7 +1284,12 @@ test("buildToolPresentation formats console and errors previews", async () => {
 		cwd: process.cwd(),
 		envelope: {
 			success: true,
-			data: { messages: [{ args: [{ secret: true }], text: "hello", type: "log" }, { text: "boom", type: "error" }] },
+			data: {
+				messages: [
+					{ args: [{ secret: true }], text: "hello", type: "log" },
+					{ text: "boom", type: "error" },
+				],
+			},
 		},
 	});
 	assert.equal(consolePresentation.summary, "Console messages: 2");
@@ -831,7 +1303,16 @@ test("buildToolPresentation formats console and errors previews", async () => {
 		cwd: process.cwd(),
 		envelope: {
 			success: true,
-			data: { errors: [{ column: 5, line: 10, text: "Error: delayed\n    at stack", url: "https://example.com/app.js" }] },
+			data: {
+				errors: [
+					{
+						column: 5,
+						line: 10,
+						text: "Error: delayed\n    at stack",
+						url: "https://example.com/app.js",
+					},
+				],
+			},
 		},
 	});
 	assert.equal(errorsPresentation.summary, "Page errors: 1");
@@ -843,20 +1324,37 @@ test("buildToolPresentation formats console and errors previews", async () => {
 
 test("buildToolPresentation labels diagnostic clear output as reset scoped", async () => {
 	const networkReset = await buildToolPresentation({
-		commandInfo: { command: "network", commandTokens: ["network", "requests", "--clear"], subcommand: "requests" },
+		commandInfo: {
+			command: "network",
+			commandTokens: ["network", "requests", "--clear"],
+			subcommand: "requests",
+		},
 		cwd: process.cwd(),
-		envelope: { success: true, data: { requests: [{ method: "GET", status: 500, url: "https://old.example.test/api" }] } },
+		envelope: {
+			success: true,
+			data: { requests: [{ method: "GET", status: 500, url: "https://old.example.test/api" }] },
+		},
 	});
 	assert.equal(networkReset.summary, "Network requests reset: 1 cleared");
-	assert.match((networkReset.content[0] as { text: string }).text, /Treat these as reset output, not current-page request failures/);
+	assert.match(
+		(networkReset.content[0] as { text: string }).text,
+		/Treat these as reset output, not current-page request failures/,
+	);
 
 	const consoleReset = await buildToolPresentation({
-		commandInfo: { command: "console", commandTokens: ["console", "--clear"], subcommand: "--clear" },
+		commandInfo: {
+			command: "console",
+			commandTokens: ["console", "--clear"],
+			subcommand: "--clear",
+		},
 		cwd: process.cwd(),
 		envelope: { success: true, data: { messages: [{ text: "old boom", type: "error" }] } },
 	});
 	assert.equal(consoleReset.summary, "Console reset: 1 cleared");
-	assert.match((consoleReset.content[0] as { text: string }).text, /Treat these as reset output, not current-page console errors/);
+	assert.match(
+		(consoleReset.content[0] as { text: string }).text,
+		/Treat these as reset output, not current-page console errors/,
+	);
 
 	const errorsReset = await buildToolPresentation({
 		commandInfo: { command: "errors", commandTokens: ["errors", "--clear"], subcommand: "--clear" },
@@ -864,14 +1362,20 @@ test("buildToolPresentation labels diagnostic clear output as reset scoped", asy
 		envelope: { success: true, data: { errors: [{ text: "old ReferenceError" }] } },
 	});
 	assert.equal(errorsReset.summary, "Page errors reset: 1 cleared");
-	assert.match((errorsReset.content[0] as { text: string }).text, /Treat these as reset output, not current-page errors/);
+	assert.match(
+		(errorsReset.content[0] as { text: string }).text,
+		/Treat these as reset output, not current-page errors/,
+	);
 });
 
 test("buildToolPresentation redacts dashboard and doctor diagnostic strings", async () => {
 	const dashboardPresentation = await buildToolPresentation({
 		commandInfo: { command: "dashboard" },
 		cwd: process.cwd(),
-		envelope: { success: true, data: { port: 9222, reason: "Authorization: Bearer dash-secret Cookie: sid=dash-cookie" } },
+		envelope: {
+			success: true,
+			data: { port: 9222, reason: "Authorization: Bearer dash-secret Cookie: sid=dash-cookie" },
+		},
 	});
 	const dashboardText = (dashboardPresentation.content[0] as { text: string }).text;
 	assert.doesNotMatch(dashboardText, /dash-secret|dash-cookie/);
@@ -881,7 +1385,10 @@ test("buildToolPresentation redacts dashboard and doctor diagnostic strings", as
 	const doctorPresentation = await buildToolPresentation({
 		commandInfo: { command: "doctor" },
 		cwd: process.cwd(),
-		envelope: { success: true, data: { status: "Authorization: Bearer doctor-secret Cookie: sid=doctor-cookie" } },
+		envelope: {
+			success: true,
+			data: { status: "Authorization: Bearer doctor-secret Cookie: sid=doctor-cookie" },
+		},
 	});
 	const doctorText = (doctorPresentation.content[0] as { text: string }).text;
 	assert.doesNotMatch(doctorText, /doctor-secret|doctor-cookie/);
@@ -909,17 +1416,26 @@ test("buildToolPresentation formats dashboard and doctor status", async () => {
 	const doctor = await buildToolPresentation({
 		commandInfo: { command: "doctor" },
 		cwd: process.cwd(),
-		envelope: { success: true, data: { checks: [{ name: "binary" }], environment: { token: "secret" }, status: "ok" } },
+		envelope: {
+			success: true,
+			data: { checks: [{ name: "binary" }], environment: { token: "secret" }, status: "ok" },
+		},
 	});
 	assert.equal(doctor.summary, "Doctor: ok");
-	assert.equal((doctor.content[0] as { text: string }).text, "Status: ok\nChecks: 1\n1. [info] binary");
+	assert.equal(
+		(doctor.content[0] as { text: string }).text,
+		"Status: ok\nChecks: 1\n1. [info] binary",
+	);
 });
 
 test("buildToolPresentation summarizes non-core command families and redacts diagnostic data", async () => {
 	const cases = [
 		{
 			commandInfo: { command: "network", subcommand: "route" },
-			data: { body: { token: "route-secret" }, routed: "https://api.example.test/**?token=route-url-secret" },
+			data: {
+				body: { token: "route-secret" },
+				routed: "https://api.example.test/**?token=route-url-secret",
+			},
 			expectedSummary: "Network route: https://api.example.test/**?token=%5BREDACTED%5D",
 			expectedText: /routed.*api\.example\.test/,
 			forbidden: /route-secret|route-url-secret/,
@@ -1010,7 +1526,11 @@ test("buildToolPresentation summarizes non-core command families and redacts dia
 			envelope: { success: true, data: item.data },
 		});
 		const text = (presentation.content[0] as { text: string }).text;
-		const serialized = JSON.stringify({ data: presentation.data, summary: presentation.summary, text });
+		const serialized = JSON.stringify({
+			data: presentation.data,
+			summary: presentation.summary,
+			text,
+		});
 		const label = `${item.commandInfo.command} ${"subcommand" in item.commandInfo ? item.commandInfo.subcommand : ""}`;
 		assert.equal(presentation.summary, item.expectedSummary, label);
 		assert.match(text, item.expectedText, label);
@@ -1019,7 +1539,10 @@ test("buildToolPresentation summarizes non-core command families and redacts dia
 });
 
 test("buildToolPresentation compacts large diagnostic output and preserves spill path", async () => {
-	const messages = Array.from({ length: 180 }, (_, index) => ({ text: `diagnostic console row ${index + 1} ${"x".repeat(120)}`, type: "log" }));
+	const messages = Array.from({ length: 180 }, (_, index) => ({
+		text: `diagnostic console row ${index + 1} ${"x".repeat(120)}`,
+		type: "log",
+	}));
 	const presentation = await buildToolPresentation({
 		commandInfo: { command: "console" },
 		cwd: process.cwd(),
@@ -1046,10 +1569,24 @@ test("buildToolPresentation command-redacts whole-batch spill data", async () =>
 		cwd: process.cwd(),
 		envelope: {
 			success: true,
-            data: [
-                { command: ["cookies"], result: { cookies: [{ domain: "example.test", name: "session", value: "raw-cookie-secret" }] }, success: true },
-                { command: ["clipboard", "write", "raw-clipboard-secret"], error: "write permission denied for raw-clipboard-secret", success: false },
-                ...Array.from({ length: 90 }, (_, index) => ({ command: ["eval", "--stdin"], result: { result: `large successful batch row ${index + 1} ${"x".repeat(120)}` }, success: true })),
+			data: [
+				{
+					command: ["cookies"],
+					result: {
+						cookies: [{ domain: "example.test", name: "session", value: "raw-cookie-secret" }],
+					},
+					success: true,
+				},
+				{
+					command: ["clipboard", "write", "raw-clipboard-secret"],
+					error: "write permission denied for raw-clipboard-secret",
+					success: false,
+				},
+				...Array.from({ length: 90 }, (_, index) => ({
+					command: ["eval", "--stdin"],
+					result: { result: `large successful batch row ${index + 1} ${"x".repeat(120)}` },
+					success: true,
+				})),
 			],
 		},
 	});
@@ -1077,7 +1614,11 @@ test("buildToolPresentation keeps failed batch context inline when compacting", 
 			success: false,
 			data: [
 				...largeSuccessfulSteps,
-				{ command: ["wait", "--text", "Checkout complete"], error: "Timed out waiting for text: Checkout complete", success: false },
+				{
+					command: ["wait", "--text", "Checkout complete"],
+					error: "Timed out waiting for text: Checkout complete",
+					success: false,
+				},
 			],
 		},
 	});
@@ -1112,7 +1653,11 @@ test("buildToolPresentation bounds long failed command text when compacting batc
 			success: false,
 			data: [
 				...largeSuccessfulSteps,
-				{ command: ["wait", "--text", longArgument], error: "Timed out waiting for text.", success: false },
+				{
+					command: ["wait", "--text", longArgument],
+					error: "Timed out waiting for text.",
+					success: false,
+				},
 			],
 		},
 	});

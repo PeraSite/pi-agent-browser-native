@@ -3,7 +3,10 @@ import { getKeybindings, Text, truncateToWidth } from "@earendil-works/pi-tui";
 
 import { compileAgentBrowserElectron } from "./input-modes/electron.js";
 import { compileAgentBrowserQaPreset } from "./input-modes/job.js";
-import { compileAgentBrowserNetworkSourceLookup, compileAgentBrowserSourceLookup } from "./input-modes/lookups.js";
+import {
+	compileAgentBrowserNetworkSourceLookup,
+	compileAgentBrowserSourceLookup,
+} from "./input-modes/lookups.js";
 import { compileAgentBrowserSemanticAction } from "./input-modes/semantic-action.js";
 import { isRecord } from "./parsing.js";
 import { redactInvocationArgs } from "./runtime.js";
@@ -11,8 +14,10 @@ import { isBooleanFlagEnabled } from "./argv-grammar.js";
 
 const TUI_INVOCATION_PREVIEW_MAX_CHARS = 160;
 const TUI_COLLAPSED_OUTPUT_MAX_LINES = 12;
-const ANSI_CONTROL_SEQUENCE_PATTERN = /\x1B(?:\][^\x07\x1B\r\n\u2028\u2029]*(?:\x07|\x1B\\)|\[[0-?]*[ -/]*[@-~]|P[^\x1B\r\n\u2028\u2029]*(?:\x1B\\)|_[^\x1B\r\n\u2028\u2029]*(?:\x1B\\)|\^[^\x1B\r\n\u2028\u2029]*(?:\x1B\\)|[@-Z\\-_])/g;
-const JSON_TOKEN_PATTERN = /"(?:\\.|[^"\\])*"(?=\s*:)|"(?:\\.|[^"\\])*"|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|true|false|null|[{}\[\],:]/g;
+const ANSI_CONTROL_SEQUENCE_PATTERN =
+	/\x1B(?:\][^\x07\x1B\r\n\u2028\u2029]*(?:\x07|\x1B\\)|\[[0-?]*[ -/]*[@-~]|P[^\x1B\r\n\u2028\u2029]*(?:\x1B\\)|_[^\x1B\r\n\u2028\u2029]*(?:\x1B\\)|\^[^\x1B\r\n\u2028\u2029]*(?:\x1B\\)|[@-Z\\-_])/g;
+const JSON_TOKEN_PATTERN =
+	/"(?:\\.|[^"\\])*"(?=\s*:)|"(?:\\.|[^"\\])*"|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|true|false|null|[{}\[\],:]/g;
 const UNSAFE_DISPLAY_CONTROL_PATTERN = /[\x00-\x08\x0B\x0C\x0E-\x1F\x7F\x80-\x9F]/g;
 const UNSAFE_DISPLAY_DIRECTIONAL_PATTERN = /[\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]/g;
 const UNSAFE_DISPLAY_ZERO_WIDTH_PATTERN = /[\u200B-\u200D\u2060\uFEFF]/g;
@@ -23,7 +28,11 @@ function sanitizeDisplayText(value: string, markRemovedSequences = false): strin
 		.replace(ANSI_CONTROL_SEQUENCE_PATTERN, markRemovedSequences ? "�" : "")
 		.replace(UNSAFE_DISPLAY_CONTROL_PATTERN, "�")
 		.replace(UNSAFE_DISPLAY_DIRECTIONAL_PATTERN, "�");
-	if (markRemovedSequences) sanitized = sanitized.replace(/[\u2028\u2029]/g, "\n").replace(UNSAFE_DISPLAY_ZERO_WIDTH_PATTERN, "�");
+	if (markRemovedSequences) {
+		sanitized = sanitized
+			.replace(/[\u2028\u2029]/g, "\n")
+			.replace(UNSAFE_DISPLAY_ZERO_WIDTH_PATTERN, "�");
+	}
 	return sanitized;
 }
 
@@ -41,7 +50,9 @@ function trimTrailingBlankLines(lines: string[]): string[] {
 
 function isJsonDocumentText(value: string): boolean {
 	const trimmed = value.trim();
-	if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) return false;
+	if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) {
+		return false;
+	}
 	try {
 		JSON.parse(trimmed);
 		return true;
@@ -58,7 +69,11 @@ function colorizeJsonLine(line: string, theme: Theme): string {
 		const index = match.index ?? 0;
 		output += line.slice(cursor, index);
 		const color = token.startsWith('"')
-			? /"\s*$/.test(token) && line.slice(index + token.length).trimStart().startsWith(":")
+			? /"\s*$/.test(token) &&
+				line
+					.slice(index + token.length)
+					.trimStart()
+					.startsWith(":")
 				? "syntaxVariable"
 				: "syntaxString"
 			: /^[{}\[\],:]$/.test(token)
@@ -76,15 +91,21 @@ function getPrimaryTextContent(result: AgentToolResult<unknown>): string {
 }
 
 function colorizeToolOutputLines(outputText: string, theme: Theme, isError: boolean): string[] {
-	const normalizedLines = trimTrailingBlankLines(replaceTabsForDisplay(sanitizeDisplayText(outputText)).split("\n"));
+	const normalizedLines = trimTrailingBlankLines(
+		replaceTabsForDisplay(sanitizeDisplayText(outputText)).split("\n"),
+	);
 	const normalizedText = normalizedLines.join("\n");
-	if (normalizedText.length === 0) return [];
+	if (normalizedText.length === 0) {
+		return [];
+	}
 	const isJsonDocument = !isError && isJsonDocumentText(normalizedText);
 	return normalizedLines.map((line) => {
 		if (line.length === 0) {
 			return "";
 		}
-		if (isJsonDocument) return colorizeJsonLine(line, theme);
+		if (isJsonDocument) {
+			return colorizeJsonLine(line, theme);
+		}
 		return isError ? theme.fg("error", line) : theme.fg("toolOutput", line);
 	});
 }
@@ -98,21 +119,55 @@ function formatExpandHint(theme: Theme): string {
 	return `${theme.fg("dim", key)} ${theme.fg("muted", "to expand")}`;
 }
 
-function formatVisualTruncationNotice(remainingLines: number, totalLines: number, theme: Theme, width: number): string {
+function formatVisualTruncationNotice(
+	remainingLines: number,
+	totalLines: number,
+	theme: Theme,
+	width: number,
+): string {
 	const notice = `${theme.fg("muted", `... (${remainingLines} more lines, ${totalLines} total, `)}${formatExpandHint(theme)}${theme.fg("muted", ")")}`;
 	return truncateToWidth(notice, Math.max(0, width));
 }
 
-function getStructuredModeInvocation(input: Record<string, unknown>): { mode?: string; rawArgs: string[]; scriptSource?: string } {
-	if (typeof input.code === "string") return { mode: "code", rawArgs: [], scriptSource: input.code };
-	if (Array.isArray(input.args)) return { rawArgs: input.args.filter((value): value is string => typeof value === "string") };
-	if (input.semanticAction !== undefined) return { mode: "semanticAction", rawArgs: compileAgentBrowserSemanticAction(input.semanticAction).compiled?.args ?? [] };
-	if (input.qa !== undefined) return { mode: "qa", rawArgs: compileAgentBrowserQaPreset(input.qa).compiled?.args ?? [] };
-	if (input.sourceLookup !== undefined) return { mode: "sourceLookup", rawArgs: compileAgentBrowserSourceLookup(input.sourceLookup).compiled?.args ?? [] };
-	if (input.networkSourceLookup !== undefined) return { mode: "networkSourceLookup", rawArgs: compileAgentBrowserNetworkSourceLookup(input.networkSourceLookup).compiled?.args ?? [] };
+function getStructuredModeInvocation(input: Record<string, unknown>): {
+	mode?: string;
+	rawArgs: string[];
+	scriptSource?: string;
+} {
+	if (typeof input.code === "string") {
+		return { mode: "code", rawArgs: [], scriptSource: input.code };
+	}
+	if (Array.isArray(input.args)) {
+		return { rawArgs: input.args.filter((value): value is string => typeof value === "string") };
+	}
+	if (input.semanticAction !== undefined) {
+		return {
+			mode: "semanticAction",
+			rawArgs: compileAgentBrowserSemanticAction(input.semanticAction).compiled?.args ?? [],
+		};
+	}
+	if (input.qa !== undefined) {
+		return { mode: "qa", rawArgs: compileAgentBrowserQaPreset(input.qa).compiled?.args ?? [] };
+	}
+	if (input.sourceLookup !== undefined) {
+		return {
+			mode: "sourceLookup",
+			rawArgs: compileAgentBrowserSourceLookup(input.sourceLookup).compiled?.args ?? [],
+		};
+	}
+	if (input.networkSourceLookup !== undefined) {
+		return {
+			mode: "networkSourceLookup",
+			rawArgs:
+				compileAgentBrowserNetworkSourceLookup(input.networkSourceLookup).compiled?.args ?? [],
+		};
+	}
 	if (input.electron !== undefined) {
 		const electron = compileAgentBrowserElectron(input.electron);
-		return { mode: "electron", rawArgs: electron.compiled ? ["electron", electron.compiled.action] : [] };
+		return {
+			mode: "electron",
+			rawArgs: electron.compiled ? ["electron", electron.compiled.action] : [],
+		};
 	}
 	return { rawArgs: [] };
 }
@@ -127,22 +182,34 @@ function formatInvocationPreview(rawArgs: string[]): string {
 
 function formatScriptSourceForDisplay(source: string, expanded: boolean): string {
 	const sanitizedSource = replaceTabsForDisplay(sanitizeDisplayText(source, true));
-	if (expanded) return sanitizedSource;
+	if (expanded) {
+		return sanitizedSource;
+	}
 	const preview = sanitizedSource.replace(/\n/g, " ↵ ").replace(/\s+/g, " ").trim();
 	return preview.length > TUI_INVOCATION_PREVIEW_MAX_CHARS
 		? `${preview.slice(0, TUI_INVOCATION_PREVIEW_MAX_CHARS - 3)}...`
 		: preview;
 }
 
-export function formatAgentBrowserRenderCall(args: unknown, theme: Theme, expanded = false): string {
+export function formatAgentBrowserRenderCall(
+	args: unknown,
+	theme: Theme,
+	expanded = false,
+): string {
 	const input = isRecord(args) ? args : {};
 	const { mode, rawArgs, scriptSource } = getStructuredModeInvocation(input);
-	const invocationPreview = scriptSource === undefined
-		? formatInvocationPreview(rawArgs)
-		: formatScriptSourceForDisplay(scriptSource, expanded);
-	let text = theme.fg("toolTitle", theme.bold(mode === "code" ? "agent_browser_code" : "agent_browser"));
+	const invocationPreview =
+		scriptSource === undefined
+			? formatInvocationPreview(rawArgs)
+			: formatScriptSourceForDisplay(scriptSource, expanded);
+	let text = theme.fg(
+		"toolTitle",
+		theme.bold(mode === "code" ? "agent_browser_code" : "agent_browser"),
+	);
 	if (mode) {
-		if (mode !== "code") text += ` ${theme.fg("accent", mode)}`;
+		if (mode !== "code") {
+			text += ` ${theme.fg("accent", mode)}`;
+		}
 		if (scriptSource !== undefined && expanded) {
 			text += `\n${theme.fg("dim", "Source:")}\n${theme.fg("accent", invocationPreview)}`;
 		} else if (invocationPreview.length > 0) {
@@ -178,9 +245,15 @@ function formatAgentBrowserRenderResult(
 	}
 	if (outputLines.length === 0) {
 		const details = isRecord(result.details) ? result.details : undefined;
-		const rawSummary = typeof details?.summary === "string" ? details.summary : isError ? "agent-browser failed" : "Done";
+		const rawSummary =
+			typeof details?.summary === "string"
+				? details.summary
+				: isError
+					? "agent-browser failed"
+					: "Done";
 		const sanitizedSummary = sanitizeDisplayText(rawSummary).trim();
-		const summary = sanitizedSummary.length > 0 ? sanitizedSummary : isError ? "agent-browser failed" : "Done";
+		const summary =
+			sanitizedSummary.length > 0 ? sanitizedSummary : isError ? "agent-browser failed" : "Done";
 		return isError ? theme.fg("error", summary) : theme.fg("success", summary);
 	}
 
@@ -188,28 +261,41 @@ function formatAgentBrowserRenderResult(
 }
 
 function formatModelVisibleFailureCategoryNotice(details: unknown): string | undefined {
-	if (!isRecord(details) || details.resultCategory !== "failure") return undefined;
-	const failureCategory = typeof details.failureCategory === "string" && details.failureCategory.length > 0
-		? details.failureCategory
-		: undefined;
+	if (!isRecord(details) || details.resultCategory !== "failure") {
+		return undefined;
+	}
+	const failureCategory =
+		typeof details.failureCategory === "string" && details.failureCategory.length > 0
+			? details.failureCategory
+			: undefined;
 	return `Result category: failure${failureCategory ? `; failureCategory: ${failureCategory}` : ""}; Pi tool isError: true.`;
 }
 
 type AgentBrowserToolContent = AgentToolResult<unknown>["content"];
 type AgentBrowserToolContentItem = AgentBrowserToolContent[number];
 
-function agentBrowserToolResultRequestedJson(result: AgentToolResult<unknown>, input: unknown): boolean {
+function agentBrowserToolResultRequestedJson(
+	result: AgentToolResult<unknown>,
+	input: unknown,
+): boolean {
 	const details = isRecord(result.details) ? result.details : undefined;
 	const detailArgs = Array.isArray(details?.args) ? details.args : undefined;
 	const inputArgs = isRecord(input) && Array.isArray(input.args) ? input.args : undefined;
-	return isBooleanFlagEnabled(detailArgs ?? [], "--json") || isBooleanFlagEnabled(inputArgs ?? [], "--json");
+	return (
+		isBooleanFlagEnabled(detailArgs ?? [], "--json") ||
+		isBooleanFlagEnabled(inputArgs ?? [], "--json")
+	);
 }
 
 function agentBrowserToolResultHasParseableJsonContent(content: AgentBrowserToolContent): boolean {
 	return content.some((item) => {
-		if (item.type !== "text" || typeof item.text !== "string") return false;
+		if (item.type !== "text" || typeof item.text !== "string") {
+			return false;
+		}
 		const text = item.text.trim();
-		if (text.length === 0) return false;
+		if (text.length === 0) {
+			return false;
+		}
 		try {
 			JSON.parse(text);
 			return true;
@@ -219,29 +305,52 @@ function agentBrowserToolResultHasParseableJsonContent(content: AgentBrowserTool
 	});
 }
 
-function appendModelVisibleFailureCategoryNotice(content: AgentBrowserToolContent, notice: string): AgentBrowserToolContent | undefined {
+function appendModelVisibleFailureCategoryNotice(
+	content: AgentBrowserToolContent,
+	notice: string,
+): AgentBrowserToolContent | undefined {
 	const noticeContent: AgentBrowserToolContentItem = { type: "text", text: notice };
-	const textIndex = content.findIndex((item) => item.type === "text" && typeof item.text === "string");
-	if (textIndex === -1) return [noticeContent, ...content];
+	const textIndex = content.findIndex(
+		(item) => item.type === "text" && typeof item.text === "string",
+	);
+	if (textIndex === -1) {
+		return [noticeContent, ...content];
+	}
 	const textItem = content[textIndex];
-	if (textItem.type !== "text" || typeof textItem.text !== "string" || textItem.text.includes(notice)) return undefined;
-	return content.map((item, index) => index === textIndex
-		? { ...item, text: `${textItem.text}\n\n${notice}` }
-		: item);
+	if (
+		textItem.type !== "text" ||
+		typeof textItem.text !== "string" ||
+		textItem.text.includes(notice)
+	) {
+		return undefined;
+	}
+	return content.map((item, index) =>
+		index === textIndex ? { ...item, text: `${textItem.text}\n\n${notice}` } : item,
+	);
 }
 
-export function finalizeAgentBrowserFailure<T extends AgentToolResult<unknown>>(result: T, input: unknown): T {
-	const failed = result.isError === true || (isRecord(result.details) && result.details.resultCategory === "failure");
-	const preservesParseableJson = (isRecord(input) && "code" in input || agentBrowserToolResultRequestedJson(result, input)) && agentBrowserToolResultHasParseableJsonContent(result.content);
-	const notice = preservesParseableJson ? undefined : formatModelVisibleFailureCategoryNotice(result.details);
-	const content = notice ? appendModelVisibleFailureCategoryNotice(result.content, notice) : undefined;
+export function finalizeAgentBrowserFailure<T extends AgentToolResult<unknown>>(
+	result: T,
+	input: unknown,
+): T {
+	const failed =
+		result.isError === true ||
+		(isRecord(result.details) && result.details.resultCategory === "failure");
+	const preservesParseableJson =
+		((isRecord(input) && "code" in input) || agentBrowserToolResultRequestedJson(result, input)) &&
+		agentBrowserToolResultHasParseableJsonContent(result.content);
+	const notice = preservesParseableJson
+		? undefined
+		: formatModelVisibleFailureCategoryNotice(result.details);
+	const content = notice
+		? appendModelVisibleFailureCategoryNotice(result.content, notice)
+		: undefined;
 	return {
 		...result,
 		content: content ?? result.content,
 		isError: failed,
 	};
 }
-
 
 export class AgentBrowserResultComponent {
 	private expanded = false;
@@ -250,13 +359,32 @@ export class AgentBrowserResultComponent {
 	private value: string | undefined;
 	private formatKey: unknown[] | undefined;
 
-	setResult(result: AgentToolResult<unknown>, options: { expanded: boolean; isPartial: boolean }, theme: Theme, isError: boolean): void {
+	setResult(
+		result: AgentToolResult<unknown>,
+		options: { expanded: boolean; isPartial: boolean },
+		theme: Theme,
+		isError: boolean,
+	): void {
 		const details = isRecord(result.details) ? result.details : undefined;
 		// Theme is a stable proxy in Pi; its resolved colors identify theme/terminal-color changes.
-		const key = [getPrimaryTextContent(result), details?.summary, details?.resultCategory, details?.failureCategory, options.isPartial, isError, theme, theme.colors, theme.fg];
+		const key = [
+			getPrimaryTextContent(result),
+			details?.summary,
+			details?.resultCategory,
+			details?.failureCategory,
+			options.isPartial,
+			isError,
+			theme,
+			theme.colors,
+			theme.fg,
+		];
 		if (!this.formatKey || key.some((value, index) => value !== this.formatKey![index])) {
 			this.formatKey = key;
-			this.setState(formatAgentBrowserRenderResult(result, options, theme, isError), options.expanded, theme);
+			this.setState(
+				formatAgentBrowserRenderResult(result, options, theme, isError),
+				options.expanded,
+				theme,
+			);
 		} else {
 			this.expanded = options.expanded;
 			this.theme = theme;

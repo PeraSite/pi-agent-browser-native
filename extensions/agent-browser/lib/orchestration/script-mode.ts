@@ -12,7 +12,12 @@ import {
 import { isRecord } from "../parsing.js";
 import { appendBrowserTransition, getBrowserRecord } from "../browser-transcript.js";
 import { redactSensitiveText } from "../runtime.js";
-import type { AgentBrowserObservation, ArtifactVerificationSummary, FileArtifactMetadata, ImageObservation } from "../results/contracts.js";
+import type {
+	AgentBrowserObservation,
+	ArtifactVerificationSummary,
+	FileArtifactMetadata,
+	ImageObservation,
+} from "../results/contracts.js";
 import { attachInlineImage } from "../results/presentation/artifacts.js";
 import { projectAgentBrowserObservation } from "../results/presentation/content.js";
 import { redactPresentationData } from "../results/presentation/diagnostics.js";
@@ -29,26 +34,69 @@ export interface ScriptSessionLease {
 }
 
 // The offline converter retains outstanding isolated-session cleanup facts in canonical events.
-export function getScriptSessionLeasesFromBranch(branch: unknown[], ownerSessionId?: string): Map<string, ScriptSessionLease> {
+export function getScriptSessionLeasesFromBranch(
+	branch: unknown[],
+	ownerSessionId?: string,
+): Map<string, ScriptSessionLease> {
 	const leases = new Map<string, ScriptSessionLease>();
 	for (const entry of branch) {
 		const lease = getBrowserRecord(entry)?.event.state.scriptLease;
-		if (!isRecord(lease)) continue;
-		if (ownerSessionId !== undefined && lease.ownerSessionId !== ownerSessionId) continue;
+		if (!isRecord(lease)) {
+			continue;
+		}
+		if (ownerSessionId !== undefined && lease.ownerSessionId !== ownerSessionId) {
+			continue;
+		}
 		const { cleanup, closeCommandArgs, launchAttempted, sessionName } = lease;
-		if (!isAgentBrowserScriptSessionName(sessionName)) continue;
+		if (!isAgentBrowserScriptSessionName(sessionName)) {
+			continue;
+		}
 		const expected = createAgentBrowserScriptCloseArgs(sessionName);
-		if ((cleanup !== "active" && cleanup !== "closed" && cleanup !== "failed") || launchAttempted !== true
-			|| !Array.isArray(closeCommandArgs) || closeCommandArgs.length !== expected.length
-			|| !closeCommandArgs.every((token, index) => token === expected[index])) continue;
-		leases.set(sessionName, { cleanup, closeCommandArgs: expected, launchAttempted: true, sessionName, ownerSessionId: typeof lease.ownerSessionId === "string" ? lease.ownerSessionId : undefined });
+		if (
+			(cleanup !== "active" && cleanup !== "closed" && cleanup !== "failed") ||
+			launchAttempted !== true ||
+			!Array.isArray(closeCommandArgs) ||
+			closeCommandArgs.length !== expected.length ||
+			!closeCommandArgs.every((token, index) => token === expected[index])
+		) {
+			continue;
+		}
+		leases.set(sessionName, {
+			cleanup,
+			closeCommandArgs: expected,
+			launchAttempted: true,
+			sessionName,
+			ownerSessionId: typeof lease.ownerSessionId === "string" ? lease.ownerSessionId : undefined,
+		});
 	}
 	return leases;
 }
 
-export function appendScriptSessionLease(pi: ExtensionAPI, sessionName: string, cleanup: ScriptSessionCleanupState, ownerSessionId: string): void {
-	appendBrowserTransition(pi, { event: { version: 1, phase: "state", operationId: randomUUID(), toolCallId: "cleanup", commandIndex: 0, isError: cleanup !== "closed",
-		state: { scriptLease: { cleanup, closeCommandArgs: createAgentBrowserScriptCloseArgs(sessionName), launchAttempted: true, sessionName, ownerSessionId } } } });
+export function appendScriptSessionLease(
+	pi: ExtensionAPI,
+	sessionName: string,
+	cleanup: ScriptSessionCleanupState,
+	ownerSessionId: string,
+): void {
+	appendBrowserTransition(pi, {
+		event: {
+			version: 1,
+			phase: "state",
+			operationId: randomUUID(),
+			toolCallId: "cleanup",
+			commandIndex: 0,
+			isError: cleanup !== "closed",
+			state: {
+				scriptLease: {
+					cleanup,
+					closeCommandArgs: createAgentBrowserScriptCloseArgs(sessionName),
+					launchAttempted: true,
+					sessionName,
+					ownerSessionId,
+				},
+			},
+		},
+	});
 }
 
 export function createBrowserCodeOutput() {
@@ -62,60 +110,127 @@ export function createBrowserCodeOutput() {
 		async observe(result: AgentBrowserToolResult): Promise<AgentBrowserObservation> {
 			const details = isRecord(result.details) ? result.details : {};
 			const observation = projectAgentBrowserObservation(details, result.isError !== true);
-			for (const entry of observation.artifactVerification?.artifacts ?? []) receipts.set(entry.absolutePath ?? entry.path, entry);
-			for (const artifact of observation.artifacts ?? []) fileArtifacts.set(artifact.absolutePath, artifact);
+			for (const entry of observation.artifactVerification?.artifacts ?? []) {
+				receipts.set(entry.absolutePath ?? entry.path, entry);
+			}
+			for (const artifact of observation.artifacts ?? []) {
+				fileArtifacts.set(artifact.absolutePath, artifact);
+			}
 			if (observation.imageObservations) {
-				observation.imageObservations = await Promise.all(observation.imageObservations.map(async image => {
-					const file = await stat(image.path);
-					const id = `image-${images.size + 1}`;
-					images.set(id, { observation: image, size: file.size, mtime: file.mtimeMs });
-					return { ...image, id };
-				}));
+				observation.imageObservations = await Promise.all(
+					observation.imageObservations.map(async (image) => {
+						const file = await stat(image.path);
+						const id = `image-${images.size + 1}`;
+						images.set(id, { observation: image, size: file.size, mtime: file.mtimeMs });
+						return { ...image, id };
+					}),
+				);
 			}
 			return observation;
 		},
 		async emitImage(value: unknown): Promise<void> {
 			const id = isRecord(value) && typeof value.id === "string" ? value.id : undefined;
 			const image = id ? images.get(id) : undefined;
-			if (!id || !image) throw new Error("emitImage expects an imageObservations handle returned by browser() in this code call.");
-			if (selected.has(id)) return;
-			if (selected.size >= 8 || selectedBytes + image.size > 20 * 1_024 * 1_024) throw new Error("Selected images exceed the code output limit (8 images / 20 MiB). Emit fewer images.");
-			const file = await stat(image.observation.path);
-			if (!file.isFile() || file.size !== image.size || file.mtimeMs !== image.mtime) throw new Error("The selected image changed since capture. Capture it again before emitting it.");
-			const presentation = await attachInlineImage({ content: [], summary: "Selected browser image" }, image.observation.path);
-			if (!presentation.content.some(item => item.type === "image")) {
-				throw new Error(presentation.content.filter(item => item.type === "text").map(item => item.text).join("\n") || "The selected image could not be attached.");
+			if (!id || !image) {
+				throw new Error(
+					"emitImage expects an imageObservations handle returned by browser() in this code call.",
+				);
 			}
-			selected.set(id, presentation.content.filter(item => item.type === "image"));
+			if (selected.has(id)) {
+				return;
+			}
+			if (selected.size >= 8 || selectedBytes + image.size > 20 * 1_024 * 1_024) {
+				throw new Error(
+					"Selected images exceed the code output limit (8 images / 20 MiB). Emit fewer images.",
+				);
+			}
+			const file = await stat(image.observation.path);
+			if (!file.isFile() || file.size !== image.size || file.mtimeMs !== image.mtime) {
+				throw new Error(
+					"The selected image changed since capture. Capture it again before emitting it.",
+				);
+			}
+			const presentation = await attachInlineImage(
+				{ content: [], summary: "Selected browser image" },
+				image.observation.path,
+			);
+			if (!presentation.content.some((item) => item.type === "image")) {
+				throw new Error(
+					presentation.content
+						.filter((item) => item.type === "text")
+						.map((item) => item.text)
+						.join("\n") || "The selected image could not be attached.",
+				);
+			}
+			selected.set(
+				id,
+				presentation.content.filter((item) => item.type === "image"),
+			);
 			selectedBytes += file.size;
 		},
-		async finish(run: AgentBrowserScriptRunResult, sessionName: string, namespace?: string): Promise<AgentBrowserToolResult> {
+		async finish(
+			run: AgentBrowserScriptRunResult,
+			sessionName: string,
+			namespace?: string,
+		): Promise<AgentBrowserToolResult> {
 			let data: unknown;
 			let outputError: string | undefined;
 			try {
 				data = redactPresentationData({ command: "code" }, run.data);
-				if (data !== undefined && Buffer.byteLength(JSON.stringify(data), "utf8") > AGENT_BROWSER_SCRIPT_FINAL_OUTPUT_MAX_BYTES) throw new Error("oversized");
-			} catch { data = undefined; outputError = "Code output could not be rendered as bounded JSON."; }
-			const failureCategory = outputError ? "validation-error" : run.failureCategory
-				?? (run.rejectedCallCount > 0 ? "validation-error" : undefined);
+				if (
+					data !== undefined &&
+					Buffer.byteLength(JSON.stringify(data), "utf8") >
+						AGENT_BROWSER_SCRIPT_FINAL_OUTPUT_MAX_BYTES
+				) {
+					throw new Error("oversized");
+				}
+			} catch {
+				data = undefined;
+				outputError = "Code output could not be rendered as bounded JSON.";
+			}
+			const failureCategory = outputError
+				? "validation-error"
+				: (run.failureCategory ?? (run.rejectedCallCount > 0 ? "validation-error" : undefined));
 			const success = run.ok && failureCategory === undefined;
 			const artifacts = [...receipts.values()];
-			const count = (state: string) => artifacts.filter(entry => entry.state === state).length;
-			const artifactVerification: ArtifactVerificationSummary | undefined = artifacts.length ? {
-				artifacts, missingCount: count("missing"), pendingCount: count("pending"), unverifiedCount: count("unverified"),
-				verifiedCount: count("verified"), verified: artifacts.every(entry => entry.state === "verified"),
-			} : undefined;
+			const count = (state: string) => artifacts.filter((entry) => entry.state === state).length;
+			const artifactVerification: ArtifactVerificationSummary | undefined = artifacts.length
+				? {
+						artifacts,
+						missingCount: count("missing"),
+						pendingCount: count("pending"),
+						unverifiedCount: count("unverified"),
+						verifiedCount: count("verified"),
+						verified: artifacts.every((entry) => entry.state === "verified"),
+					}
+				: undefined;
 			const observation = {
-				success, resultCategory: success ? "success" : "failure", failureCategory, data,
+				success,
+				resultCategory: success ? "success" : "failure",
+				failureCategory,
+				data,
 				error: outputError ?? (run.error ? redactSensitiveText(run.error) : undefined),
-				sessionName, namespace,
-				codeRun: { callCount: run.callCount, emitCount: run.emitCount, failedCallCount: run.steps.filter(step => !step.ok).length, rejectedCallCount: run.rejectedCallCount, aborted: run.aborted, timedOut: run.timedOut },
+				sessionName,
+				namespace,
+				codeRun: {
+					callCount: run.callCount,
+					emitCount: run.emitCount,
+					failedCallCount: run.steps.filter((step) => !step.ok).length,
+					rejectedCallCount: run.rejectedCallCount,
+					aborted: run.aborted,
+					timedOut: run.timedOut,
+				},
 				failures: run.failures?.length ? run.failures : undefined,
 				artifactVerification,
 				artifacts: fileArtifacts.size ? [...fileArtifacts.values()] : undefined,
-				imageObservations: [...selected.keys()].map(id => ({ ...images.get(id)!.observation, id })),
+				imageObservations: [...selected.keys()].map((id) => ({
+					...images.get(id)!.observation,
+					id,
+				})),
 			};
-			const summary = success ? `Browser code completed (${run.callCount} calls).` : "Browser code failed.";
+			const summary = success
+				? `Browser code completed (${run.callCount} calls).`
+				: "Browser code failed.";
 			return {
 				content: [...selected.values()].flat(),
 				details: { ...observation, codeSteps: run.steps, summary },

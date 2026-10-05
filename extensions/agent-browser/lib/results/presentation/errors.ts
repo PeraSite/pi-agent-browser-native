@@ -1,5 +1,9 @@
 import { isOpenNavigationCommand } from "../../command-taxonomy.js";
-import { extractUpstreamCommandTokens, redactSensitiveText, type CommandInfo } from "../../runtime.js";
+import {
+	extractUpstreamCommandTokens,
+	redactSensitiveText,
+	type CommandInfo,
+} from "../../runtime.js";
 import { buildBrowserProfileConfigRecovery } from "./browser-profile-recovery.js";
 import { redactModelFacingText } from "./common.js";
 import { buildAgentBrowserNextActions } from "../action-recommendations.js";
@@ -35,16 +39,25 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function getSelectorRecoveryHint(errorText: string): string | undefined {
 	const normalized = errorText.trim();
-	if (normalized.length === 0) return undefined;
+	if (normalized.length === 0) {
+		return undefined;
+	}
 
-	if (/\bUnknown ref\b|\bstale ref\b|\bref\b.*\b(?:not found|missing|expired)\b/i.test(normalized)) {
+	if (
+		/\bUnknown ref\b|\bstale ref\b|\bref\b.*\b(?:not found|missing|expired)\b/i.test(normalized)
+	) {
 		return STALE_REF_ERROR_HINT;
 	}
 
-	const mentionsPlaywrightSelectorDialect = /(?:\btext=|:has-text\(|\bgetByRole\b|\bgetByText\b)/i.test(normalized);
+	const mentionsPlaywrightSelectorDialect =
+		/(?:\btext=|:has-text\(|\bgetByRole\b|\bgetByText\b)/i.test(normalized);
 	const reportsSelectorMatchFailure =
-		/\b(?:no elements? found|failed to find|could not find|unable to find)\b.*\b(?:selector|locator)\b/i.test(normalized) ||
-		/\b(?:selector|locator)\b.*\b(?:no elements? found|not found|missing|failed to find|could not find|unable to find)\b/i.test(normalized);
+		/\b(?:no elements? found|failed to find|could not find|unable to find)\b.*\b(?:selector|locator)\b/i.test(
+			normalized,
+		) ||
+		/\b(?:selector|locator)\b.*\b(?:no elements? found|not found|missing|failed to find|could not find|unable to find)\b/i.test(
+			normalized,
+		);
 
 	if (
 		/\b(?:unsupported|unknown|invalid)\s+(?:selector|locator)\b/i.test(normalized) ||
@@ -58,63 +71,123 @@ function getSelectorRecoveryHint(errorText: string): string | undefined {
 	return undefined;
 }
 
-function getClipboardPermissionHint(commandInfo: CommandInfo, errorText: string): string | undefined {
-	if (commandInfo.command !== "clipboard") return undefined;
-	if (!/\bNotAllowedError\b|\bclipboard\b.*\bpermission denied\b|\bpermission denied\b.*\bclipboard\b/i.test(errorText)) {
+function getClipboardPermissionHint(
+	commandInfo: CommandInfo,
+	errorText: string,
+): string | undefined {
+	if (commandInfo.command !== "clipboard") {
+		return undefined;
+	}
+	if (
+		!/\bNotAllowedError\b|\bclipboard\b.*\bpermission denied\b|\bpermission denied\b.*\bclipboard\b/i.test(
+			errorText,
+		)
+	) {
 		return undefined;
 	}
 	return CLIPBOARD_PERMISSION_ERROR_HINT;
 }
 
 function getKeyboardPressHint(commandInfo: CommandInfo, errorText: string): string | undefined {
-	if (commandInfo.command !== "keyboard" || commandInfo.subcommand !== "press") return undefined;
-	if (!/\bunknown\s+subcommand\b|\bvalid options?\b/i.test(errorText)) return undefined;
+	if (commandInfo.command !== "keyboard" || commandInfo.subcommand !== "press") {
+		return undefined;
+	}
+	if (!/\bunknown\s+subcommand\b|\bvalid options?\b/i.test(errorText)) {
+		return undefined;
+	}
 	return KEYBOARD_PRESS_ERROR_HINT;
 }
 
-export function isOverlayBlockedClickError(command: string | undefined, errorText: string | undefined, args?: string[]): boolean {
+export function isOverlayBlockedClickError(
+	command: string | undefined,
+	errorText: string | undefined,
+	args?: string[],
+): boolean {
 	const tokens = args ? extractUpstreamCommandTokens(args) : [];
-	const action = tokens[0] === "find"
-		? tokens[tokens[1] === "nth" ? 4 : 3] ?? "click"
-		: tokens[0] ?? command;
-	return action === "click" && errorText !== undefined && /\bis covered by\b[\s\S]*\bat its click point\b/i.test(errorText);
+	const action =
+		tokens[0] === "find"
+			? (tokens[tokens[1] === "nth" ? 4 : 3] ?? "click")
+			: (tokens[0] ?? command);
+	return (
+		action === "click" &&
+		errorText !== undefined &&
+		/\bis covered by\b[\s\S]*\bat its click point\b/i.test(errorText)
+	);
 }
 
 export function redactClipboardPermissionEcho(commandInfo: CommandInfo, errorText: string): string {
-	if (commandInfo.command !== "clipboard") return errorText;
+	if (commandInfo.command !== "clipboard") {
+		return errorText;
+	}
 	return errorText
 		.replace(/(\b(?:read|write)\s+permission denied\b(?:\s+for)?\s+)([\s\S]+)$/gi, "$1[REDACTED]")
-		.replace(/(\bFailed to execute '[^']+' on 'Clipboard':\s*)([\s\S]+)$/gi, (match, prefix: string, suffix: string) => {
-			if (!/\bpermission denied\b/i.test(suffix)) return match;
-			return `${prefix}${suffix.replace(/(\bpermission denied\b(?:\s+for)?\s+)([\s\S]+)$/i, "$1[REDACTED]")}`;
-		});
+		.replace(
+			/(\bFailed to execute '[^']+' on 'Clipboard':\s*)([\s\S]+)$/gi,
+			(match, prefix: string, suffix: string) => {
+				if (!/\bpermission denied\b/i.test(suffix)) {
+					return match;
+				}
+				return `${prefix}${suffix.replace(/(\bpermission denied\b(?:\s+for)?\s+)([\s\S]+)$/i, "$1[REDACTED]")}`;
+			},
+		);
 }
 
 export function getClipboardWritePayloadCandidates(commandTokens: readonly string[]): string[] {
-	if (commandTokens[0] !== "clipboard" || commandTokens[1] !== "write") return [];
+	if (commandTokens[0] !== "clipboard" || commandTokens[1] !== "write") {
+		return [];
+	}
 	const payloadTokens = commandTokens.slice(2).filter((value) => value.length > 0);
-	return [...new Set([...payloadTokens, payloadTokens.join(" ")].filter((value) => value.length > 0))];
+	return [
+		...new Set([...payloadTokens, payloadTokens.join(" ")].filter((value) => value.length > 0)),
+	];
 }
 
-function shouldRedactClipboardPayloadField(key: string, value: string, payloadCandidates: readonly string[]): boolean {
+function shouldRedactClipboardPayloadField(
+	key: string,
+	value: string,
+	payloadCandidates: readonly string[],
+): boolean {
 	return payloadCandidates.some((candidate) => {
-		if (value === candidate) return true;
-		if (candidate.length < 8 || !/payload|clipboard|argument/i.test(key)) return false;
+		if (value === candidate) {
+			return true;
+		}
+		if (candidate.length < 8 || !/payload|clipboard|argument/i.test(key)) {
+			return false;
+		}
 		return value.includes(candidate);
 	});
 }
 
-export function redactClipboardPermissionErrorValue(commandInfo: CommandInfo, value: unknown, payloadCandidates: readonly string[] = []): unknown {
-	if (commandInfo.command !== "clipboard") return value;
-	if (typeof value === "string") return payloadCandidates.includes(value) ? "[REDACTED]" : redactClipboardPermissionEcho(commandInfo, value);
-	if (Array.isArray(value)) return value.map((item) => redactClipboardPermissionErrorValue(commandInfo, item, payloadCandidates));
-	if (!isRecord(value)) return value;
-	return Object.fromEntries(Object.entries(value).map(([key, entryValue]) => [
-		key,
-		typeof entryValue === "string" && shouldRedactClipboardPayloadField(key, entryValue, payloadCandidates)
+export function redactClipboardPermissionErrorValue(
+	commandInfo: CommandInfo,
+	value: unknown,
+	payloadCandidates: readonly string[] = [],
+): unknown {
+	if (commandInfo.command !== "clipboard") {
+		return value;
+	}
+	if (typeof value === "string") {
+		return payloadCandidates.includes(value)
 			? "[REDACTED]"
-			: redactClipboardPermissionErrorValue(commandInfo, entryValue, payloadCandidates),
-	]));
+			: redactClipboardPermissionEcho(commandInfo, value);
+	}
+	if (Array.isArray(value)) {
+		return value.map((item) =>
+			redactClipboardPermissionErrorValue(commandInfo, item, payloadCandidates),
+		);
+	}
+	if (!isRecord(value)) {
+		return value;
+	}
+	return Object.fromEntries(
+		Object.entries(value).map(([key, entryValue]) => [
+			key,
+			typeof entryValue === "string" &&
+			shouldRedactClipboardPayloadField(key, entryValue, payloadCandidates)
+				? "[REDACTED]"
+				: redactClipboardPermissionErrorValue(commandInfo, entryValue, payloadCandidates),
+		]),
+	);
 }
 
 interface CommandSuggestion {
@@ -124,30 +197,82 @@ interface CommandSuggestion {
 }
 
 const UNKNOWN_COMMAND_SUGGESTIONS: Record<string, CommandSuggestion[]> = {
-	attr: [{ description: "Use `get attr <selector> <name>` to read an attribute from a selector or current `@ref`." }],
+	attr: [
+		{
+			description:
+				"Use `get attr <selector> <name>` to read an attribute from a selector or current `@ref`.",
+		},
+	],
 	count: [{ description: "Use `get count <selector>` to count matching elements." }],
-	html: [{ description: "Use `get html <selector>` to read element HTML from a selector or current `@ref`; use `get html body` when you need whole-page body HTML." }],
-	text: [{ description: "Use `get text <selector>` to read text from a selector or current `@ref`; run `snapshot -i` first when you need a safe `@ref`." }],
-	title: [{ args: ["get", "title"], description: "Use `get title` to read the current page title.", id: "use-get-title" }],
-	url: [{ args: ["get", "url"], description: "Use `get url` to read the current page URL.", id: "use-get-url" }],
-	value: [{ description: "Use `get value <selector>` to read form control value from a selector or current `@ref`." }],
+	html: [
+		{
+			description:
+				"Use `get html <selector>` to read element HTML from a selector or current `@ref`; use `get html body` when you need whole-page body HTML.",
+		},
+	],
+	text: [
+		{
+			description:
+				"Use `get text <selector>` to read text from a selector or current `@ref`; run `snapshot -i` first when you need a safe `@ref`.",
+		},
+	],
+	title: [
+		{
+			args: ["get", "title"],
+			description: "Use `get title` to read the current page title.",
+			id: "use-get-title",
+		},
+	],
+	url: [
+		{
+			args: ["get", "url"],
+			description: "Use `get url` to read the current page URL.",
+			id: "use-get-url",
+		},
+	],
+	value: [
+		{
+			description:
+				"Use `get value <selector>` to read form control value from a selector or current `@ref`.",
+		},
+	],
 };
 
-function getUnknownCommandSuggestions(command: string | undefined, errorText: string): CommandSuggestion[] {
-	if (!command) return [];
+function getUnknownCommandSuggestions(
+	command: string | undefined,
+	errorText: string,
+): CommandSuggestion[] {
+	if (!command) {
+		return [];
+	}
 	const normalizedCommand = command.trim().toLowerCase();
-	if (!/\bunknown\s+command\b|\bunknown\s+subcommand\b|\bunrecognized\s+command\b/i.test(errorText)) return [];
+	if (
+		!/\bunknown\s+command\b|\bunknown\s+subcommand\b|\bunrecognized\s+command\b/i.test(errorText)
+	) {
+		return [];
+	}
 	return UNKNOWN_COMMAND_SUGGESTIONS[normalizedCommand] ?? [];
 }
 
 function formatUnknownCommandSuggestionText(suggestions: CommandSuggestion[]): string | undefined {
-	if (suggestions.length === 0) return undefined;
-	return ["Agent-browser hint: This looks like a getter shortcut, but upstream getter commands are grouped under `get`.", ...suggestions.map((suggestion) => suggestion.description)].join(" ");
+	if (suggestions.length === 0) {
+		return undefined;
+	}
+	return [
+		"Agent-browser hint: This looks like a getter shortcut, but upstream getter commands are grouped under `get`.",
+		...suggestions.map((suggestion) => suggestion.description),
+	].join(" ");
 }
 
-function buildUnknownCommandSuggestionActions(suggestions: CommandSuggestion[], sessionName: string | undefined): AgentBrowserNextAction[] | undefined {
+function buildUnknownCommandSuggestionActions(
+	suggestions: CommandSuggestion[],
+	sessionName: string | undefined,
+): AgentBrowserNextAction[] | undefined {
 	const actions = suggestions
-		.filter((suggestion): suggestion is CommandSuggestion & { args: string[]; id: string } => suggestion.args !== undefined && suggestion.id !== undefined)
+		.filter(
+			(suggestion): suggestion is CommandSuggestion & { args: string[]; id: string } =>
+				suggestion.args !== undefined && suggestion.id !== undefined,
+		)
 		.map((suggestion) => ({
 			id: suggestion.id,
 			params: { args: withOptionalSessionArgs(sessionName, suggestion.args) },
@@ -158,9 +283,24 @@ function buildUnknownCommandSuggestionActions(suggestions: CommandSuggestion[], 
 	return actions.length > 0 ? actions : undefined;
 }
 
-function getLocalhostNavigationHint(commandInfo: CommandInfo, errorText: string): string | undefined {
-	if (!commandInfo.command || !isOpenNavigationCommand(commandInfo.command) || !commandInfo.subcommand) return undefined;
-	if (!/\bnet::ERR_(?:EMPTY_RESPONSE|CONNECTION_REFUSED|ADDRESS_UNREACHABLE|TIMED_OUT|CONNECTION_RESET)\b/i.test(errorText)) return undefined;
+function getLocalhostNavigationHint(
+	commandInfo: CommandInfo,
+	errorText: string,
+): string | undefined {
+	if (
+		!commandInfo.command ||
+		!isOpenNavigationCommand(commandInfo.command) ||
+		!commandInfo.subcommand
+	) {
+		return undefined;
+	}
+	if (
+		!/\bnet::ERR_(?:EMPTY_RESPONSE|CONNECTION_REFUSED|ADDRESS_UNREACHABLE|TIMED_OUT|CONNECTION_RESET)\b/i.test(
+			errorText,
+		)
+	) {
+		return undefined;
+	}
 
 	let targetUrl: URL;
 	try {
@@ -169,7 +309,9 @@ function getLocalhostNavigationHint(commandInfo: CommandInfo, errorText: string)
 		return undefined;
 	}
 
-	if (!["localhost", "127.0.0.1", "::1", "[::1]"].includes(targetUrl.hostname.toLowerCase())) return undefined;
+	if (!["localhost", "127.0.0.1", "::1", "[::1]"].includes(targetUrl.hostname.toLowerCase())) {
+		return undefined;
+	}
 
 	return [
 		"Agent-browser local fixture hint: the browser process could not read a loopback URL from its own network namespace or browser host.",
@@ -180,7 +322,9 @@ function getLocalhostNavigationHint(commandInfo: CommandInfo, errorText: string)
 
 export function appendSelectorRecoveryHint(errorText: string): string {
 	const hint = getSelectorRecoveryHint(errorText);
-	if (!hint || errorText.includes("Agent-browser hint:")) return errorText;
+	if (!hint || errorText.includes("Agent-browser hint:")) {
+		return errorText;
+	}
 	return `${errorText}\n\n${hint}`;
 }
 
@@ -196,15 +340,25 @@ export function buildErrorPresentation(options: {
 		redactSensitiveText(redactClipboardPermissionEcho(commandInfo, errorText)),
 	);
 	const selectorHintedErrorText = appendSelectorRecoveryHint(safeErrorText);
-	const unknownCommandSuggestions = getUnknownCommandSuggestions(commandInfo.command, safeErrorText);
-	const unknownCommandSuggestionText = formatUnknownCommandSuggestionText(unknownCommandSuggestions);
-	const browserProfileConfigRecovery = buildBrowserProfileConfigRecovery({ args, commandInfo, errorText: safeErrorText });
+	const unknownCommandSuggestions = getUnknownCommandSuggestions(
+		commandInfo.command,
+		safeErrorText,
+	);
+	const unknownCommandSuggestionText =
+		formatUnknownCommandSuggestionText(unknownCommandSuggestions);
+	const browserProfileConfigRecovery = buildBrowserProfileConfigRecovery({
+		args,
+		commandInfo,
+		errorText: safeErrorText,
+	});
 	const localhostNavigationHint = getLocalhostNavigationHint(commandInfo, safeErrorText);
 	const clipboardPermissionHint = getClipboardPermissionHint(commandInfo, safeErrorText);
 	const keyboardPressHint = getKeyboardPressHint(commandInfo, safeErrorText);
 	const hintedErrorParts = [
 		selectorHintedErrorText,
-		unknownCommandSuggestionText && !selectorHintedErrorText.includes("Agent-browser hint:") ? unknownCommandSuggestionText : undefined,
+		unknownCommandSuggestionText && !selectorHintedErrorText.includes("Agent-browser hint:")
+			? unknownCommandSuggestionText
+			: undefined,
 		browserProfileConfigRecovery?.hint,
 		localhostNavigationHint,
 		clipboardPermissionHint,
@@ -212,7 +366,9 @@ export function buildErrorPresentation(options: {
 	].filter((part): part is string => Boolean(part));
 	const hintedErrorText = hintedErrorParts.join("\n\n");
 	const categoryDetails = buildAgentBrowserResultCategoryDetails({
-		args: [commandInfo.command, commandInfo.subcommand].filter((item): item is string => item !== undefined),
+		args: [commandInfo.command, commandInfo.subcommand].filter(
+			(item): item is string => item !== undefined,
+		),
 		command: commandInfo.command,
 		errorText: hintedErrorText,
 		succeeded: false,
@@ -220,15 +376,21 @@ export function buildErrorPresentation(options: {
 	const nextActions = [
 		...(buildUnknownCommandSuggestionActions(unknownCommandSuggestions, sessionName) ?? []),
 		...(browserProfileConfigRecovery?.actions ?? []),
-		...(browserProfileConfigRecovery ? [] : buildAgentBrowserNextActions({
-			args,
-			command: commandInfo.command,
-			failureCategory: categoryDetails.failureCategory,
-			overlayBlockedClick: isOverlayBlockedClickError(presentationCommand ?? commandInfo.command, safeErrorText, args ?? commandInfo.commandTokens),
-			resultCategory: "failure",
-			sessionName,
-			subcommand: commandInfo.subcommand,
-		}) ?? []),
+		...(browserProfileConfigRecovery
+			? []
+			: (buildAgentBrowserNextActions({
+					args,
+					command: commandInfo.command,
+					failureCategory: categoryDetails.failureCategory,
+					overlayBlockedClick: isOverlayBlockedClickError(
+						presentationCommand ?? commandInfo.command,
+						safeErrorText,
+						args ?? commandInfo.commandTokens,
+					),
+					resultCategory: "failure",
+					sessionName,
+					subcommand: commandInfo.subcommand,
+				}) ?? [])),
 	];
 	return {
 		...categoryDetails,

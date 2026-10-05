@@ -11,7 +11,9 @@ function withOptions(schema: Record<string, unknown>, options?: TSchemaOptions):
 
 function literalType(value: unknown): "boolean" | "number" | "string" | undefined {
 	const valueType = typeof value;
-	return valueType === "string" || valueType === "number" || valueType === "boolean" ? valueType : undefined;
+	return valueType === "string" || valueType === "number" || valueType === "boolean"
+		? valueType
+		: undefined;
 }
 
 function propertySchema(schema: TSchema): TSchema {
@@ -41,13 +43,19 @@ export const JsonSchema = {
 		const required = globalThis.Object.entries(properties)
 			.filter(([, schema]) => (schema as SchemaObject)[OPTIONAL_SCHEMA] !== true)
 			.map(([key]) => key);
-		return withOptions({
-			type: "object",
-			properties: globalThis.Object.fromEntries(
-				globalThis.Object.entries(properties).map(([key, schema]) => [key, propertySchema(schema)]),
-			),
-			...(required.length > 0 ? { required } : {}),
-		}, options);
+		return withOptions(
+			{
+				type: "object",
+				properties: globalThis.Object.fromEntries(
+					globalThis.Object.entries(properties).map(([key, schema]) => [
+						key,
+						propertySchema(schema),
+					]),
+				),
+				...(required.length > 0 ? { required } : {}),
+			},
+			options,
+		);
 	},
 	Optional(schema: TSchema): TSchema {
 		return { ...(schema as SchemaObject), [OPTIONAL_SCHEMA]: true } as TSchema;

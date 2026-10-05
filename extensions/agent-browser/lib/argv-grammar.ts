@@ -83,9 +83,15 @@ const COMMAND_VALUE_FLAGS = [
 ] as const;
 
 const OPTIONAL_GLOBAL_VALUE_FLAGS: ReadonlySet<string> = new Set(["--restore"]);
-export const VALUE_FLAGS: ReadonlySet<string> = new Set([...GLOBAL_VALUE_FLAGS, ...COMMAND_VALUE_FLAGS]);
+export const VALUE_FLAGS: ReadonlySet<string> = new Set([
+	...GLOBAL_VALUE_FLAGS,
+	...COMMAND_VALUE_FLAGS,
+]);
 export const PREVALIDATED_VALUE_FLAGS: ReadonlySet<string> = new Set(GLOBAL_VALUE_FLAGS);
-export const GLOBAL_VALUE_FLAGS_ALLOWING_DASH_VALUE: ReadonlySet<string> = new Set(["--args", "--session"]);
+export const GLOBAL_VALUE_FLAGS_ALLOWING_DASH_VALUE: ReadonlySet<string> = new Set([
+	"--args",
+	"--session",
+]);
 export const GLOBAL_BOOLEAN_FLAGS_WITH_OPTIONAL_VALUES: ReadonlySet<string> = new Set([
 	"--allow-file-access",
 	"--annotate",
@@ -126,14 +132,21 @@ export function getBooleanFlagValue(args: string[], flag: string): boolean | und
 		const token = args[index];
 		if (token === flag) {
 			enabled = args[index + 1] !== "false";
-			if (["true", "false"].includes(args[index + 1] ?? "")) index += 1;
+			if (["true", "false"].includes(args[index + 1] ?? "")) {
+				index += 1;
+			}
 			continue;
 		}
 		if (PREVALIDATED_VALUE_FLAGS.has(token)) {
 			index += 1;
 			continue;
 		}
-		if (GLOBAL_BOOLEAN_FLAGS_WITH_OPTIONAL_VALUES.has(token) && ["true", "false"].includes(args[index + 1] ?? "")) index += 1;
+		if (
+			GLOBAL_BOOLEAN_FLAGS_WITH_OPTIONAL_VALUES.has(token) &&
+			["true", "false"].includes(args[index + 1] ?? "")
+		) {
+			index += 1;
+		}
 	}
 	return enabled;
 }
@@ -149,7 +162,9 @@ export function isUpstreamEnvFlagEnabled(value: string | undefined): boolean {
 
 /** Mirror upstream sanitize_session_component for namespace/socket/state identity. */
 export function canonicalizeAgentBrowserNamespace(value: string | undefined): string | undefined {
-	if (value === undefined) return undefined;
+	if (value === undefined) {
+		return undefined;
+	}
 	let normalized = "";
 	let lastWasSeparator = false;
 	for (const character of value) {
@@ -169,32 +184,54 @@ export function canonicalizeAgentBrowserNamespace(value: string | undefined): st
 	return normalized.replace(/[-_]+$/u, "") || undefined;
 }
 
-export function foldAgentBrowserFilesystemIdentity(value: string, platform: NodeJS.Platform): string {
-	if (platform !== "darwin" && platform !== "win32") return value;
+export function foldAgentBrowserFilesystemIdentity(
+	value: string,
+	platform: NodeJS.Platform,
+): string {
+	if (platform !== "darwin" && platform !== "win32") {
+		return value;
+	}
 	// APFS aliases include full Unicode folds such as ß/SS and ς/Σ, not just ASCII case.
 	return value.normalize("NFC").toLowerCase().toUpperCase().toLowerCase().normalize("NFC");
 }
 
-export function getAgentBrowserSessionIdentityKey(sessionName: string, namespace?: string, platform: NodeJS.Platform = process.platform): string {
+export function getAgentBrowserSessionIdentityKey(
+	sessionName: string,
+	namespace?: string,
+	platform: NodeJS.Platform = process.platform,
+): string {
 	const canonicalNamespace = canonicalizeAgentBrowserNamespace(namespace);
-	const identityNamespace = canonicalNamespace ? foldAgentBrowserFilesystemIdentity(canonicalNamespace, platform) : undefined;
+	const identityNamespace = canonicalNamespace
+		? foldAgentBrowserFilesystemIdentity(canonicalNamespace, platform)
+		: undefined;
 	const canonicalSessionName = foldAgentBrowserFilesystemIdentity(sessionName, platform);
 	return identityNamespace ? `${identityNamespace}\0${canonicalSessionName}` : canonicalSessionName;
 }
 
-export function isAgentBrowserSessionIdentityKeyInNamespace(identityKey: string, namespace?: string): boolean {
+export function isAgentBrowserSessionIdentityKeyInNamespace(
+	identityKey: string,
+	namespace?: string,
+): boolean {
 	const prefix = getAgentBrowserSessionIdentityKey("", namespace);
 	return prefix ? identityKey.startsWith(prefix) : !identityKey.includes("\0");
 }
 
-export function deleteIdentityKeysInNamespace(entries: Set<string> | Map<string, unknown>, namespace?: string): void {
+export function deleteIdentityKeysInNamespace(
+	entries: Set<string> | Map<string, unknown>,
+	namespace?: string,
+): void {
 	for (const key of entries.keys()) {
-		if (isAgentBrowserSessionIdentityKeyInNamespace(key, namespace)) entries.delete(key);
+		if (isAgentBrowserSessionIdentityKeyInNamespace(key, namespace)) {
+			entries.delete(key);
+		}
 	}
 }
 
 /** Mirror upstream global parsing: full argv, no `--` sentinel, and only global value payloads are skipped. */
-export function scanUpstreamGlobalFlagOccurrences(args: string[], targetFlag: string): UpstreamGlobalFlagOccurrence[] {
+export function scanUpstreamGlobalFlagOccurrences(
+	args: string[],
+	targetFlag: string,
+): UpstreamGlobalFlagOccurrence[] {
 	const occurrences: UpstreamGlobalFlagOccurrence[] = [];
 	for (let index = 0; index < args.length; index += 1) {
 		const token = args[index];
@@ -207,7 +244,12 @@ export function scanUpstreamGlobalFlagOccurrences(args: string[], targetFlag: st
 			index += 1;
 			continue;
 		}
-		if (GLOBAL_BOOLEAN_FLAGS_WITH_OPTIONAL_VALUES.has(token) && ["true", "false"].includes(args[index + 1] ?? "")) index += 1;
+		if (
+			GLOBAL_BOOLEAN_FLAGS_WITH_OPTIONAL_VALUES.has(token) &&
+			["true", "false"].includes(args[index + 1] ?? "")
+		) {
+			index += 1;
+		}
 	}
 	return occurrences;
 }
@@ -217,17 +259,28 @@ export function extractExplicitSessionName(args: string[]): string | undefined {
 }
 
 export function extractExplicitNamespace(args: string[]): string | undefined {
-	return canonicalizeAgentBrowserNamespace(scanUpstreamGlobalFlagOccurrences(args, "--namespace").at(-1)?.value);
+	return canonicalizeAgentBrowserNamespace(
+		scanUpstreamGlobalFlagOccurrences(args, "--namespace").at(-1)?.value,
+	);
 }
 
-export function resolveAgentBrowserNamespace(args: string[], envValue: string | undefined): string | undefined {
+export function resolveAgentBrowserNamespace(
+	args: string[],
+	envValue: string | undefined,
+): string | undefined {
 	const occurrences = scanUpstreamGlobalFlagOccurrences(args, "--namespace");
-	if (occurrences.length > 0) return canonicalizeAgentBrowserNamespace(occurrences.at(-1)?.value) ?? "";
+	if (occurrences.length > 0) {
+		return canonicalizeAgentBrowserNamespace(occurrences.at(-1)?.value) ?? "";
+	}
 	return canonicalizeAgentBrowserNamespace(envValue);
 }
 
 /** Mirror upstream's optional restore value and full-argv last-wins parsing. */
-export function extractRequestedRestoreKey(args: string[], sessionName: string, envValue: string | undefined): string | null {
+export function extractRequestedRestoreKey(
+	args: string[],
+	sessionName: string,
+	envValue: string | undefined,
+): string | null {
 	let restoreKey = envValue || null;
 	let seenCommand = false;
 	for (let index = 0; index < args.length; index += 1) {
@@ -249,11 +302,16 @@ export function extractRequestedRestoreKey(args: string[], sessionName: string, 
 			index += 1;
 			continue;
 		}
-		if (GLOBAL_BOOLEAN_FLAGS_WITH_OPTIONAL_VALUES.has(token) && ["true", "false"].includes(args[index + 1] ?? "")) {
+		if (
+			GLOBAL_BOOLEAN_FLAGS_WITH_OPTIONAL_VALUES.has(token) &&
+			["true", "false"].includes(args[index + 1] ?? "")
+		) {
 			index += 1;
 			continue;
 		}
-		if (isKnownCommandToken(token)) seenCommand = true;
+		if (isKnownCommandToken(token)) {
+			seenCommand = true;
+		}
 	}
 	return restoreKey;
 }
@@ -266,7 +324,10 @@ export function isNonFlagToken(token: string | undefined): token is string {
 	return typeof token === "string" && !token.startsWith("-");
 }
 
-export function hasOnlyBooleanFlags(tokens: readonly string[], allowedFlags: ReadonlySet<string>): boolean {
+export function hasOnlyBooleanFlags(
+	tokens: readonly string[],
+	allowedFlags: ReadonlySet<string>,
+): boolean {
 	return tokens.every((token) => token.startsWith("-") && allowedFlags.has(getFlagName(token)));
 }
 
@@ -277,32 +338,58 @@ export function hasOnlyOptionFlags(
 ): boolean {
 	for (let index = 0; index < tokens.length; index += 1) {
 		const token = tokens[index];
-		if (!token.startsWith("-")) return false;
+		if (!token.startsWith("-")) {
+			return false;
+		}
 		const flagName = getFlagName(token);
-		if (allowedBooleanFlags.has(flagName)) continue;
-		if (!allowedValueFlags.has(flagName)) return false;
-		if (token.includes("=")) continue;
+		if (allowedBooleanFlags.has(flagName)) {
+			continue;
+		}
+		if (!allowedValueFlags.has(flagName)) {
+			return false;
+		}
+		if (token.includes("=")) {
+			continue;
+		}
 		const value = tokens[index + 1];
-		if (!isNonFlagToken(value)) return false;
+		if (!isNonFlagToken(value)) {
+			return false;
+		}
 		index += 1;
 	}
 	return true;
 }
 
-export function optionalGlobalValueFlagConsumesNext(flag: string, nextToken: string | undefined): boolean {
-	if (!OPTIONAL_GLOBAL_VALUE_FLAGS.has(flag) || nextToken === undefined || nextToken.startsWith("-")) return false;
+export function optionalGlobalValueFlagConsumesNext(
+	flag: string,
+	nextToken: string | undefined,
+): boolean {
+	if (
+		!OPTIONAL_GLOBAL_VALUE_FLAGS.has(flag) ||
+		nextToken === undefined ||
+		nextToken.startsWith("-")
+	) {
+		return false;
+	}
 	return !isKnownCommandToken(nextToken);
 }
 
-export function projectUpstreamGlobalFlags(args: readonly string[]): { indices: number[]; tokens: string[] } {
+export function projectUpstreamGlobalFlags(args: readonly string[]): {
+	indices: number[];
+	tokens: string[];
+} {
 	const indices: number[] = [];
 	const tokens: string[] = [];
 	let seenCommand = false;
 	for (let index = 0; index < args.length; index += 1) {
 		const token = args[index];
-		if (token.startsWith("--restore=")) continue;
+		if (token.startsWith("--restore=")) {
+			continue;
+		}
 		if (token === "--restore") {
-			if (!seenCommand && optionalGlobalValueFlagConsumesNext(token, args[index + 1])) index += 1;
+			if (!seenCommand && optionalGlobalValueFlagConsumesNext(token, args[index + 1])) {
+				index += 1;
+			}
 			continue;
 		}
 		if (PREVALIDATED_VALUE_FLAGS.has(token)) {
@@ -310,12 +397,16 @@ export function projectUpstreamGlobalFlags(args: readonly string[]): { indices: 
 			continue;
 		}
 		if (GLOBAL_BOOLEAN_FLAGS_WITH_OPTIONAL_VALUES.has(token)) {
-			if (["true", "false"].includes(args[index + 1] ?? "")) index += 1;
+			if (["true", "false"].includes(args[index + 1] ?? "")) {
+				index += 1;
+			}
 			continue;
 		}
 		tokens.push(token);
 		indices.push(index);
-		if (isKnownCommandToken(token)) seenCommand = true;
+		if (isKnownCommandToken(token)) {
+			seenCommand = true;
+		}
 	}
 	return { indices, tokens };
 }
@@ -330,12 +421,16 @@ export function stripSessionlessShapeGlobalFlags(commandTokens: readonly string[
 	for (let index = 0; index < commandTokens.length; index += 1) {
 		const token = commandTokens[index];
 		const flagName = getFlagName(token);
-		if (token === "--json") continue;
+		if (token === "--json") {
+			continue;
+		}
 		if ((flagName === "--session" || flagName === "--namespace") && !token.includes("=")) {
 			index += 1;
 			continue;
 		}
-		if (token.startsWith("--session=") || token.startsWith("--namespace=")) continue;
+		if (token.startsWith("--session=") || token.startsWith("--namespace=")) {
+			continue;
+		}
 		stripped.push(token);
 	}
 	return stripped;

@@ -23,10 +23,17 @@ type LifecycleResult = {
 	toolCallId?: string;
 	isError?: boolean;
 	content?: Array<{ type: string; text: string }>;
-	details?: { command?: string; resultCategory?: string; failureCategory?: string; data?: unknown; sessionName?: string; sessionTabTarget?: { url: string } };
+	details?: {
+		command?: string;
+		resultCategory?: string;
+		failureCategory?: string;
+		data?: unknown;
+		sessionName?: string;
+		sessionTabTarget?: { url: string };
+	};
 };
 
-const lifecycleModule = (await import("../scripts/verify-lifecycle.mjs") as unknown) as {
+const lifecycleModule = (await import("../scripts/verify-lifecycle.mjs")) as unknown as {
 	agentBrowserResults: (entries: unknown[]) => Array<{
 		content?: Array<{ text?: string; type?: string }>;
 		details?: { fullOutputPath?: string; fullOutputPaths?: string[]; sessionName?: string };
@@ -104,7 +111,10 @@ test("parseCliArgs supports lifecycle harness options", () => {
 		timeoutMs: 42,
 		verbose: true,
 	});
-	assert.deepEqual(parseCliArgs(["--model", "openai-codex/gpt-5.5:minimal"]).model, "openai-codex/gpt-5.5:minimal");
+	assert.deepEqual(
+		parseCliArgs(["--model", "openai-codex/gpt-5.5:minimal"]).model,
+		"openai-codex/gpt-5.5:minimal",
+	);
 	assert.equal(parseCliArgs(["--help"]).showHelp, true);
 	assert.equal(parseCliArgs(["-h"]).showHelp, true);
 });
@@ -149,9 +159,24 @@ test("buildPiLaunchArgs approves project trust and pins lifecycle launches to th
 });
 
 test("paneLooksReady accepts exact-session relaunches with non-zero context usage", () => {
-	assert.equal(paneLooksReady("~/repo\n↑23k ↓362 R117k 12.0%/200k (auto)                         (zai) glm-5.2 • medium"), true);
-	assert.equal(paneLooksReady("~/repo\n↑1k ↓2 R3k 0.0%/200k (auto)                         (zai) glm-5.2 • medium"), true);
-	assert.equal(paneLooksReady("~/repo\n0.0%/1.0M (auto)                                          (zai) glm-5.2 • medium"), true);
+	assert.equal(
+		paneLooksReady(
+			"~/repo\n↑23k ↓362 R117k 12.0%/200k (auto)                         (zai) glm-5.2 • medium",
+		),
+		true,
+	);
+	assert.equal(
+		paneLooksReady(
+			"~/repo\n↑1k ↓2 R3k 0.0%/200k (auto)                         (zai) glm-5.2 • medium",
+		),
+		true,
+	);
+	assert.equal(
+		paneLooksReady(
+			"~/repo\n0.0%/1.0M (auto)                                          (zai) glm-5.2 • medium",
+		),
+		true,
+	);
 	assert.equal(paneLooksReady("Working…\n↑23k ↓362 R117k 12.0%/200k"), false);
 });
 
@@ -173,22 +198,66 @@ test("buildSettingsPayload isolates the configured package source", () => {
 });
 
 test("parseJsonl and extraction helpers read agent_browser results and sentinel entries", () => {
-	const entries = parseJsonl([
-		JSON.stringify({ type: "session", id: "piab-lifecycle-4242" }),
-		JSON.stringify({ type: "custom", customType: "piab-lifecycle-sentinel", data: { token: "v1" } }),
-		JSON.stringify({ type: "message", message: { role: "toolResult", toolName: "agent_browser", details: { sessionName: "s1", fullOutputPath: "/tmp/a.txt" } } }),
-		JSON.stringify({ type: "message", message: { role: "toolResult", toolName: "agent_browser_code", details: { sessionName: "s1" } } }),
-		JSON.stringify({ type: "message", message: { role: "toolResult", toolName: "agent_browser_qa", details: { sessionName: "s1" } } }),
-		JSON.stringify({ type: "message", message: { role: "toolResult", toolName: "agent_browser_tools" } }),
-		JSON.stringify({ type: "message", message: { role: "toolResult", toolName: "bash", details: { fullOutputPath: "/tmp/ignored.txt" } } }),
-		JSON.stringify({ type: "custom", customType: "piab-lifecycle-sentinel", data: { token: "v2" } }),
-		"",
-	].join("\n"));
+	const entries = parseJsonl(
+		[
+			JSON.stringify({ type: "session", id: "piab-lifecycle-4242" }),
+			JSON.stringify({
+				type: "custom",
+				customType: "piab-lifecycle-sentinel",
+				data: { token: "v1" },
+			}),
+			JSON.stringify({
+				type: "message",
+				message: {
+					role: "toolResult",
+					toolName: "agent_browser",
+					details: { sessionName: "s1", fullOutputPath: "/tmp/a.txt" },
+				},
+			}),
+			JSON.stringify({
+				type: "message",
+				message: {
+					role: "toolResult",
+					toolName: "agent_browser_code",
+					details: { sessionName: "s1" },
+				},
+			}),
+			JSON.stringify({
+				type: "message",
+				message: {
+					role: "toolResult",
+					toolName: "agent_browser_qa",
+					details: { sessionName: "s1" },
+				},
+			}),
+			JSON.stringify({
+				type: "message",
+				message: { role: "toolResult", toolName: "agent_browser_tools" },
+			}),
+			JSON.stringify({
+				type: "message",
+				message: {
+					role: "toolResult",
+					toolName: "bash",
+					details: { fullOutputPath: "/tmp/ignored.txt" },
+				},
+			}),
+			JSON.stringify({
+				type: "custom",
+				customType: "piab-lifecycle-sentinel",
+				data: { token: "v2" },
+			}),
+			"",
+		].join("\n"),
+	);
 
 	assert.equal(sessionHeaderId(entries), "piab-lifecycle-4242");
 	assert.deepEqual(sentinelTokens(entries), ["v1", "v2"]);
 	const results = agentBrowserResults(entries);
-	assert.deepEqual(results.map(result => result.toolName), ["agent_browser", "agent_browser_code", "agent_browser_qa"]);
+	assert.deepEqual(
+		results.map((result) => result.toolName),
+		["agent_browser", "agent_browser_code", "agent_browser_qa"],
+	);
 	assert.equal(results[0]?.details?.sessionName, "s1");
 	assert.deepEqual(collectFullOutputPaths(results), ["/tmp/a.txt"]);
 });
@@ -196,7 +265,12 @@ test("parseJsonl and extraction helpers read agent_browser results and sentinel 
 const failedResumeSnapshot: LifecycleResult = {
 	toolCallId: "call_1423577b6db24f3b9b3c6637",
 	isError: true,
-	content: [{ type: "text", text: "agent-browser could not re-select and verify the intended tab before running the command.\nNext actions:\nInspect tabs for React at https://react.dev/ before continuing after tab drift.\nResult category: failure; failureCategory: tab-drift; Pi tool isError: true." }],
+	content: [
+		{
+			type: "text",
+			text: "agent-browser could not re-select and verify the intended tab before running the command.\nNext actions:\nInspect tabs for React at https://react.dev/ before continuing after tab drift.\nResult category: failure; failureCategory: tab-drift; Pi tool isError: true.",
+		},
+	],
 	details: {
 		sessionName: "piab-src-02ac2afca195-63810b22",
 		resultCategory: "failure",
@@ -207,20 +281,65 @@ const failedResumeSnapshot: LifecycleResult = {
 const successfulSnapshot: LifecycleResult = {
 	toolCallId: "observed-snapshot",
 	isError: false,
-	details: { command: "snapshot", resultCategory: "success", data: { origin: "https://react.dev/", snapshot: '- heading "React" [ref=e1]', refs: { e1: { role: "heading", name: "React" } } } },
+	details: {
+		command: "snapshot",
+		resultCategory: "success",
+		data: {
+			origin: "https://react.dev/",
+			snapshot: '- heading "React" [ref=e1]',
+			refs: { e1: { role: "heading", name: "React" } },
+		},
+	},
 };
 
 test("lifecycle page checks require successful expected-command observed data, not recovery text or remembered targets", () => {
-	assert.equal(matchesSuccessfulPageResult(failedResumeSnapshot, "snapshot", "https://react.dev/"), false);
-	assert.equal(matchesSuccessfulPageResult({
-		...successfulSnapshot,
-		content: [{ type: "text", text: "Warning: active tab is about:blank; prior intended tab was https://react.dev/" }],
-		details: { ...successfulSnapshot.details, data: { origin: "about:blank" }, sessionTabTarget: { url: "https://react.dev/" } },
-	}, "snapshot", "https://react.dev/"), false);
-	assert.equal(matchesSuccessfulPageResult(successfulSnapshot, "snapshot", "https://react.dev/#learn"), true);
-	assert.equal(matchesSuccessfulPageResult({ isError: false, details: { command: "open", resultCategory: "success", data: { title: "React", url: "https://react.dev" } } }, "open", "https://react.dev/"), true);
+	assert.equal(
+		matchesSuccessfulPageResult(failedResumeSnapshot, "snapshot", "https://react.dev/"),
+		false,
+	);
+	assert.equal(
+		matchesSuccessfulPageResult(
+			{
+				...successfulSnapshot,
+				content: [
+					{
+						type: "text",
+						text: "Warning: active tab is about:blank; prior intended tab was https://react.dev/",
+					},
+				],
+				details: {
+					...successfulSnapshot.details,
+					data: { origin: "about:blank" },
+					sessionTabTarget: { url: "https://react.dev/" },
+				},
+			},
+			"snapshot",
+			"https://react.dev/",
+		),
+		false,
+	);
+	assert.equal(
+		matchesSuccessfulPageResult(successfulSnapshot, "snapshot", "https://react.dev/#learn"),
+		true,
+	);
+	assert.equal(
+		matchesSuccessfulPageResult(
+			{
+				isError: false,
+				details: {
+					command: "open",
+					resultCategory: "success",
+					data: { title: "React", url: "https://react.dev" },
+				},
+			},
+			"open",
+			"https://react.dev/",
+		),
+		true,
+	);
 	for (const command of ["open", "snapshot"]) {
-		const data = command === "open" ? { url: "https://react.dev/" } : { origin: "https://react.dev/" };
+		const data =
+			command === "open" ? { url: "https://react.dev/" } : { origin: "https://react.dev/" };
 		const valid = { isError: false, details: { command, resultCategory: "success", data } };
 		for (const result of [
 			{ ...valid, isError: true },
@@ -229,10 +348,39 @@ test("lifecycle page checks require successful expected-command observed data, n
 			{ ...valid, details: { ...valid.details, resultCategory: undefined } },
 			{ ...valid, details: { ...valid.details, command: undefined } },
 			{ ...valid, details: { ...valid.details, command: "get" } },
-			{ ...valid, details: { ...valid.details, data: undefined, sessionTabTarget: { url: "https://react.dev/" } } },
-			{ ...valid, details: { ...valid.details, data: command === "open" ? { origin: "https://react.dev/" } : { url: "https://react.dev/" } } },
-			{ ...valid, details: { ...valid.details, data: command === "open" ? { url: "https://react.dev/learn" } : { origin: "https://react.dev/learn" } } },
-		]) assert.equal(matchesSuccessfulPageResult(result, command, "https://react.dev/"), false, JSON.stringify(result));
+			{
+				...valid,
+				details: {
+					...valid.details,
+					data: undefined,
+					sessionTabTarget: { url: "https://react.dev/" },
+				},
+			},
+			{
+				...valid,
+				details: {
+					...valid.details,
+					data:
+						command === "open" ? { origin: "https://react.dev/" } : { url: "https://react.dev/" },
+				},
+			},
+			{
+				...valid,
+				details: {
+					...valid.details,
+					data:
+						command === "open"
+							? { url: "https://react.dev/learn" }
+							: { origin: "https://react.dev/learn" },
+				},
+			},
+		]) {
+			assert.equal(
+				matchesSuccessfulPageResult(result, command, "https://react.dev/"),
+				false,
+				JSON.stringify(result),
+			);
+		}
 	}
 });
 
@@ -245,11 +393,22 @@ for (const laterSuccess of [false, true]) {
 		const directory = await mkdtemp(join(tmpdir(), "piab-lifecycle-results-"));
 		const sessionFile = join(directory, "session.jsonl");
 		try {
-			await writeFile(sessionFile, lifecycleResultLine(successfulSnapshot) + lifecycleResultLine(failedResumeSnapshot) + (laterSuccess ? lifecycleResultLine(successfulSnapshot) : ""));
-			await assert.rejects(waitForAgentBrowserResult({
-				describe: "same-page snapshot", sessionFile, timeoutMs: 20, sinceCount: 1,
-				predicate: (result) => result.toolCallId === successfulSnapshot.toolCallId,
-			}), /Unexpected agent_browser result.*call_1423577b6db24f3b9b3c6637.*category failure\/tab-drift/);
+			await writeFile(
+				sessionFile,
+				lifecycleResultLine(successfulSnapshot) +
+					lifecycleResultLine(failedResumeSnapshot) +
+					(laterSuccess ? lifecycleResultLine(successfulSnapshot) : ""),
+			);
+			await assert.rejects(
+				waitForAgentBrowserResult({
+					describe: "same-page snapshot",
+					sessionFile,
+					timeoutMs: 20,
+					sinceCount: 1,
+					predicate: (result) => result.toolCallId === successfulSnapshot.toolCallId,
+				}),
+				/Unexpected agent_browser result.*call_1423577b6db24f3b9b3c6637.*category failure\/tab-drift/,
+			);
 		} finally {
 			await rm(directory, { force: true, recursive: true });
 		}
@@ -261,10 +420,18 @@ test("lifecycle wait validates the completed row outside polling's exception han
 	const sessionFile = join(directory, "session.jsonl");
 	try {
 		await writeFile(sessionFile, lifecycleResultLine(failedResumeSnapshot));
-		await assert.rejects(waitForAgentBrowserResult({
-			describe: "throwing assertion", sessionFile, timeoutMs: 20, sinceCount: 0,
-			predicate: () => { throw new Error("stage assertion failed"); },
-		}), /^Error: stage assertion failed$/);
+		await assert.rejects(
+			waitForAgentBrowserResult({
+				describe: "throwing assertion",
+				sessionFile,
+				timeoutMs: 20,
+				sinceCount: 0,
+				predicate: () => {
+					throw new Error("stage assertion failed");
+				},
+			}),
+			/^Error: stage assertion failed$/,
+		);
 	} finally {
 		await rm(directory, { force: true, recursive: true });
 	}
@@ -274,9 +441,22 @@ test("lifecycle wait discovers the initial transcript for observed open validati
 	const directory = await mkdtemp(join(tmpdir(), "piab-lifecycle-results-"));
 	const sessionFile = join(directory, "session.jsonl");
 	try {
-		await writeFile(sessionFile, lifecycleResultLine({ isError: false, details: { command: "open", resultCategory: "success", data: { url: "https://react.dev/" } } }));
+		await writeFile(
+			sessionFile,
+			lifecycleResultLine({
+				isError: false,
+				details: {
+					command: "open",
+					resultCategory: "success",
+					data: { url: "https://react.dev/" },
+				},
+			}),
+		);
 		const opened = await waitForAgentBrowserResult({
-			describe: "initial open", sessionDir: directory, timeoutMs: 2000, sinceCount: 0,
+			describe: "initial open",
+			sessionDir: directory,
+			timeoutMs: 2000,
+			sinceCount: 0,
 			predicate: (result) => matchesSuccessfulPageResult(result, "open", "https://react.dev/"),
 		});
 		// Native find may return mixed separators; assert the discovered file's identity, not its spelling.
@@ -292,10 +472,20 @@ test("lifecycle wait accepts a newly appended expected QA failure using the orig
 	const sessionFile = join(directory, "session.jsonl");
 	try {
 		await writeFile(sessionFile, "");
-		const qaFailure = { toolCallId: "expected-qa-failure", isError: true, details: { resultCategory: "failure", failureCategory: "qa-failure" } };
+		const qaFailure = {
+			toolCallId: "expected-qa-failure",
+			isError: true,
+			details: { resultCategory: "failure", failureCategory: "qa-failure" },
+		};
 		const waiting = waitForAgentBrowserResult({
-			describe: "QA failure patch", sessionFile, timeoutMs: 2000, sinceCount: 0,
-			predicate: (result) => result?.details?.failureCategory === "qa-failure" && result?.details?.resultCategory === "failure" && result?.isError === true,
+			describe: "QA failure patch",
+			sessionFile,
+			timeoutMs: 2000,
+			sinceCount: 0,
+			predicate: (result) =>
+				result?.details?.failureCategory === "qa-failure" &&
+				result?.details?.resultCategory === "failure" &&
+				result?.isError === true,
 		});
 		await appendFile(sessionFile, lifecycleResultLine(qaFailure));
 		assert.equal((await waiting).result.toolCallId, qaFailure.toolCallId);
@@ -322,13 +512,23 @@ test("injectLifecycleSentinelSource inserts and replaces one command inside the 
 	const directory = await mkdtemp(join(tmpdir(), "piab-lifecycle-sentinel-"));
 	const checkPath = join(directory, "index.mjs");
 	try {
-		const source = await readFile(new URL("../dist/extensions/agent-browser/index.js", import.meta.url), "utf8");
-		const sentinelBlock = /\n\t\/\/ PIAB_LIFECYCLE_SENTINEL_START[\s\S]*?\n\t\/\/ PIAB_LIFECYCLE_SENTINEL_END\n/;
+		const source = await readFile(
+			new URL("../dist/extensions/agent-browser/index.js", import.meta.url),
+			"utf8",
+		);
+		const sentinelBlock =
+			/\n\t\/\/ PIAB_LIFECYCLE_SENTINEL_START[\s\S]*?\n\t\/\/ PIAB_LIFECYCLE_SENTINEL_END\n/;
 		let injected = source;
 		for (const token of ["v1", "v2"]) {
 			injected = injectLifecycleSentinelSource(injected, token);
-			assert.match(injected, new RegExp(`pi\\.registerCommand\\("piab-lifecycle-sentinel-${token}"`));
-			assert.match(injected, new RegExp(`pi\\.appendEntry\\("piab-lifecycle-sentinel", \\{ token: "${token}" \\}\\);`));
+			assert.match(
+				injected,
+				new RegExp(`pi\\.registerCommand\\("piab-lifecycle-sentinel-${token}"`),
+			);
+			assert.match(
+				injected,
+				new RegExp(`pi\\.appendEntry\\("piab-lifecycle-sentinel", \\{ token: "${token}" \\}\\);`),
+			);
 			assert.equal(injected.replace(sentinelBlock, ""), source);
 			assert.equal((injected.match(/PIAB_LIFECYCLE_SENTINEL_START/g) ?? []).length, 1);
 			assert.equal((injected.match(/PIAB_LIFECYCLE_SENTINEL_END/g) ?? []).length, 1);

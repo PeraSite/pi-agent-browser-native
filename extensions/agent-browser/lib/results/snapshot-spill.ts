@@ -26,10 +26,17 @@ export async function writeSnapshotSpillFile(
 		suffix: ".json",
 	};
 	if (persistentArtifactStore) {
-		const result = await writePersistentSessionArtifactFile({ ...options, store: persistentArtifactStore });
+		const result = await writePersistentSessionArtifactFile({
+			...options,
+			store: persistentArtifactStore,
+		});
 		return { ...result, storageScope: "persistent-session" };
 	}
-	return { evictedArtifacts: [], path: await writeSecureTempFile(options), storageScope: "process-temp" };
+	return {
+		evictedArtifacts: [],
+		path: await writeSecureTempFile(options),
+		storageScope: "process-temp",
+	};
 }
 
 export function applySnapshotArtifactManifest(options: {
@@ -38,7 +45,9 @@ export function applySnapshotArtifactManifest(options: {
 	fullOutputPath?: string;
 	spill?: SnapshotSpillWriteResult;
 }): { artifactManifest?: SessionArtifactManifest; artifactRetentionSummary?: string } {
-	if (!options.fullOutputPath || !options.spill) return {};
+	if (!options.fullOutputPath || !options.spill) {
+		return {};
+	}
 	const nowMs = Date.now();
 	const entries: SessionArtifactManifestEntry[] = [
 		{
@@ -51,6 +60,15 @@ export function applySnapshotArtifactManifest(options: {
 		},
 		...buildEvictedSessionArtifactEntries(options.spill.evictedArtifacts, nowMs),
 	];
-	const artifactManifest = mergeSessionArtifactManifest({ base: options.baseManifest, entries, nowMs });
-	return artifactManifest ? { artifactManifest, artifactRetentionSummary: formatSessionArtifactRetentionSummary(artifactManifest) } : {};
+	const artifactManifest = mergeSessionArtifactManifest({
+		base: options.baseManifest,
+		entries,
+		nowMs,
+	});
+	return artifactManifest
+		? {
+				artifactManifest,
+				artifactRetentionSummary: formatSessionArtifactRetentionSummary(artifactManifest),
+			}
+		: {};
 }

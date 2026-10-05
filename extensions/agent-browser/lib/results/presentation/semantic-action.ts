@@ -51,9 +51,15 @@ function formatSemanticActionCompactLine(compiled: CompiledAgentBrowserSemanticA
 function resolveSemanticPresentationCommand(
 	compiled: CompiledAgentBrowserSemanticAction | undefined,
 ): string | undefined {
-	if (!compiled || !SEMANTIC_PRESENTATION_ACTIONS.has(compiled.action)) return undefined;
-	if (compiled.action === "select") return "select";
-	if (isCompiledSemanticActionFindCommand(compiled)) return compiled.action;
+	if (!compiled || !SEMANTIC_PRESENTATION_ACTIONS.has(compiled.action)) {
+		return undefined;
+	}
+	if (compiled.action === "select") {
+		return "select";
+	}
+	if (isCompiledSemanticActionFindCommand(compiled)) {
+		return compiled.action;
+	}
 	return undefined;
 }
 
@@ -62,7 +68,9 @@ export function resolvePresentationCommandInfo(
 	compiledSemanticAction?: CompiledAgentBrowserSemanticAction,
 ): CommandInfo {
 	const presentationCommand = resolveSemanticPresentationCommand(compiledSemanticAction);
-	if (!presentationCommand) return commandInfo;
+	if (!presentationCommand) {
+		return commandInfo;
+	}
 	return { ...commandInfo, command: presentationCommand };
 }
 
@@ -70,8 +78,12 @@ export function shouldCaptureSemanticActionNavigationSummary(
 	compiled: CompiledAgentBrowserSemanticAction | undefined,
 	data: unknown,
 ): boolean {
-	if (!compiled || !SEMANTIC_NAVIGATION_PROBE_ACTIONS.has(compiled.action)) return false;
-	if (!isCompiledSemanticActionFindCommand(compiled)) return false;
+	if (!compiled || !SEMANTIC_NAVIGATION_PROBE_ACTIONS.has(compiled.action)) {
+		return false;
+	}
+	if (!isCompiledSemanticActionFindCommand(compiled)) {
+		return false;
+	}
 	return !isRecord(data) || (typeof data.title !== "string" && typeof data.url !== "string");
 }
 
@@ -80,17 +92,23 @@ export function formatSemanticActionPresentationText(
 	data: Record<string, unknown>,
 ): string | undefined {
 	const presentationCommand = resolveSemanticPresentationCommand(compiled);
-	if (!presentationCommand) return undefined;
+	if (!presentationCommand) {
+		return undefined;
+	}
 
 	const actionLine = formatSemanticActionCompactLine(compiled);
 	const navigationSummary = getNavigationSummary(data);
 	if (navigationSummary && isNavigationObservableCommand(presentationCommand)) {
 		const navigationText = formatNavigationSummary(navigationSummary);
-		if (navigationText) return `${actionLine}\n\nCurrent page:\n${navigationText}`;
+		if (navigationText) {
+			return `${actionLine}\n\nCurrent page:\n${navigationText}`;
+		}
 	}
 
 	const pageSummary = getPageSummary(data);
-	if (pageSummary) return `${actionLine}\n\nCurrent page:\n${redactModelFacingText(pageSummary)}`;
+	if (pageSummary) {
+		return `${actionLine}\n\nCurrent page:\n${redactModelFacingText(pageSummary)}`;
+	}
 
 	return actionLine;
 }
@@ -100,7 +118,9 @@ export function formatSemanticActionPresentationSummary(
 	data: Record<string, unknown>,
 ): string | undefined {
 	const presentationCommand = resolveSemanticPresentationCommand(compiled);
-	if (!presentationCommand) return undefined;
+	if (!presentationCommand) {
+		return undefined;
+	}
 
 	const navigationSummary = getNavigationSummary(data);
 	if (navigationSummary && isNavigationObservableCommand(presentationCommand)) {
@@ -111,7 +131,9 @@ export function formatSemanticActionPresentationSummary(
 	}
 
 	const pageSummary = getPageSummary(data);
-	if (pageSummary) return `${presentationCommand} → ${pageSummary.split("\n", 1)[0] ?? pageSummary}`;
+	if (pageSummary) {
+		return `${presentationCommand} → ${pageSummary.split("\n", 1)[0] ?? pageSummary}`;
+	}
 
 	return `${presentationCommand} → ${formatSemanticActionTarget(compiled)}`;
 }

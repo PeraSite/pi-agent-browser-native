@@ -56,22 +56,30 @@ function parseArgs(argv = process.argv.slice(2)) {
 	const options = { json: false, samples: DEFAULT_SAMPLES, showHelp: false };
 	for (let index = 0; index < argv.length; index += 1) {
 		const arg = argv[index];
-		if (arg === "-h" || arg === "--help") return { ...options, showHelp: true };
+		if (arg === "-h" || arg === "--help") {
+			return { ...options, showHelp: true };
+		}
 		if (arg === "--json") {
 			options.json = true;
 			continue;
 		}
 		if (arg === "--samples") {
 			const value = argv[index + 1];
-			if (!value || value.startsWith("-")) throw new UsageError("--samples requires a positive integer.");
+			if (!value || value.startsWith("-")) {
+				throw new UsageError("--samples requires a positive integer.");
+			}
 			const parsed = Number(value);
-			if (!Number.isInteger(parsed) || parsed <= 0) throw new UsageError("--samples requires a positive integer.");
+			if (!Number.isInteger(parsed) || parsed <= 0) {
+				throw new UsageError("--samples requires a positive integer.");
+			}
 			options.samples = parsed;
 			index += 1;
 			continue;
 		}
 		if (arg === "--timeout-ms") {
-			throw new UsageError("--timeout-ms was removed: startup-profile no longer launches full Pi/tmux sessions.");
+			throw new UsageError(
+				"--timeout-ms was removed: startup-profile no longer launches full Pi/tmux sessions.",
+			);
 		}
 		throw new UsageError(`Unknown option: ${arg}`);
 	}
@@ -98,15 +106,25 @@ async function readPackageEntrypoint() {
 async function measureDirectImportSamples(entrypoint, sampleCount) {
 	const samples = [];
 	for (let index = 0; index < sampleCount; index += 1) {
-		samples.push({ ...await measureColdStartup(entrypoint, repoRoot), sampleIndex: index + 1, ok: true });
+		samples.push({
+			...(await measureColdStartup(entrypoint, repoRoot)),
+			sampleIndex: index + 1,
+			ok: true,
+		});
 	}
 	return samples;
 }
 
 function summarize(samples) {
-	const values = samples.filter((sample) => sample.ok).map((sample) => sample.totalMs).sort((a, b) => a - b);
-	if (values.length === 0) return { n: 0 };
-	const percentile = (p) => values[Math.min(values.length - 1, Math.max(0, Math.ceil((p / 100) * values.length) - 1))];
+	const values = samples
+		.filter((sample) => sample.ok)
+		.map((sample) => sample.totalMs)
+		.sort((a, b) => a - b);
+	if (values.length === 0) {
+		return { n: 0 };
+	}
+	const percentile = (p) =>
+		values[Math.min(values.length - 1, Math.max(0, Math.ceil((p / 100) * values.length) - 1))];
 	return {
 		budgetMs: DIRECT_IMPORT_BUDGET_MS,
 		maxMs: values.at(-1),
@@ -144,7 +162,9 @@ async function main(argv = process.argv.slice(2)) {
 	const directImportSamples = await measureDirectImportSamples(packageEntrypoint, options.samples);
 	const directSummary = summarize(directImportSamples);
 	if (!directSummary.withinBudget) {
-		throw new Error(`Direct startup exceeded ${DIRECT_IMPORT_BUDGET_MS}ms budget: max ${directSummary.maxMs.toFixed(1)}ms.`);
+		throw new Error(
+			`Direct startup exceeded ${DIRECT_IMPORT_BUDGET_MS}ms budget: max ${directSummary.maxMs.toFixed(1)}ms.`,
+		);
 	}
 	const firstSample = directImportSamples[0] ?? { events: 0, tools: [] };
 	const report = {

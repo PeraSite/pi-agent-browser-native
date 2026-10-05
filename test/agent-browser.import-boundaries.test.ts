@@ -5,7 +5,8 @@ import test from "node:test";
 
 // Runtime module edges only: `import`/`export` ... from statements and bare side-effect imports.
 // `type`-only edges are erased at compile time and cannot create runtime cycles, so they are skipped.
-const IMPORT_SPECIFIER_PATTERN = /\b(?:import|export)\s*(type\s+)?[^;'"()]*?["'](\.{1,2}\/[^"']+)["']/g;
+const IMPORT_SPECIFIER_PATTERN =
+	/\b(?:import|export)\s*(type\s+)?[^;'"()]*?["'](\.{1,2}\/[^"']+)["']/g;
 
 async function collectTypeScriptFiles(root: string): Promise<string[]> {
 	const entries = await readdir(root, { withFileTypes: true });
@@ -21,7 +22,11 @@ async function collectTypeScriptFiles(root: string): Promise<string[]> {
 	return files;
 }
 
-function resolveLocalTypeScriptImport(fromFile: string, specifier: string, knownFiles: Set<string>): string | undefined {
+function resolveLocalTypeScriptImport(
+	fromFile: string,
+	specifier: string,
+	knownFiles: Set<string>,
+): string | undefined {
 	const resolved = resolve(dirname(fromFile), specifier);
 	const candidates = resolved.endsWith(".js")
 		? [resolved.slice(0, -3) + ".ts"]
@@ -37,9 +42,13 @@ async function buildImportGraph(root: string): Promise<Map<string, Set<string>>>
 		const text = await readFile(file, "utf8");
 		const imports = new Set<string>();
 		for (const match of text.matchAll(IMPORT_SPECIFIER_PATTERN)) {
-			if (match[1]) continue;
+			if (match[1]) {
+				continue;
+			}
 			const resolved = resolveLocalTypeScriptImport(file, match[2] ?? "", knownFiles);
-			if (resolved) imports.add(resolved);
+			if (resolved) {
+				imports.add(resolved);
+			}
 		}
 		graph.set(file, imports);
 	}
@@ -57,16 +66,22 @@ function findCycles(graph: Map<string, Set<string>>): string[][] {
 			cycles.push(stack.slice(stack.indexOf(file)).concat(file));
 			return;
 		}
-		if (visited.has(file)) return;
+		if (visited.has(file)) {
+			return;
+		}
 		visited.add(file);
 		active.add(file);
 		stack.push(file);
-		for (const imported of graph.get(file) ?? []) visit(imported);
+		for (const imported of graph.get(file) ?? []) {
+			visit(imported);
+		}
 		stack.pop();
 		active.delete(file);
 	}
 
-	for (const file of graph.keys()) visit(file);
+	for (const file of graph.keys()) {
+		visit(file);
+	}
 	return cycles;
 }
 
@@ -76,8 +91,16 @@ test("browser-run orchestration modules stay acyclic", async () => {
 	// Re-export edges in browser-run/index.ts must stay visible to the cycle detector; without them a
 	// cycle routed through a re-export would pass unnoticed.
 	const indexImports = graph.get(resolve(root, "index.ts"));
-	assert.equal(indexImports?.has(resolve(root, "managed-session-daemon-policy.ts")), true, "index.ts re-export edge to managed-session-daemon-policy.ts is not detected");
-	assert.equal(indexImports?.has(resolve(root, "session-state.ts")), true, "index.ts re-export edge to session-state.ts is not detected");
+	assert.equal(
+		indexImports?.has(resolve(root, "managed-session-daemon-policy.ts")),
+		true,
+		"index.ts re-export edge to managed-session-daemon-policy.ts is not detected",
+	);
+	assert.equal(
+		indexImports?.has(resolve(root, "session-state.ts")),
+		true,
+		"index.ts re-export edge to session-state.ts is not detected",
+	);
 	const cycles = findCycles(graph);
 	assert.deepEqual(
 		cycles.map((cycle) => cycle.map((file) => relative(process.cwd(), file))),

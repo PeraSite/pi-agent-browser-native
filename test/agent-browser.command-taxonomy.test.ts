@@ -50,17 +50,111 @@ test("command taxonomy guards exactly the upstream ref-resolving selector comman
 	// Complete guarded set from COMMAND_CAPABILITIES, aliases such as `scrollinto` included. The
 	// unguarded list covers every other command token the wrapper knows, so dropping `guardsPageRefs`
 	// from a real command or adding it to an unrelated one (for example `pdf`) both fail here.
-	const guardedCommands = ["check", "click", "dblclick", "diff", "download", "drag", "fill", "focus", "frame", "get", "highlight", "hover", "is", "screenshot", "scroll", "scrollinto", "scrollintoview", "select", "tap", "type", "uncheck", "upload"];
-	const unguardedCommands = ["a11y", "auth", "back", "batch", "chat", "clipboard", "close", "confirm", "connect", "console", "cookies", "dashboard", "deny", "device", "dialog", "doctor", "errors", "eval", "exit", "find", "forward", "goto", "inspect", "install", "key", "keyboard", "keydown", "keyup", "mcp", "mouse", "navigate", "network", "open", "pdf", "plugin", "plugins", "press", "profiler", "profiles", "pushstate", "quit", "react", "read", "record", "reload", "removeinitscript", "session", "set", "skills", "snapshot", "state", "storage", "stream", "swipe", "tab", "trace", "upgrade", "vitals", "wait", "web-vitals", "webmcp", "window"];
+	const guardedCommands = [
+		"check",
+		"click",
+		"dblclick",
+		"diff",
+		"download",
+		"drag",
+		"fill",
+		"focus",
+		"frame",
+		"get",
+		"highlight",
+		"hover",
+		"is",
+		"screenshot",
+		"scroll",
+		"scrollinto",
+		"scrollintoview",
+		"select",
+		"tap",
+		"type",
+		"uncheck",
+		"upload",
+	];
+	const unguardedCommands = [
+		"a11y",
+		"auth",
+		"back",
+		"batch",
+		"chat",
+		"clipboard",
+		"close",
+		"confirm",
+		"connect",
+		"console",
+		"cookies",
+		"dashboard",
+		"deny",
+		"device",
+		"dialog",
+		"doctor",
+		"errors",
+		"eval",
+		"exit",
+		"find",
+		"forward",
+		"goto",
+		"inspect",
+		"install",
+		"key",
+		"keyboard",
+		"keydown",
+		"keyup",
+		"mcp",
+		"mouse",
+		"navigate",
+		"network",
+		"open",
+		"pdf",
+		"plugin",
+		"plugins",
+		"press",
+		"profiler",
+		"profiles",
+		"pushstate",
+		"quit",
+		"react",
+		"read",
+		"record",
+		"reload",
+		"removeinitscript",
+		"session",
+		"set",
+		"skills",
+		"snapshot",
+		"state",
+		"storage",
+		"stream",
+		"swipe",
+		"tab",
+		"trace",
+		"upgrade",
+		"vitals",
+		"wait",
+		"web-vitals",
+		"webmcp",
+		"window",
+	];
 	const knownCommands = [...guardedCommands, ...unguardedCommands];
-	assert.equal(new Set(knownCommands).size, knownCommands.length, "guarded and unguarded lists must stay disjoint");
+	assert.equal(
+		new Set(knownCommands).size,
+		knownCommands.length,
+		"guarded and unguarded lists must stay disjoint",
+	);
 	for (const command of knownCommands) {
 		assert.equal(isKnownCommandToken(command), true, `${command} is not a known command token`);
 	}
 	// diff guarding is deliberately command-level: diff screenshot resolves refs while diff snapshot's
 	// selector is CSS-only, but the wrapper's stale-ref guidance is a clearer failure than upstream's
 	// invalid-selector error and subcommand precision buys nothing observable.
-	assert.deepEqual(knownCommands.filter(isRefGuardedCommand), guardedCommands, "guarded set must match the complete ref-resolving list");
+	assert.deepEqual(
+		knownCommands.filter(isRefGuardedCommand),
+		guardedCommands,
+		"guarded set must match the complete ref-resolving list",
+	);
 	// Upstream passes these selectors/operands through literally and never resolves @e refs for them,
 	// so guarding would falsely reject literal tokens such as `wait --text @e1` or `find text @e1 click`.
 	for (const command of ["a11y", "find", "wait"]) {
@@ -79,13 +173,33 @@ test("WebMCP mutation commands invalidate refs while list remains read-only", ()
 
 test("recording FPS without a URL preserves restart refs", () => {
 	// `out.webm` is the bare path-operand form without Chromium-style flags.
-	for (const operands of [["take.webm", "--fps", "30"], ["--fps", "+24", "take.webm"], ["--fps", "12", "take.webm", "--fps", "24"], ["out.webm"]]) {
+	for (const operands of [
+		["take.webm", "--fps", "30"],
+		["--fps", "+24", "take.webm"],
+		["--fps", "12", "take.webm", "--fps", "24"],
+		["out.webm"],
+	]) {
 		assert.equal(isRecordPageTransitionCommand(["record", "restart", ...operands]), false);
 		assert.equal(isRefInvalidatingBatchCommand(["record", "restart", ...operands]), false);
-		assert.equal(isRecordPageTransitionCommand(["record", "start", ...operands]), true, "older native starts replace the page even on failure");
-		assert.equal(isRefInvalidatingBatchCommand(["record", "start", ...operands]), true, "older native starts still need conservative ref protection");
-		assert.equal(isRecordPageTransitionCommand(["record", "restart", ...operands, "https://example.com"]), true);
-		assert.equal(isRefInvalidatingBatchCommand(["record", "restart", ...operands, "https://example.com"]), true, "a navigating restart replaces the page");
+		assert.equal(
+			isRecordPageTransitionCommand(["record", "start", ...operands]),
+			true,
+			"older native starts replace the page even on failure",
+		);
+		assert.equal(
+			isRefInvalidatingBatchCommand(["record", "start", ...operands]),
+			true,
+			"older native starts still need conservative ref protection",
+		);
+		assert.equal(
+			isRecordPageTransitionCommand(["record", "restart", ...operands, "https://example.com"]),
+			true,
+		);
+		assert.equal(
+			isRefInvalidatingBatchCommand(["record", "restart", ...operands, "https://example.com"]),
+			true,
+			"a navigating restart replaces the page",
+		);
 	}
 	assert.equal(isRecordPageTransitionCommand(["record", "stop"]), false);
 	assert.equal(isRefInvalidatingBatchCommand(["record", "stop"]), false);

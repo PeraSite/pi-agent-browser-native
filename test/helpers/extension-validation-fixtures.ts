@@ -11,7 +11,10 @@ import { join } from "node:path";
 import { Theme } from "@earendil-works/pi-coding-agent";
 
 import type { ElectronAppDiscovery } from "../../extensions/agent-browser/lib/electron/discovery.js";
-import type { AgentBrowserToolParams, AgentBrowserToolRenderContext } from "./agent-browser-harness.js";
+import type {
+	AgentBrowserToolParams,
+	AgentBrowserToolRenderContext,
+} from "./agent-browser-harness.js";
 
 type RenderThemeColor = Parameters<Theme["fg"]>[0];
 type RenderThemeBg = Parameters<Theme["bg"]>[0];
@@ -80,7 +83,9 @@ const PLAIN_RENDER_BG_COLORS = {
 
 class PlainRenderTheme extends Theme {
 	constructor() {
-		super(PLAIN_RENDER_FG_COLORS, PLAIN_RENDER_BG_COLORS, "truecolor", { name: "plain-render-test" });
+		super(PLAIN_RENDER_FG_COLORS, PLAIN_RENDER_BG_COLORS, "truecolor", {
+			name: "plain-render-test",
+		});
 	}
 
 	override fg(color: RenderThemeColor, text: string): string {
@@ -145,13 +150,17 @@ export async function writeFakeMacElectronApp(options: {
 	const executableName = options.executableName ?? options.name;
 	const appPath = join(options.applicationsDir, `${options.name}.app`);
 	const executablePath = join(appPath, "Contents", "MacOS", executableName);
-	await mkdir(join(appPath, "Contents", "Frameworks", "Electron Framework.framework"), { recursive: true });
+	await mkdir(join(appPath, "Contents", "Frameworks", "Electron Framework.framework"), {
+		recursive: true,
+	});
 	await mkdir(join(appPath, "Contents", "Resources"), { recursive: true });
 	await mkdir(join(appPath, "Contents", "MacOS"), { recursive: true });
 	await writeFile(join(appPath, "Contents", "Resources", "app.asar"), "asar", "utf8");
 	await writeFile(executablePath, "#!/bin/sh\n", "utf8");
 	await chmod(executablePath, 0o755);
-	await writeFile(join(appPath, "Contents", "Info.plist"), `<?xml version="1.0" encoding="UTF-8"?>
+	await writeFile(
+		join(appPath, "Contents", "Info.plist"),
+		`<?xml version="1.0" encoding="UTF-8"?>
 <plist version="1.0">
 <dict>
 	<key>CFBundleDisplayName</key><string>${options.name}</string>
@@ -160,7 +169,9 @@ export async function writeFakeMacElectronApp(options: {
 	<key>CFBundleExecutable</key><string>${executableName}</string>
 </dict>
 </plist>
-`, "utf8");
+`,
+		"utf8",
+	);
 	return { appPath, executablePath };
 }
 
@@ -180,7 +191,9 @@ export function electronAppNames(apps: ElectronAppDiscovery[]): string[] {
 }
 
 export function isTestPidAlive(pid: number | undefined): boolean {
-	if (!pid) return false;
+	if (!pid) {
+		return false;
+	}
 	try {
 		process.kill(pid, 0);
 		return true;
@@ -193,23 +206,32 @@ export function sleepMs(ms: number): Promise<void> {
 	return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-export async function waitForTestPidExit(pid: number | undefined, timeoutMs = 2_000): Promise<boolean> {
+export async function waitForTestPidExit(
+	pid: number | undefined,
+	timeoutMs = 2_000,
+): Promise<boolean> {
 	const deadlineMs = Date.now() + timeoutMs;
 	while (Date.now() <= deadlineMs) {
-		if (!isTestPidAlive(pid)) return true;
+		if (!isTestPidAlive(pid)) {
+			return true;
+		}
 		await sleepMs(50);
 	}
 	return !isTestPidAlive(pid);
 }
 
 export async function stopTestPid(pid: number | undefined): Promise<void> {
-	if (!pid || !isTestPidAlive(pid)) return;
+	if (!pid || !isTestPidAlive(pid)) {
+		return;
+	}
 	try {
 		process.kill(pid, "SIGTERM");
 	} catch {
 		return;
 	}
-	if (await waitForTestPidExit(pid, 1_000)) return;
+	if (await waitForTestPidExit(pid, 1_000)) {
+		return;
+	}
 	try {
 		process.kill(pid, "SIGKILL");
 	} catch {
@@ -226,12 +248,18 @@ interface FakeElectronLaunchLogEntry {
 	userDataDir: string;
 }
 
-export async function readOptionalFakeElectronLaunchLog(path: string): Promise<FakeElectronLaunchLogEntry[]> {
+export async function readOptionalFakeElectronLaunchLog(
+	path: string,
+): Promise<FakeElectronLaunchLogEntry[]> {
 	try {
 		const text = (await readFile(path, "utf8")).trim();
-		return text.length > 0 ? text.split("\n").map((line) => JSON.parse(line) as FakeElectronLaunchLogEntry) : [];
+		return text.length > 0
+			? text.split("\n").map((line) => JSON.parse(line) as FakeElectronLaunchLogEntry)
+			: [];
 	} catch (error) {
-		if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+		if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+			return [];
+		}
 		throw error;
 	}
 }
@@ -271,7 +299,9 @@ export async function writeFakeLaunchableElectronApp(options: {
 }): Promise<Awaited<ReturnType<typeof writeFakeElectronProcessApp>>> {
 	const app = await writeFakeElectronProcessApp(options);
 	const mode = options.mode ?? "normal";
-	await writeFile(app.scriptPath, `#!/usr/bin/env node
+	await writeFile(
+		app.scriptPath,
+		`#!/usr/bin/env node
 const fs = require("node:fs");
 const http = require("node:http");
 const path = require("node:path");
@@ -292,13 +322,19 @@ const server = http.createServer((request, response) => {
 			return;
 		}
 	response.writeHead(200, { "content-type": "application/json" });
-	response.end(JSON.stringify({ Browser: "Electron/Fake", "Protocol-Version": "1.3", "User-Agent": "FakeElectron", webSocketDebuggerUrl: ` + "`ws://127.0.0.1:${port}/devtools/browser/fake`" + ` }));
+	response.end(JSON.stringify({ Browser: "Electron/Fake", "Protocol-Version": "1.3", "User-Agent": "FakeElectron", webSocketDebuggerUrl: ` +
+			"`ws://127.0.0.1:${port}/devtools/browser/fake`" +
+			` }));
 	return;
 	}
 	if (request.url === "/json/list") {
 	response.writeHead(200, { "content-type": "application/json" });
-	const targets = [{ id: "page-1", type: "page", title: "Demo Electron", url: "app://demo", webSocketDebuggerUrl: ` + "`ws://127.0.0.1:${port}/devtools/page/page-1`" + ` }];
-	if (includeWebview) targets.push({ id: "webview-1", type: "webview", title: "Demo Webview", url: "app://webview", webSocketDebuggerUrl: ` + "`ws://127.0.0.1:${port}/devtools/page/webview-1`" + ` });
+	const targets = [{ id: "page-1", type: "page", title: "Demo Electron", url: "app://demo", webSocketDebuggerUrl: ` +
+			"`ws://127.0.0.1:${port}/devtools/page/page-1`" +
+			` }];
+	if (includeWebview) targets.push({ id: "webview-1", type: "webview", title: "Demo Webview", url: "app://webview", webSocketDebuggerUrl: ` +
+			"`ws://127.0.0.1:${port}/devtools/page/webview-1`" +
+			` });
 	response.end(JSON.stringify(targets));
 	return;
 	}
@@ -313,19 +349,24 @@ server.listen(0, "127.0.0.1", () => {
 const shutdown = () => server.close(() => process.exit(0));
 process.on("SIGTERM", shutdown);
 process.on("SIGINT", shutdown);
-`, "utf8");
+`,
+		"utf8",
+	);
 	await chmod(app.executablePath, 0o755);
 	return app;
 }
 
-export function fakeAgentBrowserLifecycleScript(logPath: string, options: {
-	sessionTitle?: string;
-	sessionUrl?: string;
-	snapshotTitle?: string;
-	snapshotUrl?: string;
-	tabTitle?: string;
-	tabUrl?: string;
-} = {}): string {
+export function fakeAgentBrowserLifecycleScript(
+	logPath: string,
+	options: {
+		sessionTitle?: string;
+		sessionUrl?: string;
+		snapshotTitle?: string;
+		snapshotUrl?: string;
+		tabTitle?: string;
+		tabUrl?: string;
+	} = {},
+): string {
 	const sessionTitle = options.sessionTitle ?? "Demo Electron";
 	const sessionUrl = options.sessionUrl ?? "app://demo";
 	const snapshotTitle = options.snapshotTitle ?? "Demo Electron";

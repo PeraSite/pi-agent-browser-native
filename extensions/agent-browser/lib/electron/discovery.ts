@@ -10,7 +10,17 @@ export const ELECTRON_DISCOVERY_MAX_RESULTS = 200;
 
 const LINUX_ELECTRON_CANDIDATE_MAX_DEPTH = 7;
 const LINUX_ELECTRON_CANDIDATE_MAX_ENTRIES = 5_000;
-const LINUX_NON_EXECUTABLE_CANDIDATE_EXTENSIONS = new Set([".asar", ".dat", ".desktop", ".json", ".md", ".pak", ".png", ".so", ".txt"]);
+const LINUX_NON_EXECUTABLE_CANDIDATE_EXTENSIONS = new Set([
+	".asar",
+	".dat",
+	".desktop",
+	".json",
+	".md",
+	".pak",
+	".png",
+	".so",
+	".txt",
+]);
 
 export type ElectronDiscoveryPlatform = "darwin" | "linux" | "win32";
 
@@ -87,28 +97,78 @@ interface LinuxExecutableResolution {
 
 const ELECTRON_SENSITIVE_APP_CATEGORY_PATTERNS: Array<{ category: string; patterns: RegExp[] }> = [
 	{ category: "notes", patterns: [/\bobsidian\b/i, /\bnotion\b/i, /\blogseq\b/i] },
-	{ category: "chat", patterns: [/\bslack\b/i, /\bdiscord\b/i, /\bteams\b/i, /\bsignal\b/i, /\btelegram\b/i, /\bwhatsapp\b/i] },
-	{ category: "mail", patterns: [/\bmail\b/i, /\boutlook\b/i, /\bthunderbird\b/i, /\bspark\b/i, /\bproton[- ]?mail\b/i] },
-	{ category: "developer-workspace", patterns: [/\bvisual studio code\b/i, /\bvs ?code\b/i, /\bcode - insiders\b/i, /^code$/i, /\bcursor\b/i, /\bwindsurf\b/i] },
-	{ category: "passwords-auth", patterns: [/\b1password\b/i, /\bbitwarden\b/i, /\blastpass\b/i, /\bdashlane\b/i, /\bauthy\b/i, /\bauthenticator\b/i, /\bkeepass\b/i] },
+	{
+		category: "chat",
+		patterns: [
+			/\bslack\b/i,
+			/\bdiscord\b/i,
+			/\bteams\b/i,
+			/\bsignal\b/i,
+			/\btelegram\b/i,
+			/\bwhatsapp\b/i,
+		],
+	},
+	{
+		category: "mail",
+		patterns: [
+			/\bmail\b/i,
+			/\boutlook\b/i,
+			/\bthunderbird\b/i,
+			/\bspark\b/i,
+			/\bproton[- ]?mail\b/i,
+		],
+	},
+	{
+		category: "developer-workspace",
+		patterns: [
+			/\bvisual studio code\b/i,
+			/\bvs ?code\b/i,
+			/\bcode - insiders\b/i,
+			/^code$/i,
+			/\bcursor\b/i,
+			/\bwindsurf\b/i,
+		],
+	},
+	{
+		category: "passwords-auth",
+		patterns: [
+			/\b1password\b/i,
+			/\bbitwarden\b/i,
+			/\blastpass\b/i,
+			/\bdashlane\b/i,
+			/\bauthy\b/i,
+			/\bauthenticator\b/i,
+			/\bkeepass\b/i,
+		],
+	},
 ];
 
 function normalizeSensitivityValue(value: string | undefined): string | undefined {
-	return value?.trim().replace(/[_./\\-]+/g, " ").replace(/\s+/g, " ") || undefined;
+	return (
+		value
+			?.trim()
+			.replace(/[_./\\-]+/g, " ")
+			.replace(/\s+/g, " ") || undefined
+	);
 }
 
-export function getElectronAppSensitivity(app: ElectronAppDiscovery): ElectronAppSensitivity | undefined {
+export function getElectronAppSensitivity(
+	app: ElectronAppDiscovery,
+): ElectronAppSensitivity | undefined {
 	const metadataValues = [app.name, app.bundleId, app.desktopId, app.appPath, app.executablePath]
 		.map(normalizeSensitivityValue)
 		.filter((value): value is string => value !== undefined);
-	const categories = ELECTRON_SENSITIVE_APP_CATEGORY_PATTERNS
-		.filter(({ patterns }) => metadataValues.some((value) => patterns.some((pattern) => pattern.test(value))))
-		.map(({ category }) => category);
-	if (categories.length === 0) return undefined;
+	const categories = ELECTRON_SENSITIVE_APP_CATEGORY_PATTERNS.filter(({ patterns }) =>
+		metadataValues.some((value) => patterns.some((pattern) => pattern.test(value))),
+	).map(({ category }) => category);
+	if (categories.length === 0) {
+		return undefined;
+	}
 	return {
 		categories: [...new Set(categories)].sort(),
 		level: "likely-sensitive",
-		reason: "App name, bundle id, desktop id, or path matched common private-data app patterns; discovery still does not enforce policy.",
+		reason:
+			"App name, bundle id, desktop id, or path matched common private-data app patterns; discovery still does not enforce policy.",
 	};
 }
 
@@ -124,12 +184,18 @@ function normalizeMaxResults(maxResults: number | undefined): number {
 	return Math.min(maxResults, ELECTRON_DISCOVERY_MAX_RESULTS);
 }
 
-function resolveLocations(locations: ElectronDiscoveryScanLocations | undefined): ResolvedElectronDiscoveryLocations {
+function resolveLocations(
+	locations: ElectronDiscoveryScanLocations | undefined,
+): ResolvedElectronDiscoveryLocations {
 	const homeDir = locations?.homeDir ?? homedir();
 	return {
-		darwinApplicationDirectories: locations?.darwinApplicationDirectories ?? ["/Applications", join(homeDir, "Applications")],
+		darwinApplicationDirectories: locations?.darwinApplicationDirectories ?? [
+			"/Applications",
+			join(homeDir, "Applications"),
+		],
 		flatpakSystemAppDirectory: locations?.flatpakSystemAppDirectory ?? "/var/lib/flatpak/app",
-		flatpakUserAppDirectory: locations?.flatpakUserAppDirectory ?? join(homeDir, ".local", "share", "flatpak", "app"),
+		flatpakUserAppDirectory:
+			locations?.flatpakUserAppDirectory ?? join(homeDir, ".local", "share", "flatpak", "app"),
 		homeDir,
 		linuxDesktopDirectories: locations?.linuxDesktopDirectories ?? [
 			join(homeDir, ".local", "share", "applications"),
@@ -163,7 +229,9 @@ async function isFile(path: string): Promise<boolean> {
 async function isExecutableFile(path: string): Promise<boolean> {
 	try {
 		const metadata = await stat(path);
-		if (!metadata.isFile()) return false;
+		if (!metadata.isFile()) {
+			return false;
+		}
 		await access(path, fsConstants.X_OK);
 		return true;
 	} catch {
@@ -193,7 +261,10 @@ function decodeXmlEntities(value: string): string {
 }
 
 function readPlistString(plist: string, key: string): string | undefined {
-	const pattern = new RegExp(`<key>\\s*${escapeRegExp(key)}\\s*</key>\\s*<string>([\\s\\S]*?)</string>`, "i");
+	const pattern = new RegExp(
+		`<key>\\s*${escapeRegExp(key)}\\s*</key>\\s*<string>([\\s\\S]*?)</string>`,
+		"i",
+	);
 	const match = pattern.exec(plist);
 	return match ? decodeXmlEntities(match[1]?.trim() ?? "") : undefined;
 }
@@ -212,11 +283,15 @@ async function readMacInfoPlist(appPath: string): Promise<Record<string, string>
 	}
 }
 
-async function resolveMacExecutablePath(appPath: string, executableName: string | undefined, fallbackName: string): Promise<string | undefined> {
+async function resolveMacExecutablePath(
+	appPath: string,
+	executableName: string | undefined,
+	fallbackName: string,
+): Promise<string | undefined> {
 	const macOsDirectory = join(appPath, "Contents", "MacOS");
 	if (executableName && executableName.trim().length > 0) {
 		const executablePath = join(macOsDirectory, executableName);
-		return await pathExists(executablePath) ? executablePath : undefined;
+		return (await pathExists(executablePath)) ? executablePath : undefined;
 	}
 	try {
 		const entries = await readdir(macOsDirectory, { withFileTypes: true });
@@ -232,13 +307,23 @@ export async function inspectDarwinApp(appPath: string): Promise<ElectronAppDisc
 	const frameworkPath = join(appPath, "Contents", "Frameworks", "Electron Framework.framework");
 	const resourcesPath = join(appPath, "Contents", "Resources");
 	const hasElectronFramework = await isDirectory(frameworkPath);
-	const hasAppPayload = await pathExists(join(resourcesPath, "app.asar")) || await isDirectory(join(resourcesPath, "app"));
-	if (!hasElectronFramework || !hasAppPayload) return undefined;
+	const hasAppPayload =
+		(await pathExists(join(resourcesPath, "app.asar"))) ||
+		(await isDirectory(join(resourcesPath, "app")));
+	if (!hasElectronFramework || !hasAppPayload) {
+		return undefined;
+	}
 
 	const info = await readMacInfoPlist(appPath);
 	const appDirectoryName = basename(appPath, ".app");
-	const executablePath = await resolveMacExecutablePath(appPath, info.CFBundleExecutable, appDirectoryName);
-	if (!executablePath) return undefined;
+	const executablePath = await resolveMacExecutablePath(
+		appPath,
+		info.CFBundleExecutable,
+		appDirectoryName,
+	);
+	if (!executablePath) {
+		return undefined;
+	}
 	const name = info.CFBundleDisplayName || info.CFBundleName || appDirectoryName;
 	return {
 		appPath,
@@ -249,7 +334,9 @@ export async function inspectDarwinApp(appPath: string): Promise<ElectronAppDisc
 	};
 }
 
-async function discoverDarwinApps(locations: ResolvedElectronDiscoveryLocations): Promise<{ apps: ElectronAppDiscovery[]; skippedCount: number }> {
+async function discoverDarwinApps(
+	locations: ResolvedElectronDiscoveryLocations,
+): Promise<{ apps: ElectronAppDiscovery[]; skippedCount: number }> {
 	const apps: ElectronAppDiscovery[] = [];
 	let skippedCount = 0;
 	for (const directory of locations.darwinApplicationDirectories) {
@@ -260,11 +347,15 @@ async function discoverDarwinApps(locations: ResolvedElectronDiscoveryLocations)
 			continue;
 		}
 		for (const entry of entries) {
-			if (!entry.name.endsWith(".app")) continue;
+			if (!entry.name.endsWith(".app")) {
+				continue;
+			}
 			const appPath = join(directory, entry.name);
 			try {
 				const app = await inspectDarwinApp(appPath);
-				if (app) apps.push(app);
+				if (app) {
+					apps.push(app);
+				}
 			} catch {
 				skippedCount += 1;
 			}
@@ -291,23 +382,35 @@ function parseDesktopFile(text: string, filePath: string): LinuxDesktopEntry | u
 	let inDesktopEntry = false;
 	for (const rawLine of text.split(/\r?\n/)) {
 		const line = rawLine.trim();
-		if (line.length === 0 || line.startsWith("#")) continue;
+		if (line.length === 0 || line.startsWith("#")) {
+			continue;
+		}
 		if (line.startsWith("[") && line.endsWith("]")) {
 			inDesktopEntry = line === "[Desktop Entry]";
 			continue;
 		}
-		if (!inDesktopEntry) continue;
+		if (!inDesktopEntry) {
+			continue;
+		}
 		const separatorIndex = line.indexOf("=");
-		if (separatorIndex <= 0) continue;
+		if (separatorIndex <= 0) {
+			continue;
+		}
 		const key = line.slice(0, separatorIndex);
 		const value = unescapeDesktopValue(line.slice(separatorIndex + 1));
 		fields.set(key, value);
 	}
 
-	if (fields.get("Type") !== "Application") return undefined;
-	if (parseDesktopBoolean(fields.get("NoDisplay")) || parseDesktopBoolean(fields.get("Hidden"))) return undefined;
+	if (fields.get("Type") !== "Application") {
+		return undefined;
+	}
+	if (parseDesktopBoolean(fields.get("NoDisplay")) || parseDesktopBoolean(fields.get("Hidden"))) {
+		return undefined;
+	}
 	const exec = fields.get("Exec")?.trim();
-	if (!exec) return undefined;
+	if (!exec) {
+		return undefined;
+	}
 	const desktopId = basename(filePath, ".desktop");
 	return {
 		comment: fields.get("Comment") || undefined,
@@ -363,13 +466,19 @@ function tokenizeDesktopExec(exec: string): string[] {
 		}
 		current += char;
 	}
-	if (escaped) current += "\\";
-	if (current.length > 0) tokens.push(current);
+	if (escaped) {
+		current += "\\";
+	}
+	if (current.length > 0) {
+		tokens.push(current);
+	}
 	return tokens;
 }
 
 function stripEnvLauncher(tokens: string[]): string[] {
-	if (tokens.length === 0 || basename(tokens[0] ?? "") !== "env") return tokens;
+	if (tokens.length === 0 || basename(tokens[0] ?? "") !== "env") {
+		return tokens;
+	}
 	let index = 1;
 	while (index < tokens.length) {
 		const token = tokens[index] ?? "";
@@ -397,13 +506,20 @@ async function directoryContainsChromePak(directory: string): Promise<boolean> {
 
 export async function hasLinuxElectronEvidence(executablePath: string): Promise<boolean> {
 	const resolvedExecutablePath = await resolveRealPath(executablePath);
-	if (!await isExecutableFile(resolvedExecutablePath)) return false;
+	if (!(await isExecutableFile(resolvedExecutablePath))) {
+		return false;
+	}
 	const executableDirectory = dirname(resolvedExecutablePath);
-	if (!await directoryContainsChromePak(executableDirectory)) return false;
+	if (!(await directoryContainsChromePak(executableDirectory))) {
+		return false;
+	}
 	const resourceBases = [executableDirectory, dirname(executableDirectory)];
 	for (const base of resourceBases) {
 		const resourcesDirectory = join(base, "resources");
-		if (await pathExists(join(resourcesDirectory, "app.asar")) || await isDirectory(join(resourcesDirectory, "app"))) {
+		if (
+			(await pathExists(join(resourcesDirectory, "app.asar"))) ||
+			(await isDirectory(join(resourcesDirectory, "app")))
+		) {
 			return true;
 		}
 	}
@@ -411,11 +527,17 @@ export async function hasLinuxElectronEvidence(executablePath: string): Promise<
 }
 
 async function findExecutableInPath(command: string, pathEnv: string): Promise<string | undefined> {
-	if (command.includes("/")) return undefined;
+	if (command.includes("/")) {
+		return undefined;
+	}
 	for (const directory of pathEnv.split(":")) {
-		if (directory.length === 0) continue;
+		if (directory.length === 0) {
+			continue;
+		}
 		const candidate = join(directory, command);
-		if (await isFile(candidate)) return candidate;
+		if (await isFile(candidate)) {
+			return candidate;
+		}
 	}
 	return undefined;
 }
@@ -429,14 +551,24 @@ function isLikelyExecutableCandidate(path: string): boolean {
 	return !LINUX_NON_EXECUTABLE_CANDIDATE_EXTENSIONS.has(extname(path).toLowerCase());
 }
 
-async function findElectronBinaryUnder(root: string, preferredNames: string[]): Promise<string | undefined> {
-	if (!await isDirectory(root)) return undefined;
+async function findElectronBinaryUnder(
+	root: string,
+	preferredNames: string[],
+): Promise<string | undefined> {
+	if (!(await isDirectory(root))) {
+		return undefined;
+	}
 	const preferredNameSet = new Set(preferredNames.filter((name) => name.length > 0));
 	const allFileCandidates: string[] = [];
 	let visitedEntries = 0;
 
 	async function visit(directory: string, depth: number): Promise<string | undefined> {
-		if (depth > LINUX_ELECTRON_CANDIDATE_MAX_DEPTH || visitedEntries >= LINUX_ELECTRON_CANDIDATE_MAX_ENTRIES) return undefined;
+		if (
+			depth > LINUX_ELECTRON_CANDIDATE_MAX_DEPTH ||
+			visitedEntries >= LINUX_ELECTRON_CANDIDATE_MAX_ENTRIES
+		) {
+			return undefined;
+		}
 		let entries: Array<{ isDirectory: () => boolean; isFile: () => boolean; name: string }>;
 		try {
 			entries = await readdir(directory, { withFileTypes: true });
@@ -445,13 +577,19 @@ async function findElectronBinaryUnder(root: string, preferredNames: string[]): 
 		}
 		for (const entry of entries) {
 			visitedEntries += 1;
-			if (visitedEntries > LINUX_ELECTRON_CANDIDATE_MAX_ENTRIES) return undefined;
+			if (visitedEntries > LINUX_ELECTRON_CANDIDATE_MAX_ENTRIES) {
+				return undefined;
+			}
 			const path = join(directory, entry.name);
 			if (entry.isDirectory()) {
 				const found = await visit(path, depth + 1);
-				if (found) return found;
+				if (found) {
+					return found;
+				}
 			} else if (entry.isFile() && isLikelyExecutableCandidate(path)) {
-				if (preferredNameSet.has(entry.name) && await hasLinuxElectronEvidence(path)) return await resolveRealPath(path);
+				if (preferredNameSet.has(entry.name) && (await hasLinuxElectronEvidence(path))) {
+					return await resolveRealPath(path);
+				}
 				allFileCandidates.push(path);
 			}
 		}
@@ -459,9 +597,13 @@ async function findElectronBinaryUnder(root: string, preferredNames: string[]): 
 	}
 
 	const preferredMatch = await visit(root, 0);
-	if (preferredMatch) return preferredMatch;
+	if (preferredMatch) {
+		return preferredMatch;
+	}
 	for (const candidate of allFileCandidates) {
-		if (await hasLinuxElectronEvidence(candidate)) return await resolveRealPath(candidate);
+		if (await hasLinuxElectronEvidence(candidate)) {
+			return await resolveRealPath(candidate);
+		}
 	}
 	return undefined;
 }
@@ -471,12 +613,21 @@ function getSnapCandidateNames(commandName: string, desktopId: string): string[]
 	return [...new Set(names.filter((name) => name.length > 0))];
 }
 
-async function resolveSnapExecutable(commandPath: string, entry: LinuxDesktopEntry, locations: ResolvedElectronDiscoveryLocations): Promise<string | undefined> {
+async function resolveSnapExecutable(
+	commandPath: string,
+	entry: LinuxDesktopEntry,
+	locations: ResolvedElectronDiscoveryLocations,
+): Promise<string | undefined> {
 	const commandName = basename(commandPath);
 	for (const snapName of getSnapCandidateNames(commandName, entry.desktopId)) {
 		const root = join(locations.snapMountDirectory, snapName, "current");
-		const candidate = await findElectronBinaryUnder(root, [commandName, commandName.split(".").at(-1) ?? commandName]);
-		if (candidate) return candidate;
+		const candidate = await findElectronBinaryUnder(root, [
+			commandName,
+			commandName.split(".").at(-1) ?? commandName,
+		]);
+		if (candidate) {
+			return candidate;
+		}
 	}
 	return undefined;
 }
@@ -484,7 +635,9 @@ async function resolveSnapExecutable(commandPath: string, entry: LinuxDesktopEnt
 function getFlatpakAppId(tokens: string[], desktopId: string): string {
 	for (let index = tokens.length - 1; index >= 0; index -= 1) {
 		const token = tokens[index] ?? "";
-		if (!token.startsWith("-") && token.includes(".") && token !== "flatpak") return token;
+		if (!token.startsWith("-") && token.includes(".") && token !== "flatpak") {
+			return token;
+		}
 	}
 	return desktopId;
 }
@@ -492,14 +645,29 @@ function getFlatpakAppId(tokens: string[], desktopId: string): string {
 function getFlatpakCommandName(tokens: string[]): string | undefined {
 	for (let index = 0; index < tokens.length; index += 1) {
 		const token = tokens[index] ?? "";
-		if (token.startsWith("--command=")) return token.slice("--command=".length);
-		if (token === "--command") return tokens[index + 1];
+		if (token.startsWith("--command=")) {
+			return token.slice("--command=".length);
+		}
+		if (token === "--command") {
+			return tokens[index + 1];
+		}
 	}
 	return undefined;
 }
 
-function getFlatpakRoots(entry: LinuxDesktopEntry, locations: ResolvedElectronDiscoveryLocations): string[] {
-	const userExportDirectory = join(locations.homeDir, ".local", "share", "flatpak", "exports", "share", "applications");
+function getFlatpakRoots(
+	entry: LinuxDesktopEntry,
+	locations: ResolvedElectronDiscoveryLocations,
+): string[] {
+	const userExportDirectory = join(
+		locations.homeDir,
+		".local",
+		"share",
+		"flatpak",
+		"exports",
+		"share",
+		"applications",
+	);
 	const systemExportDirectory = "/var/lib/flatpak/exports/share/applications";
 	if (pathIsWithin(entry.filePath, userExportDirectory)) {
 		return [locations.flatpakUserAppDirectory, locations.flatpakSystemAppDirectory];
@@ -510,22 +678,33 @@ function getFlatpakRoots(entry: LinuxDesktopEntry, locations: ResolvedElectronDi
 	return [locations.flatpakUserAppDirectory, locations.flatpakSystemAppDirectory];
 }
 
-async function resolveFlatpakExecutable(tokens: string[], entry: LinuxDesktopEntry, locations: ResolvedElectronDiscoveryLocations): Promise<string | undefined> {
+async function resolveFlatpakExecutable(
+	tokens: string[],
+	entry: LinuxDesktopEntry,
+	locations: ResolvedElectronDiscoveryLocations,
+): Promise<string | undefined> {
 	const appId = getFlatpakAppId(tokens, entry.desktopId);
 	const commandName = getFlatpakCommandName(tokens);
 	const preferredNames = commandName ? [commandName] : [];
 	for (const root of getFlatpakRoots(entry, locations)) {
 		const filesRoot = join(root, appId, "current", "active", "files");
 		const candidate = await findElectronBinaryUnder(filesRoot, preferredNames);
-		if (candidate) return candidate;
+		if (candidate) {
+			return candidate;
+		}
 	}
 	return undefined;
 }
 
-async function resolveLinuxExecutable(entry: LinuxDesktopEntry, locations: ResolvedElectronDiscoveryLocations): Promise<LinuxExecutableResolution | undefined> {
+async function resolveLinuxExecutable(
+	entry: LinuxDesktopEntry,
+	locations: ResolvedElectronDiscoveryLocations,
+): Promise<LinuxExecutableResolution | undefined> {
 	const tokens = stripEnvLauncher(tokenizeDesktopExec(entry.exec));
 	const executableToken = tokens[0];
-	if (!executableToken) return undefined;
+	if (!executableToken) {
+		return undefined;
+	}
 
 	if (basename(executableToken) === "flatpak") {
 		const executablePath = await resolveFlatpakExecutable(tokens, entry, locations);
@@ -535,7 +714,9 @@ async function resolveLinuxExecutable(entry: LinuxDesktopEntry, locations: Resol
 	let executablePath = executableToken;
 	if (!isAbsolute(executablePath)) {
 		const pathExecutable = await findExecutableInPath(executablePath, locations.pathEnv);
-		if (!pathExecutable) return undefined;
+		if (!pathExecutable) {
+			return undefined;
+		}
 		executablePath = pathExecutable;
 	}
 
@@ -547,7 +728,10 @@ async function resolveLinuxExecutable(entry: LinuxDesktopEntry, locations: Resol
 	return { executablePath: await resolveRealPath(executablePath), packageSource: "desktop" };
 }
 
-async function inspectLinuxDesktopFile(filePath: string, locations: ResolvedElectronDiscoveryLocations): Promise<ElectronAppDiscovery | undefined> {
+async function inspectLinuxDesktopFile(
+	filePath: string,
+	locations: ResolvedElectronDiscoveryLocations,
+): Promise<ElectronAppDiscovery | undefined> {
 	let text: string;
 	try {
 		text = await readFile(filePath, "utf8");
@@ -555,10 +739,16 @@ async function inspectLinuxDesktopFile(filePath: string, locations: ResolvedElec
 		return undefined;
 	}
 	const entry = parseDesktopFile(text, filePath);
-	if (!entry) return undefined;
+	if (!entry) {
+		return undefined;
+	}
 	const resolution = await resolveLinuxExecutable(entry, locations);
-	if (!resolution) return undefined;
-	if (!await hasLinuxElectronEvidence(resolution.executablePath)) return undefined;
+	if (!resolution) {
+		return undefined;
+	}
+	if (!(await hasLinuxElectronEvidence(resolution.executablePath))) {
+		return undefined;
+	}
 	return {
 		comment: entry.comment,
 		desktopId: entry.desktopId,
@@ -570,7 +760,9 @@ async function inspectLinuxDesktopFile(filePath: string, locations: ResolvedElec
 	};
 }
 
-async function discoverLinuxApps(locations: ResolvedElectronDiscoveryLocations): Promise<{ apps: ElectronAppDiscovery[]; skippedCount: number }> {
+async function discoverLinuxApps(
+	locations: ResolvedElectronDiscoveryLocations,
+): Promise<{ apps: ElectronAppDiscovery[]; skippedCount: number }> {
 	const apps: ElectronAppDiscovery[] = [];
 	let skippedCount = 0;
 	for (const directory of locations.linuxDesktopDirectories) {
@@ -581,10 +773,14 @@ async function discoverLinuxApps(locations: ResolvedElectronDiscoveryLocations):
 			continue;
 		}
 		for (const entry of entries) {
-			if (!entry.isFile() || extname(entry.name) !== ".desktop") continue;
+			if (!entry.isFile() || extname(entry.name) !== ".desktop") {
+				continue;
+			}
 			try {
 				const app = await inspectLinuxDesktopFile(join(directory, entry.name), locations);
-				if (app) apps.push(app);
+				if (app) {
+					apps.push(app);
+				}
 			} catch {
 				skippedCount += 1;
 			}
@@ -594,9 +790,20 @@ async function discoverLinuxApps(locations: ResolvedElectronDiscoveryLocations):
 }
 
 function appMatchesQuery(app: ElectronAppDiscovery, query: string | undefined): boolean {
-	if (!query) return true;
+	if (!query) {
+		return true;
+	}
 	const normalizedQuery = query.toLowerCase();
-	const searchableValues = [app.name, app.bundleId, app.appPath, app.executablePath, app.comment, app.desktopId, app.icon, app.packageSource]
+	const searchableValues = [
+		app.name,
+		app.bundleId,
+		app.appPath,
+		app.executablePath,
+		app.comment,
+		app.desktopId,
+		app.icon,
+		app.packageSource,
+	]
 		.filter((value): value is string => typeof value === "string" && value.length > 0)
 		.map((value) => value.toLowerCase());
 	return searchableValues.some((value) => value.includes(normalizedQuery));
@@ -607,7 +814,9 @@ function dedupeApps(apps: ElectronAppDiscovery[]): ElectronAppDiscovery[] {
 	const deduped: ElectronAppDiscovery[] = [];
 	for (const app of apps) {
 		const key = app.appPath ?? app.executablePath;
-		if (seen.has(key)) continue;
+		if (seen.has(key)) {
+			continue;
+		}
 		seen.add(key);
 		deduped.push(app);
 	}
@@ -617,7 +826,9 @@ function dedupeApps(apps: ElectronAppDiscovery[]): ElectronAppDiscovery[] {
 function sortApps(apps: ElectronAppDiscovery[]): ElectronAppDiscovery[] {
 	return [...apps].sort((left, right) => {
 		const nameComparison = left.name.localeCompare(right.name, undefined, { sensitivity: "base" });
-		return nameComparison === 0 ? left.executablePath.localeCompare(right.executablePath) : nameComparison;
+		return nameComparison === 0
+			? left.executablePath.localeCompare(right.executablePath)
+			: nameComparison;
 	});
 }
 
@@ -627,14 +838,24 @@ function findMacAppBundleAncestor(path: string): string | undefined {
 	return appIndex >= 0 ? parts.slice(0, appIndex + 1).join("/") || "/" : undefined;
 }
 
-async function inspectWin32Executable(executablePath: string): Promise<ElectronAppDiscovery | undefined> {
+async function inspectWin32Executable(
+	executablePath: string,
+): Promise<ElectronAppDiscovery | undefined> {
 	const resolvedExecutablePath = await resolveRealPath(executablePath);
-	if (!await isExecutableFile(resolvedExecutablePath)) return undefined;
+	if (!(await isExecutableFile(resolvedExecutablePath))) {
+		return undefined;
+	}
 	const executableDirectory = dirname(resolvedExecutablePath);
 	const resourcesDirectory = join(executableDirectory, "resources");
-	const hasAppPayload = await pathExists(join(resourcesDirectory, "app.asar")) || await isDirectory(join(resourcesDirectory, "app"));
-	const hasPak = await directoryContainsChromePak(executableDirectory) || await pathExists(join(executableDirectory, "resources.pak"));
-	if (!hasAppPayload || !hasPak) return undefined;
+	const hasAppPayload =
+		(await pathExists(join(resourcesDirectory, "app.asar"))) ||
+		(await isDirectory(join(resourcesDirectory, "app")));
+	const hasPak =
+		(await directoryContainsChromePak(executableDirectory)) ||
+		(await pathExists(join(executableDirectory, "resources.pak")));
+	if (!hasAppPayload || !hasPak) {
+		return undefined;
+	}
 	return {
 		executablePath: resolvedExecutablePath,
 		name: basename(resolvedExecutablePath, extname(resolvedExecutablePath)),
@@ -652,7 +873,9 @@ export async function inspectElectronExecutablePath(
 		return appPath ? inspectDarwinApp(appPath) : undefined;
 	}
 	if (platform === "linux") {
-		if (!await hasLinuxElectronEvidence(resolvedExecutablePath)) return undefined;
+		if (!(await hasLinuxElectronEvidence(resolvedExecutablePath))) {
+			return undefined;
+		}
 		return {
 			executablePath: resolvedExecutablePath,
 			name: basename(resolvedExecutablePath),
@@ -675,7 +898,9 @@ export async function inspectElectronAppPath(
 	return inspectElectronExecutablePath(appPath, platform);
 }
 
-export async function discoverElectronApps(options: DiscoverElectronAppsOptions = {}): Promise<ElectronDiscoveryResult> {
+export async function discoverElectronApps(
+	options: DiscoverElectronAppsOptions = {},
+): Promise<ElectronDiscoveryResult> {
 	const platform = options.platform ?? process.platform;
 	const query = options.query?.trim() || undefined;
 	const maxResults = normalizeMaxResults(options.maxResults);
@@ -689,7 +914,13 @@ export async function discoverElectronApps(options: DiscoverElectronAppsOptions 
 		return { apps: [], maxResults, omittedCount: 0, platform: "unsupported", query };
 	}
 
-	const filteredApps = sortApps(dedupeApps(discovered.apps.map(annotateElectronAppSensitivity).filter((app) => appMatchesQuery(app, query))));
+	const filteredApps = sortApps(
+		dedupeApps(
+			discovered.apps
+				.map(annotateElectronAppSensitivity)
+				.filter((app) => appMatchesQuery(app, query)),
+		),
+	);
 	const apps = filteredApps.slice(0, maxResults);
 	return {
 		apps,

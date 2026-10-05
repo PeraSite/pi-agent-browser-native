@@ -93,18 +93,24 @@ export function parseCliArgs(argv = process.argv.slice(2)) {
 		}
 		if (arg === "--model") {
 			const value = argv[index + 1];
-			if (!value || value.startsWith("-")) throw new UsageError("--model requires a provider/model id value.");
+			if (!value || value.startsWith("-")) {
+				throw new UsageError("--model requires a provider/model id value.");
+			}
 			index += 1;
 			options.model = value;
 			continue;
 		}
 		if (arg === "--timeout-ms") {
 			const value = argv[index + 1];
-			if (!value) throw new UsageError("--timeout-ms requires a positive integer value.");
+			if (!value) {
+				throw new UsageError("--timeout-ms requires a positive integer value.");
+			}
 			index += 1;
 			const timeoutMs = Number(value);
 			if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0) {
-				throw new UsageError(`--timeout-ms must be a positive integer; received ${JSON.stringify(value)}.`);
+				throw new UsageError(
+					`--timeout-ms must be a positive integer; received ${JSON.stringify(value)}.`,
+				);
 			}
 			options.timeoutMs = timeoutMs;
 			continue;
@@ -136,7 +142,9 @@ async function pathExists(path) {
 }
 
 function normalizeComparableUrl(url) {
-	if (typeof url !== "string" || url.trim().length === 0) return undefined;
+	if (typeof url !== "string" || url.trim().length === 0) {
+		return undefined;
+	}
 	try {
 		const parsed = new URL(url.trim());
 		parsed.hash = "";
@@ -149,7 +157,9 @@ function normalizeComparableUrl(url) {
 export function parseJsonl(text) {
 	const entries = [];
 	for (const [index, line] of text.split("\n").entries()) {
-		if (line.trim().length === 0) continue;
+		if (line.trim().length === 0) {
+			continue;
+		}
 		try {
 			entries.push(JSON.parse(line));
 		} catch (error) {
@@ -170,7 +180,14 @@ function isRecord(value) {
 
 export function agentBrowserResults(entries) {
 	return entries
-		.filter((entry) => entry?.type === "message" && entry.message?.role === "toolResult" && ["agent_browser", "agent_browser_code", "agent_browser_qa"].includes(entry.message?.toolName))
+		.filter(
+			(entry) =>
+				entry?.type === "message" &&
+				entry.message?.role === "toolResult" &&
+				["agent_browser", "agent_browser_code", "agent_browser_qa"].includes(
+					entry.message?.toolName,
+				),
+		)
 		.map((entry) => entry.message);
 }
 
@@ -190,7 +207,9 @@ export function collectFullOutputPaths(results) {
 	const paths = [];
 	for (const result of results) {
 		const details = isRecord(result?.details) ? result.details : undefined;
-		if (typeof details?.fullOutputPath === "string") paths.push(details.fullOutputPath);
+		if (typeof details?.fullOutputPath === "string") {
+			paths.push(details.fullOutputPath);
+		}
 		if (Array.isArray(details?.fullOutputPaths)) {
 			paths.push(...details.fullOutputPaths.filter((path) => typeof path === "string"));
 		}
@@ -214,7 +233,11 @@ export function buildSettingsPayload({ packageDir, sessionDir }) {
 async function writeSettings({ agentDir, packageDir, sessionDir }) {
 	await mkdir(agentDir, { recursive: true });
 	const settings = buildSettingsPayload({ packageDir, sessionDir });
-	await writeFile(join(agentDir, "settings.json"), `${JSON.stringify(settings, null, "\t")}\n`, "utf8");
+	await writeFile(
+		join(agentDir, "settings.json"),
+		`${JSON.stringify(settings, null, "\t")}\n`,
+		"utf8",
+	);
 	return settings;
 }
 
@@ -244,7 +267,9 @@ function lifecycleSentinelCommand(token) {
 
 export function injectLifecycleSentinelSource(source, token) {
 	const withoutOldSentinel = source.replace(
-		new RegExp(`\\n\\t${SENTINEL_MARKER_START.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}[\\s\\S]*?\\n\\t${SENTINEL_MARKER_END.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\n`),
+		new RegExp(
+			`\\n\\t${SENTINEL_MARKER_START.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}[\\s\\S]*?\\n\\t${SENTINEL_MARKER_END.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\n`,
+		),
 		"",
 	);
 	const marker = "export default function agentBrowserExtension(pi, { beforeExecute } = {}) {";
@@ -378,7 +403,11 @@ async function createFakeAgentBrowserBinary(binDir) {
 	const scriptPath = join(binDir, "agent-browser");
 	await writeFile(scriptPath, fakeAgentBrowserScript(), "utf8");
 	await chmod(scriptPath, 0o755);
-	await writeFile(join(binDir, "agent-browser.cmd"), `@echo off\n${JSON.stringify(process.execPath)} "%~dp0agent-browser" %*\n`, "utf8");
+	await writeFile(
+		join(binDir, "agent-browser.cmd"),
+		`@echo off\n${JSON.stringify(process.execPath)} "%~dp0agent-browser" %*\n`,
+		"utf8",
+	);
 }
 
 export function tmuxActiveTarget(tmuxSession) {
@@ -386,7 +415,14 @@ export function tmuxActiveTarget(tmuxSession) {
 }
 
 async function capturePaneText(tmuxSession) {
-	const { stdout } = await run("tmux", ["capture-pane", "-p", "-S", "-2000", "-t", tmuxActiveTarget(tmuxSession)]);
+	const { stdout } = await run("tmux", [
+		"capture-pane",
+		"-p",
+		"-S",
+		"-2000",
+		"-t",
+		tmuxActiveTarget(tmuxSession),
+	]);
 	return stdout;
 }
 
@@ -401,7 +437,11 @@ async function capturePane(tmuxSession, artifactPath) {
 		await writeFile(artifactPath, stdout, "utf8");
 		return stdout;
 	} catch (error) {
-		await writeFile(artifactPath, `Could not capture pane: ${error instanceof Error ? error.message : String(error)}\n`, "utf8").catch(() => undefined);
+		await writeFile(
+			artifactPath,
+			`Could not capture pane: ${error instanceof Error ? error.message : String(error)}\n`,
+			"utf8",
+		).catch(() => undefined);
 		return "";
 	}
 }
@@ -415,7 +455,8 @@ function shellQuote(value) {
 }
 
 async function launchPiInTmux(options) {
-	const { agentDir, cwd, fakeBinDir, fakeStateDir, model, paneLogPath, sessionId, tmuxSession } = options;
+	const { agentDir, cwd, fakeBinDir, fakeStateDir, model, paneLogPath, sessionId, tmuxSession } =
+		options;
 	await killTmuxSession(tmuxSession);
 	await run("tmux", [
 		"new-session",
@@ -433,7 +474,13 @@ async function launchPiInTmux(options) {
 	]);
 	if (paneLogPath) {
 		await mkdir(dirname(paneLogPath), { recursive: true });
-		await run("tmux", ["pipe-pane", "-o", "-t", tmuxActiveTarget(tmuxSession), `cat >> ${shellQuote(paneLogPath)}`]);
+		await run("tmux", [
+			"pipe-pane",
+			"-o",
+			"-t",
+			tmuxActiveTarget(tmuxSession),
+			`cat >> ${shellQuote(paneLogPath)}`,
+		]);
 	}
 }
 
@@ -455,11 +502,15 @@ async function listSessionFiles(sessionDir) {
 
 async function newestSessionFile(sessionDir) {
 	const files = await listSessionFiles(sessionDir);
-	if (files.length === 0) return undefined;
+	if (files.length === 0) {
+		return undefined;
+	}
 	let newest;
 	let newestMtime = -1;
 	for (const file of files) {
-		const { stdout } = await run("stat", ["-f", "%m", file]).catch(async () => run("stat", ["-c", "%Y", file]));
+		const { stdout } = await run("stat", ["-f", "%m", file]).catch(async () =>
+			run("stat", ["-c", "%Y", file]),
+		);
 		const mtime = Number(stdout.trim());
 		if (mtime >= newestMtime) {
 			newest = file;
@@ -475,35 +526,53 @@ async function waitFor({ describe, predicate, timeoutMs, intervalMs = 1000, onPo
 	while (Date.now() - start <= timeoutMs) {
 		try {
 			const result = await predicate();
-			if (result) return result;
+			if (result) {
+				return result;
+			}
 		} catch (error) {
 			lastError = error;
 		}
-		if (onPoll) await onPoll();
+		if (onPoll) {
+			await onPoll();
+		}
 		await sleep(intervalMs);
 	}
-	const suffix = lastError ? ` Last error: ${lastError instanceof Error ? lastError.message : String(lastError)}` : "";
+	const suffix = lastError
+		? ` Last error: ${lastError instanceof Error ? lastError.message : String(lastError)}`
+		: "";
 	throw new Error(`Timed out waiting for ${describe} after ${timeoutMs}ms.${suffix}`);
 }
 
 function resultText(result) {
 	return Array.isArray(result?.content)
-		? result.content.filter((item) => item?.type === "text" && typeof item.text === "string").map((item) => item.text).join("\n")
+		? result.content
+				.filter((item) => item?.type === "text" && typeof item.text === "string")
+				.map((item) => item.text)
+				.join("\n")
 		: "";
 }
 
 export function matchesSuccessfulPageResult(result, command, expectedUrl) {
 	const details = result?.details;
-	const observedUrl = command === "open" ? details?.data?.url : command === "snapshot" ? details?.data?.origin : undefined;
-	return result?.isError === false
-		&& details?.resultCategory === "success"
-		&& details?.command === command
-		&& typeof observedUrl === "string"
-		&& normalizeComparableUrl(observedUrl) === normalizeComparableUrl(expectedUrl);
+	const observedUrl =
+		command === "open"
+			? details?.data?.url
+			: command === "snapshot"
+				? details?.data?.origin
+				: undefined;
+	return (
+		result?.isError === false &&
+		details?.resultCategory === "success" &&
+		details?.command === command &&
+		typeof observedUrl === "string" &&
+		normalizeComparableUrl(observedUrl) === normalizeComparableUrl(expectedUrl)
+	);
 }
 
 function assert(condition, message) {
-	if (!condition) throw new Error(message);
+	if (!condition) {
+		throw new Error(message);
+	}
 }
 
 async function assertFileExists(filePath, label) {
@@ -525,13 +594,22 @@ async function waitForSentinel({ sessionFile, timeoutMs, token }) {
 	});
 }
 
-export async function waitForAgentBrowserResult({ describe, sessionFile, sessionDir, timeoutMs, sinceCount, predicate }) {
+export async function waitForAgentBrowserResult({
+	describe,
+	sessionFile,
+	sessionDir,
+	timeoutMs,
+	sinceCount,
+	predicate,
+}) {
 	const report = await waitFor({
 		describe,
 		timeoutMs,
 		predicate: async () => {
 			sessionFile ??= await newestSessionFile(sessionDir);
-			if (!sessionFile) return undefined;
+			if (!sessionFile) {
+				return undefined;
+			}
 			const entries = await readEntries(sessionFile);
 			const results = agentBrowserResults(entries);
 			const result = results[sinceCount];
@@ -539,7 +617,10 @@ export async function waitForAgentBrowserResult({ describe, sessionFile, session
 		},
 	});
 	const { result } = report;
-	assert(predicate(result), `Unexpected agent_browser result for ${describe}: call ${result.toolCallId ?? "unknown"}; command ${result.details?.command ?? "missing"}; isError ${result.isError}; category ${result.details?.resultCategory ?? "missing"}/${result.details?.failureCategory ?? result.details?.successCategory ?? "missing"}.`);
+	assert(
+		predicate(result),
+		`Unexpected agent_browser result for ${describe}: call ${result.toolCallId ?? "unknown"}; command ${result.details?.command ?? "missing"}; isError ${result.isError}; category ${result.details?.resultCategory ?? "missing"}/${result.details?.failureCategory ?? result.details?.successCategory ?? "missing"}.`,
+	);
 	return report;
 }
 
@@ -563,13 +644,34 @@ async function waitForAssistantFinal({ describe, sessionFile, sinceEntryCount, t
 	});
 }
 
-async function runPromptAndWaitForResult({ describe, prompt, sessionFile, timeoutMs, tmuxSession, predicate, verbose }) {
+async function runPromptAndWaitForResult({
+	describe,
+	prompt,
+	sessionFile,
+	timeoutMs,
+	tmuxSession,
+	predicate,
+	verbose,
+}) {
 	const beforeEntries = await readEntries(sessionFile);
 	const beforeResults = agentBrowserResults(beforeEntries).length;
-	if (verbose) console.log(`→ ${describe}`);
+	if (verbose) {
+		console.log(`→ ${describe}`);
+	}
 	await sendLine(tmuxSession, prompt);
-	const report = await waitForAgentBrowserResult({ describe, sessionFile, timeoutMs, sinceCount: beforeResults, predicate });
-	await waitForAssistantFinal({ describe, sessionFile, sinceEntryCount: beforeEntries.length, timeoutMs });
+	const report = await waitForAgentBrowserResult({
+		describe,
+		sessionFile,
+		timeoutMs,
+		sinceCount: beforeResults,
+		predicate,
+	});
+	await waitForAssistantFinal({
+		describe,
+		sessionFile,
+		sinceEntryCount: beforeEntries.length,
+		timeoutMs,
+	});
 	return report;
 }
 
@@ -601,7 +703,9 @@ async function verifyLifecycle(options = {}) {
 	let failure;
 
 	const log = (message) => {
-		if (verbose) console.log(message);
+		if (verbose) {
+			console.log(message);
+		}
 	};
 
 	try {
@@ -611,12 +715,30 @@ async function verifyLifecycle(options = {}) {
 		await writeLifecycleSentinel({ packageDir, token: "v1" });
 		await createFakeAgentBrowserBinary(fakeBinDir);
 		const settings = await writeSettings({ agentDir, packageDir, sessionDir });
-		assert(settings.packages.length === 1 && settings.packages[0] === packageDir, "Isolated settings must use exactly one configured package source.");
-		assert(settings.extensions.length === 0 && settings.skills.length === 0 && settings.prompts.length === 0 && settings.themes.length === 0, "Isolated settings must clear local resource arrays.");
+		assert(
+			settings.packages.length === 1 && settings.packages[0] === packageDir,
+			"Isolated settings must use exactly one configured package source.",
+		);
+		assert(
+			settings.extensions.length === 0 &&
+				settings.skills.length === 0 &&
+				settings.prompts.length === 0 &&
+				settings.themes.length === 0,
+			"Isolated settings must clear local resource arrays.",
+		);
 
 		log(`Temp root: ${tempRoot}`);
 		log(`Launching Pi in tmux with model ${model} and session id ${piSessionId}...`);
-		await launchPiInTmux({ agentDir, cwd: repoRoot, fakeBinDir, fakeStateDir, model, paneLogPath: join(artifactsDir, "initial-pane-stream.txt"), sessionId: piSessionId, tmuxSession });
+		await launchPiInTmux({
+			agentDir,
+			cwd: repoRoot,
+			fakeBinDir,
+			fakeStateDir,
+			model,
+			paneLogPath: join(artifactsDir, "initial-pane-stream.txt"),
+			sessionId: piSessionId,
+			tmuxSession,
+		});
 		await waitFor({
 			describe: "Pi prompt readiness",
 			timeoutMs,
@@ -626,8 +748,13 @@ async function verifyLifecycle(options = {}) {
 			},
 		});
 		await sleep(1000);
-		if (verbose) console.log("→ initial managed open");
-		await sendLine(tmuxSession, buildToolInputPrompt({ args: ["open", EXPECTED_URL], sessionMode: "fresh" }));
+		if (verbose) {
+			console.log("→ initial managed open");
+		}
+		await sendLine(
+			tmuxSession,
+			buildToolInputPrompt({ args: ["open", EXPECTED_URL], sessionMode: "fresh" }),
+		);
 		const openReport = await waitForAgentBrowserResult({
 			describe: "initial managed open result",
 			sessionDir,
@@ -637,19 +764,46 @@ async function verifyLifecycle(options = {}) {
 		});
 		sessionFile = openReport.sessionFile;
 		assert(sessionFile, "Pi did not create a session file.");
-		assert(sessionHeaderId(openReport.entries) === piSessionId, `Pi session header id ${JSON.stringify(sessionHeaderId(openReport.entries))} did not match requested lifecycle session id ${JSON.stringify(piSessionId)}.`);
-		await waitForAssistantFinal({ describe: "initial managed open", sessionFile, sinceEntryCount: 0, timeoutMs });
+		assert(
+			sessionHeaderId(openReport.entries) === piSessionId,
+			`Pi session header id ${JSON.stringify(sessionHeaderId(openReport.entries))} did not match requested lifecycle session id ${JSON.stringify(piSessionId)}.`,
+		);
+		await waitForAssistantFinal({
+			describe: "initial managed open",
+			sessionFile,
+			sinceEntryCount: 0,
+			timeoutMs,
+		});
 		const firstSessionName = openReport.result.details?.sessionName;
-		assert(typeof firstSessionName === "string" && firstSessionName.length > 0, "Initial open did not report details.sessionName.");
-		assert(openReport.result.details?.managedSessionOutcome?.status === "created", "Initial fresh open did not create a managed session.");
+		assert(
+			typeof firstSessionName === "string" && firstSessionName.length > 0,
+			"Initial open did not report details.sessionName.",
+		);
+		assert(
+			openReport.result.details?.managedSessionOutcome?.status === "created",
+			"Initial fresh open did not create a managed session.",
+		);
 
 		const codeNavigation = await runPromptAndWaitForResult({
 			describe: "persistent code navigation before reload",
-			prompt: buildToolInputPrompt({ code: `emit((await browser({args:["open",${JSON.stringify(CODE_URL)}]})).data);` }, "", "agent_browser_code"),
-			sessionFile, timeoutMs, tmuxSession, verbose,
-			predicate: (result) => result.isError === false && result.details?.data?.url === CODE_URL && result.details?.codeRun?.callCount === 1,
+			prompt: buildToolInputPrompt(
+				{ code: `emit((await browser({args:["open",${JSON.stringify(CODE_URL)}]})).data);` },
+				"",
+				"agent_browser_code",
+			),
+			sessionFile,
+			timeoutMs,
+			tmuxSession,
+			verbose,
+			predicate: (result) =>
+				result.isError === false &&
+				result.details?.data?.url === CODE_URL &&
+				result.details?.codeRun?.callCount === 1,
 		});
-		assert(codeNavigation.result.details?.sessionName === firstSessionName, "Code navigation used a different browser.");
+		assert(
+			codeNavigation.result.details?.sessionName === firstSessionName,
+			"Code navigation used a different browser.",
+		);
 
 		await sendLine(tmuxSession, `/${lifecycleSentinelCommand("v1")}`);
 		await waitForSentinel({ sessionFile, timeoutMs, token: "v1" });
@@ -667,8 +821,14 @@ async function verifyLifecycle(options = {}) {
 			verbose,
 			predicate: (result) => matchesSuccessfulPageResult(result, "snapshot", CODE_URL),
 		});
-		assert(reloadSnapshot.result.details?.sessionName === firstSessionName, "Post-reload snapshot used a different managed session name.");
-		assert(reloadSnapshot.result.details?.usedImplicitSession === true, "Post-reload snapshot did not reuse the managed session.");
+		assert(
+			reloadSnapshot.result.details?.sessionName === firstSessionName,
+			"Post-reload snapshot used a different managed session name.",
+		);
+		assert(
+			reloadSnapshot.result.details?.usedImplicitSession === true,
+			"Post-reload snapshot did not reuse the managed session.",
+		);
 
 		const largeReport = await runPromptAndWaitForResult({
 			describe: "large eval output spill",
@@ -680,13 +840,25 @@ async function verifyLifecycle(options = {}) {
 			predicate: (result) => collectFullOutputPaths([result]).length > 0,
 		});
 		[firstFullOutputPath] = collectFullOutputPaths([largeReport.result]);
-		assert(typeof firstFullOutputPath === "string", "Large eval did not expose details.fullOutputPath.");
+		assert(
+			typeof firstFullOutputPath === "string",
+			"Large eval did not expose details.fullOutputPath.",
+		);
 		await assertFileExists(firstFullOutputPath, "Large-output fullOutputPath");
 
 		await capturePane(tmuxSession, join(artifactsDir, "before-restart-pane.txt"));
 		await killTmuxSession(tmuxSession);
 		log("Relaunching Pi with exact prior session id...");
-		await launchPiInTmux({ agentDir, cwd: repoRoot, fakeBinDir, fakeStateDir, model, paneLogPath: join(artifactsDir, "relaunch-pane-stream.txt"), sessionId: piSessionId, tmuxSession });
+		await launchPiInTmux({
+			agentDir,
+			cwd: repoRoot,
+			fakeBinDir,
+			fakeStateDir,
+			model,
+			paneLogPath: join(artifactsDir, "relaunch-pane-stream.txt"),
+			sessionId: piSessionId,
+			tmuxSession,
+		});
 		await waitFor({
 			describe: "relaunched Pi prompt readiness",
 			timeoutMs,
@@ -707,9 +879,18 @@ async function verifyLifecycle(options = {}) {
 			verbose,
 			predicate: (result) => matchesSuccessfulPageResult(result, "snapshot", CODE_URL),
 		});
-		assert(resumeSnapshot.result.details?.sessionName === firstSessionName, "Post-relaunch snapshot used a different managed session name.");
-		assert(resumeSnapshot.result.details?.usedImplicitSession === true, "Post-relaunch snapshot did not reuse the managed session.");
-		await assertFileExists(firstFullOutputPath, "Previously persisted fullOutputPath after relaunch");
+		assert(
+			resumeSnapshot.result.details?.sessionName === firstSessionName,
+			"Post-relaunch snapshot used a different managed session name.",
+		);
+		assert(
+			resumeSnapshot.result.details?.usedImplicitSession === true,
+			"Post-relaunch snapshot did not reuse the managed session.",
+		);
+		await assertFileExists(
+			firstFullOutputPath,
+			"Previously persisted fullOutputPath after relaunch",
+		);
 
 		const qaFailureReport = await runPromptAndWaitForResult({
 			describe: "qa reclassification failure patch",
@@ -718,11 +899,22 @@ async function verifyLifecycle(options = {}) {
 			timeoutMs,
 			tmuxSession,
 			verbose,
-			predicate: (result) => result?.details?.failureCategory === "qa-failure" && result?.details?.resultCategory === "failure" && result?.isError === true,
+			predicate: (result) =>
+				result?.details?.failureCategory === "qa-failure" &&
+				result?.details?.resultCategory === "failure" &&
+				result?.isError === true,
 		});
 		const qaText = resultText(qaFailureReport.result);
-		assert(qaText.includes('"success":false') && qaText.includes('"failureCategory":"qa-failure"'), "QA failure was not visible in the canonical observation.");
-		assert(qaText.includes("Result category: failure; failureCategory: qa-failure; Pi tool isError: true."), "QA failure transcript row did not include the Pi isError patch notice.");
+		assert(
+			qaText.includes('"success":false') && qaText.includes('"failureCategory":"qa-failure"'),
+			"QA failure was not visible in the canonical observation.",
+		);
+		assert(
+			qaText.includes(
+				"Result category: failure; failureCategory: qa-failure; Pi tool isError: true.",
+			),
+			"QA failure transcript row did not include the Pi isError patch notice.",
+		);
 
 		await capturePane(tmuxSession, join(artifactsDir, "success-pane.txt"));
 		return {
@@ -746,9 +938,13 @@ async function verifyLifecycle(options = {}) {
 		await killTmuxSession(tmuxSession);
 		if (!keepArtifacts && !failure) {
 			// Preserve Pi transcripts and evidence; remove only disposable runtime inputs.
-			for (const path of [packageDir, fakeBinDir, fakeStateDir, agentDir]) await rm(path, { force: true, recursive: true });
+			for (const path of [packageDir, fakeBinDir, fakeStateDir, agentDir]) {
+				await rm(path, { force: true, recursive: true });
+			}
 		} else {
-			console.error(`${failure ? "Lifecycle artifacts retained for debugging" : "Lifecycle artifacts retained"}: ${tempRoot}`);
+			console.error(
+				`${failure ? "Lifecycle artifacts retained for debugging" : "Lifecycle artifacts retained"}: ${tempRoot}`,
+			);
 		}
 	}
 }
@@ -774,7 +970,7 @@ export async function main(argv = process.argv.slice(2)) {
 			return 2;
 		}
 		console.error("Lifecycle verification failed:");
-		console.error(error instanceof Error ? error.stack ?? error.message : String(error));
+		console.error(error instanceof Error ? (error.stack ?? error.message) : String(error));
 		return 1;
 	}
 }

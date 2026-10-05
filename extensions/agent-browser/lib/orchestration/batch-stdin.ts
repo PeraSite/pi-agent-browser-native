@@ -3,37 +3,60 @@ import { projectUpstreamGlobalFlags } from "../argv-grammar.js";
 export type BatchCommandStep = string[];
 
 /** Bare open's native launch action drops prior launch options. URL reads lazily launch without navigating. */
-export function normalizeUrlLessOpen(args: string[], stdin?: string, batchStep = false): { args: string[]; stdin?: string } {
-	const { tokens, indices } = batchStep ? { tokens: args, indices: args.map((_, index) => index) } : projectUpstreamGlobalFlags(args);
-	if (tokens[0] === "open" && !tokens.slice(1).some(token => !token.startsWith("--"))) {
+export function normalizeUrlLessOpen(
+	args: string[],
+	stdin?: string,
+	batchStep = false,
+): { args: string[]; stdin?: string } {
+	const { tokens, indices } = batchStep
+		? { tokens: args, indices: args.map((_, index) => index) }
+		: projectUpstreamGlobalFlags(args);
+	if (tokens[0] === "open" && !tokens.slice(1).some((token) => !token.startsWith("--"))) {
 		const index = indices[0];
 		return { args: [...args.slice(0, index), "get", "url", ...args.slice(index + 1)], stdin };
 	}
-	if (tokens[0] !== "batch") return { args, stdin };
+	if (tokens[0] !== "batch") {
+		return { args, stdin };
+	}
 	const rawSteps = tokens.slice(1).flatMap((token, offset) => {
 		const step = token === "--bail" ? undefined : parseBatchCommandArgument(token).step;
 		return step ? [{ index: indices[offset + 1], step }] : [];
 	});
-	if (tokens.slice(1).some(token => token !== "--bail")) {
+	if (tokens.slice(1).some((token) => token !== "--bail")) {
 		let normalized = args;
 		for (const { index, step } of rawSteps) {
 			const row = normalizeUrlLessOpen(step, undefined, true).args;
-			if (row === step) continue;
-			if (normalized === args) normalized = [...args];
-			normalized[index] = row.map(token => `'${token.replaceAll("'", "'\\''")}'`).join(" ");
+			if (row === step) {
+				continue;
+			}
+			if (normalized === args) {
+				normalized = [...args];
+			}
+			normalized[index] = row.map((token) => `'${token.replaceAll("'", "'\\''")}'`).join(" ");
 		}
 		return { args: normalized, stdin };
 	}
 	const steps = parseUserBatchStdin(stdin).steps;
-	if (!steps?.length) return { args, stdin };
-	const normalized = steps.map(step => normalizeUrlLessOpen(step, undefined, true).args);
-	return { args, stdin: normalized.some((step, index) => step !== steps[index]) ? JSON.stringify(normalized) : stdin };
+	if (!steps?.length) {
+		return { args, stdin };
+	}
+	const normalized = steps.map((step) => normalizeUrlLessOpen(step, undefined, true).args);
+	return {
+		args,
+		stdin: normalized.some((step, index) => step !== steps[index])
+			? JSON.stringify(normalized)
+			: stdin,
+	};
 }
 
-const BATCH_STDIN_EXAMPLE = ' Example: { "args": ["batch"], "stdin": "[[\\"get\\",\\"title\\"],[\\"get\\",\\"url\\"]]" }';
+const BATCH_STDIN_EXAMPLE =
+	' Example: { "args": ["batch"], "stdin": "[[\\"get\\",\\"title\\"],[\\"get\\",\\"url\\"]]" }';
 
 // Mirror upstream commands::shell_words_split so policy inspection sees the same argv.
-export function parseBatchCommandArgument(command: string): { error?: string; step?: BatchCommandStep } {
+export function parseBatchCommandArgument(command: string): {
+	error?: string;
+	step?: BatchCommandStep;
+} {
 	const tokens: string[] = [];
 	let token = "";
 	let inDoubleQuote = false;
@@ -59,11 +82,18 @@ export function parseBatchCommandArgument(command: string): { error?: string; st
 			token += character;
 		}
 	}
-	if (token !== "") tokens.push(token);
-	return tokens.length > 0 ? { step: tokens as BatchCommandStep } : { error: "batch command is empty" };
+	if (token !== "") {
+		tokens.push(token);
+	}
+	return tokens.length > 0
+		? { step: tokens as BatchCommandStep }
+		: { error: "batch command is empty" };
 }
 
-function validateUserBatchStep(step: unknown, index: number): { error: string; ok: false } | { ok: true; step: BatchCommandStep } {
+function validateUserBatchStep(
+	step: unknown,
+	index: number,
+): { error: string; ok: false } | { ok: true; step: BatchCommandStep } {
 	if (!Array.isArray(step)) {
 		return {
 			error: `agent_browser batch stdin step ${index} must be an array of string command tokens.${BATCH_STDIN_EXAMPLE}`,
@@ -80,23 +110,33 @@ function validateUserBatchStep(step: unknown, index: number): { error: string; o
 	return { ok: true, step: step as BatchCommandStep };
 }
 
-export function parseBatchStdinJsonArray(stdin: string | undefined): { error?: string; steps?: unknown[] } {
+export function parseBatchStdinJsonArray(stdin: string | undefined): {
+	error?: string;
+	steps?: unknown[];
+} {
 	if (stdin === undefined) {
 		return { steps: [] };
 	}
 	try {
 		const parsed = JSON.parse(stdin) as unknown;
 		if (!Array.isArray(parsed)) {
-			return { error: `agent_browser batch stdin must be a JSON array of command steps.${BATCH_STDIN_EXAMPLE}` };
+			return {
+				error: `agent_browser batch stdin must be a JSON array of command steps.${BATCH_STDIN_EXAMPLE}`,
+			};
 		}
 		return { steps: parsed };
 	} catch (error) {
 		const message = error instanceof Error ? error.message : String(error);
-		return { error: `agent_browser batch stdin could not be parsed as JSON: ${message}.${BATCH_STDIN_EXAMPLE}` };
+		return {
+			error: `agent_browser batch stdin could not be parsed as JSON: ${message}.${BATCH_STDIN_EXAMPLE}`,
+		};
 	}
 }
 
-export function parseUserBatchStdin(stdin: string | undefined): { error?: string; steps?: BatchCommandStep[] } {
+export function parseUserBatchStdin(stdin: string | undefined): {
+	error?: string;
+	steps?: BatchCommandStep[];
+} {
 	const parsed = parseBatchStdinJsonArray(stdin);
 	if (parsed.error || parsed.steps === undefined) {
 		return parsed.error ? { error: parsed.error } : { steps: [] };
@@ -119,13 +159,22 @@ export function parseUserBatchStdin(stdin: string | undefined): { error?: string
  * `--bail=true` stays a raw command (an unknown-command row) and keeps stdin
  * ignored.
  */
-export function getUpstreamEffectiveBatchSteps(commandTokens: readonly string[], stdin: string | undefined): BatchCommandStep[] {
-	if (commandTokens[0] !== "batch") return [];
+export function getUpstreamEffectiveBatchSteps(
+	commandTokens: readonly string[],
+	stdin: string | undefined,
+): BatchCommandStep[] {
+	if (commandTokens[0] !== "batch") {
+		return [];
+	}
 	const argumentSteps = commandTokens.slice(1).flatMap((command) => {
-		if (command === "--bail") return [];
+		if (command === "--bail") {
+			return [];
+		}
 		const step = parseBatchCommandArgument(command).step;
 		return step ? [step] : [];
 	});
-	if (argumentSteps.length > 0) return argumentSteps;
-	return parseUserBatchStdin(stdin).steps?.filter(step => step.length > 0) ?? [];
+	if (argumentSteps.length > 0) {
+		return argumentSteps;
+	}
+	return parseUserBatchStdin(stdin).steps?.filter((step) => step.length > 0) ?? [];
 }

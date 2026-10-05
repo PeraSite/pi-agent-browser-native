@@ -56,15 +56,29 @@ test("platform smoke config and package scripts require macOS, Ubuntu, and nativ
 	assert.ok(packageJson.files?.includes("scripts/platform-smoke.mjs"));
 	assert.ok(packageJson.files?.includes("scripts/platform-smoke"));
 	assert.ok(packageJson.files?.includes("docs/platform-smoke.md"));
-	assert.match(packageJson.scripts?.["check:platform-smoke"] ?? "", /node --check scripts\/platform-smoke\.mjs/);
-	assert.match(packageJson.scripts?.["check:platform-smoke"] ?? "", /test\/platform-smoke\.test\.ts/);
-	assert.equal(packageJson.scripts?.["smoke:platform:doctor"], "node scripts/platform-smoke.mjs doctor");
-	assert.match(packageJson.scripts?.["smoke:platform:ubuntu-image"] ?? "", /build-ubuntu-image\.mjs/);
+	assert.match(
+		packageJson.scripts?.["check:platform-smoke"] ?? "",
+		/node --check scripts\/platform-smoke\.mjs/,
+	);
+	assert.match(
+		packageJson.scripts?.["check:platform-smoke"] ?? "",
+		/test\/platform-smoke\.test\.ts/,
+	);
+	assert.equal(
+		packageJson.scripts?.["smoke:platform:doctor"],
+		"node scripts/platform-smoke.mjs doctor",
+	);
+	assert.match(
+		packageJson.scripts?.["smoke:platform:ubuntu-image"] ?? "",
+		/build-ubuntu-image\.mjs/,
+	);
 	assert.match(packageJson.scripts?.["smoke:platform:all"] ?? "", /smoke:platform:doctor/);
 	assert.match(packageJson.scripts?.["smoke:platform:all"] ?? "", /macos,ubuntu,windows-native/);
 	assert.match(packageJson.scripts?.["smoke:platform:windows-native"] ?? "", /windows-native/);
 	const linuxImage = readFileSync("scripts/platform-smoke/linux-image/Dockerfile", "utf8");
-	for (const dependency of ["libvulkan1", "mesa-vulkan-drivers", "xvfb"]) assert.match(linuxImage, new RegExp(`\\b${dependency}\\b`));
+	for (const dependency of ["libvulkan1", "mesa-vulkan-drivers", "xvfb"]) {
+		assert.match(linuxImage, new RegExp(`\\b${dependency}\\b`));
+	}
 
 	const code = String.raw`
 import config, * as configModule from "./platform-smoke.config.mjs";

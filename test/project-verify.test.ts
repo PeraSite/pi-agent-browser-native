@@ -12,10 +12,17 @@ import { delimiter } from "node:path";
 import test from "node:test";
 
 const projectModule = (await import("../scripts/project.mjs")) as {
-	docsSteps: (options: { mode: string; target: string }) => Array<{ command: string; args: string[]; env?: Record<string, string> }>;
+	docsSteps: (options: {
+		mode: string;
+		target: string;
+	}) => Array<{ command: string; args: string[]; env?: Record<string, string> }>;
 	hostToolPath: (pathValue?: string) => string;
 	parseVerifyArgs: (argv?: string[]) => { mode: string; passthrough: string[]; showHelp: boolean };
-	verifySteps: (options: { mode: string; passthrough: string[]; showHelp: boolean }) => Array<{ command: string; args: string[]; env?: Record<string, string> }>;
+	verifySteps: (options: {
+		mode: string;
+		passthrough: string[];
+		showHelp: boolean;
+	}) => Array<{ command: string; args: string[]; env?: Record<string, string> }>;
 };
 const { docsSteps, hostToolPath, parseVerifyArgs, verifySteps } = projectModule;
 
@@ -24,11 +31,17 @@ function labels(steps: Array<{ args: string[]; env?: Record<string, string> }>):
 }
 
 test("package lock excludes WorkOS URLs", () => {
-	assert.doesNotMatch(readFileSync("package-lock.json", "utf8"), /(?:[a-z][a-z0-9+.-]*:)?\/\/[^\s\"]*(?:workos|socket-firewall)/i);
+	assert.doesNotMatch(
+		readFileSync("package-lock.json", "utf8"),
+		/(?:[a-z][a-z0-9+.-]*:)?\/\/[^\s\"]*(?:workos|socket-firewall)/i,
+	);
 });
 
 test("typecheck gate covers shared JavaScript config policy implementation", () => {
-	const tsconfig = JSON.parse(readFileSync("tsconfig.json", "utf8")) as { compilerOptions?: { allowJs?: boolean; noUnusedLocals?: boolean }; include?: string[] };
+	const tsconfig = JSON.parse(readFileSync("tsconfig.json", "utf8")) as {
+		compilerOptions?: { allowJs?: boolean; noUnusedLocals?: boolean };
+		include?: string[];
+	};
 	assert.equal(tsconfig.compilerOptions?.allowJs, true);
 	assert.equal(tsconfig.compilerOptions?.noUnusedLocals, true);
 	assert.ok(tsconfig.include?.includes("extensions/agent-browser/lib/config-policy.js"));
@@ -63,7 +76,11 @@ test("verify facade pre-pr mode composes default verification with package-conte
 });
 
 test("verify facade opt-in modes keep startup-profile, real-upstream, dogfood, package-pi, platform-target, and platform smoke gates explicit", () => {
-	const startupProfile = verifySteps({ mode: "startup-profile", passthrough: ["--samples", "3", "--json"], showHelp: false });
+	const startupProfile = verifySteps({
+		mode: "startup-profile",
+		passthrough: ["--samples", "3", "--json"],
+		showHelp: false,
+	});
 	assert.deepEqual(labels(startupProfile), ["./scripts/profile-startup.mjs --samples 3 --json"]);
 
 	const realUpstream = verifySteps({ mode: "real-upstream", passthrough: [], showHelp: false });
@@ -72,10 +89,20 @@ test("verify facade opt-in modes keep startup-profile, real-upstream, dogfood, p
 		"--test --test-force-exit --test-name-pattern contract suite matches test/agent-browser.real-upstream-contract.test.ts",
 		"--test --test-force-exit test/agent-browser.batch-fidelity.test.ts",
 	]);
-	assert.equal(realUpstream.every((step) => step.env?.PI_AGENT_BROWSER_REAL_UPSTREAM === "1"), true);
+	assert.equal(
+		realUpstream.every((step) => step.env?.PI_AGENT_BROWSER_REAL_UPSTREAM === "1"),
+		true,
+	);
 
-	const dogfood = verifySteps({ mode: "dogfood", passthrough: ["--keep-artifacts"], showHelp: false });
-	assert.deepEqual(labels(dogfood), ["./scripts/build.mjs", "./scripts/verify-agent-browser-dogfood.ts --keep-artifacts"]);
+	const dogfood = verifySteps({
+		mode: "dogfood",
+		passthrough: ["--keep-artifacts"],
+		showHelp: false,
+	});
+	assert.deepEqual(labels(dogfood), [
+		"./scripts/build.mjs",
+		"./scripts/verify-agent-browser-dogfood.ts --keep-artifacts",
+	]);
 
 	const packagePi = verifySteps({ mode: "package-pi", passthrough: [], showHelp: false });
 	assert.deepEqual(labels(packagePi), ["./scripts/verify-package.mjs --smoke-pi"]);
@@ -89,8 +116,14 @@ test("verify facade opt-in modes keep startup-profile, real-upstream, dogfood, p
 		"--test --test-concurrency=1 test/project-verify.test.ts test/platform-smoke.test.ts test/verify-package.test.ts test/agent-browser.runtime.test.ts test/agent-browser.windows-argv.test.ts",
 	]);
 
-	const platformSmoke = verifySteps({ mode: "platform-smoke", passthrough: ["run", "--target", "macos", "--suite", "platform-build"], showHelp: false });
-	assert.deepEqual(labels(platformSmoke), ["./scripts/platform-smoke.mjs run --target macos --suite platform-build"]);
+	const platformSmoke = verifySteps({
+		mode: "platform-smoke",
+		passthrough: ["run", "--target", "macos", "--suite", "platform-build"],
+		showHelp: false,
+	});
+	assert.deepEqual(labels(platformSmoke), [
+		"./scripts/platform-smoke.mjs run --target macos --suite platform-build",
+	]);
 });
 
 test("verify facade release gate composes default verification, lifecycle, packaged Pi smoke, and platform smoke", () => {
@@ -134,11 +167,17 @@ test("verify facade rejects unsupported options before running a partial gate", 
 		/--samples requires a value/,
 	);
 	assert.throws(
-		() => verifySteps({ mode: "startup-profile", passthrough: ["--timeout-ms", "1000"], showHelp: false }),
+		() =>
+			verifySteps({
+				mode: "startup-profile",
+				passthrough: ["--timeout-ms", "1000"],
+				showHelp: false,
+			}),
 		/Option --timeout-ms is not supported for verify mode startup-profile/,
 	);
 	assert.throws(
-		() => verifySteps({ mode: "platform-smoke", passthrough: ["run", "--target"], showHelp: false }),
+		() =>
+			verifySteps({ mode: "platform-smoke", passthrough: ["run", "--target"], showHelp: false }),
 		/--target requires a value/,
 	);
 	assert.deepEqual(parseVerifyArgs(["package", "--list-files"]), {
@@ -151,14 +190,24 @@ test("verify facade rejects unsupported options before running a partial gate", 
 test("verify facade lifecycle mode passes --model and other allowed flags through to verify-lifecycle.mjs", () => {
 	const steps = verifySteps({
 		mode: "lifecycle",
-		passthrough: ["--model", "openai-codex/gpt-5.5:minimal", "--keep-artifacts", "--verbose", "--timeout-ms", "600000"],
+		passthrough: [
+			"--model",
+			"openai-codex/gpt-5.5:minimal",
+			"--keep-artifacts",
+			"--verbose",
+			"--timeout-ms",
+			"600000",
+		],
 		showHelp: false,
 	});
 	assert.deepEqual(labels(steps), [
 		"./scripts/verify-lifecycle.mjs --model openai-codex/gpt-5.5:minimal --keep-artifacts --verbose --timeout-ms 600000",
 	]);
 	assert.equal(steps[0]?.env?.PATH, hostToolPath());
-	assert.equal(hostToolPath(["/repo/node_modules/.bin", "/global/bin", "/usr/bin"].join(delimiter)), ["/global/bin", "/usr/bin"].join(delimiter));
+	assert.equal(
+		hostToolPath(["/repo/node_modules/.bin", "/global/bin", "/usr/bin"].join(delimiter)),
+		["/global/bin", "/usr/bin"].join(delimiter),
+	);
 });
 
 test("verify facade lifecycle mode rejects --model without a value", () => {
@@ -167,7 +216,12 @@ test("verify facade lifecycle mode rejects --model without a value", () => {
 		/--model requires a value/,
 	);
 	assert.throws(
-		() => verifySteps({ mode: "lifecycle", passthrough: ["--model", "--keep-artifacts"], showHelp: false }),
+		() =>
+			verifySteps({
+				mode: "lifecycle",
+				passthrough: ["--model", "--keep-artifacts"],
+				showHelp: false,
+			}),
 		/--model requires a value/,
 	);
 });

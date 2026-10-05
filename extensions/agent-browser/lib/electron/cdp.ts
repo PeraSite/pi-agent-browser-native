@@ -24,7 +24,9 @@ function asString(value: unknown): string | undefined {
 }
 
 export function parseCdpVersion(value: unknown): ElectronCdpVersion | undefined {
-	if (!isRecord(value)) return undefined;
+	if (!isRecord(value)) {
+		return undefined;
+	}
 	return {
 		browser: asString(value.Browser) ?? asString(value.browser),
 		protocolVersion: asString(value["Protocol-Version"]) ?? asString(value.protocolVersion),
@@ -36,7 +38,9 @@ export function parseCdpVersion(value: unknown): ElectronCdpVersion | undefined 
 }
 
 export function parseCdpTargets(value: unknown): ElectronCdpTarget[] {
-	if (!Array.isArray(value)) return [];
+	if (!Array.isArray(value)) {
+		return [];
+	}
 	return value.filter(isRecord).map((target) => ({
 		id: asString(target.id),
 		title: asString(target.title),
@@ -46,13 +50,20 @@ export function parseCdpTargets(value: unknown): ElectronCdpTarget[] {
 	}));
 }
 
-export async function fetchCdpJson(url: string, signal?: AbortSignal): Promise<unknown | undefined> {
+export async function fetchCdpJson(
+	url: string,
+	signal?: AbortSignal,
+): Promise<unknown | undefined> {
 	const controller = new AbortController();
 	const timeout = setTimeout(() => controller.abort(), ELECTRON_CDP_FETCH_TIMEOUT_MS);
 	try {
-		const response = await fetch(url, { signal: signal ? AbortSignal.any([signal, controller.signal]) : controller.signal });
-		if (!response.ok) return undefined;
-		return await response.json() as unknown;
+		const response = await fetch(url, {
+			signal: signal ? AbortSignal.any([signal, controller.signal]) : controller.signal,
+		});
+		if (!response.ok) {
+			return undefined;
+		}
+		return (await response.json()) as unknown;
 	} catch {
 		return undefined;
 	} finally {
@@ -60,8 +71,15 @@ export async function fetchCdpJson(url: string, signal?: AbortSignal): Promise<u
 	}
 }
 
-export function boundElectronProbeString(value: string | undefined, maxLength = 240): string | undefined {
+export function boundElectronProbeString(
+	value: string | undefined,
+	maxLength = 240,
+): string | undefined {
 	const trimmed = value?.trim();
-	if (!trimmed) return undefined;
-	return trimmed.length > maxLength ? `${trimmed.slice(0, Math.max(0, maxLength - 3))}...` : trimmed;
+	if (!trimmed) {
+		return undefined;
+	}
+	return trimmed.length > maxLength
+		? `${trimmed.slice(0, Math.max(0, maxLength - 3))}...`
+		: trimmed;
 }

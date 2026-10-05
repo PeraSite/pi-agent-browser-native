@@ -1,6 +1,7 @@
 # Electron desktop apps
 
 Related docs:
+
 - [`../README.md`](../README.md)
 - [`../AGENTS.md`](https://github.com/fitchmultz/pi-agent-browser-native/blob/main/AGENTS.md) — maintainer verification (`npm run verify`, lifecycle), Pi `tmux` smoke expectations, and upstream rebaselining
 - [`TOOL_CONTRACT.md`](TOOL_CONTRACT.md) — full `electron` and `qa.attached` field contracts
@@ -68,15 +69,15 @@ For a quick "is the app actually showing what we expect?" smoke check after atta
 
 Pick the mode that matches the **state you need**.
 
-| | `electron.launch` (wrapper-owned) | `args: ["connect", …]` (manual host launch) |
-|---|---|---|
-| Profile | Isolated temporary `userDataDir` | The app's normal profile (your real signed-in state) |
-| Debug port | OS-chosen via `--remote-debugging-port=0` and `DevToolsActivePort` | Caller-supplied port (for example `9222`) |
-| Signed-in state | **No** — first-run or empty profile | **Yes** — whatever is in the launched profile |
-| Already-running app | Cannot attach to it | Required (or relaunch yourself with a debug port) |
-| Lifecycle ownership | Wrapper owns shutdown and profile cleanup | **You** own shutdown and profile cleanup |
-| When to use | Anything you can do against a fresh app: tooling, UX flows, scripted local QA, exploring panels, packaged debugging | Tasks that explicitly need the user's signed-in Slack/Obsidian/VS Code state |
-| How to clean up | `electron.cleanup` with the returned `launchId` | Close the app yourself; do **not** call `electron.cleanup` |
+|                     | `electron.launch` (wrapper-owned)                                                                                   | `args: ["connect", …]` (manual host launch)                                  |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| Profile             | Isolated temporary `userDataDir`                                                                                    | The app's normal profile (your real signed-in state)                         |
+| Debug port          | OS-chosen via `--remote-debugging-port=0` and `DevToolsActivePort`                                                  | Caller-supplied port (for example `9222`)                                    |
+| Signed-in state     | **No** — first-run or empty profile                                                                                 | **Yes** — whatever is in the launched profile                                |
+| Already-running app | Cannot attach to it                                                                                                 | Required (or relaunch yourself with a debug port)                            |
+| Lifecycle ownership | Wrapper owns shutdown and profile cleanup                                                                           | **You** own shutdown and profile cleanup                                     |
+| When to use         | Anything you can do against a fresh app: tooling, UX flows, scripted local QA, exploring panels, packaged debugging | Tasks that explicitly need the user's signed-in Slack/Obsidian/VS Code state |
+| How to clean up     | `electron.cleanup` with the returned `launchId`                                                                     | Close the app yourself; do **not** call `electron.cleanup`                   |
 
 ### Manual host-launch pattern
 
@@ -134,22 +135,22 @@ Pass **exactly one** target: `appPath`, `appName`, `bundleId`, or `executablePat
 
 ```json
 {
-  "action": "launch",
-  "appName": "Visual Studio Code",
-  "handoff": "snapshot",
-  "targetType": "page",
-  "timeoutMs": 30000,
-  "appArgs": ["--disable-telemetry"]
+	"action": "launch",
+	"appName": "Visual Studio Code",
+	"handoff": "snapshot",
+	"targetType": "page",
+	"timeoutMs": 30000,
+	"appArgs": ["--disable-telemetry"]
 }
 ```
 
 Handoff selection (`handoff` field):
 
-| Value | Behavior | When to use |
-|---|---|---|
-| `"snapshot"` (default) | Attach, verify `get url`, list targets, capture `snapshot -i` in one call | You need interactive refs immediately for clicks/fills |
-| `"tabs"` | Attach, verify `get url`, and list targets only | Safer diagnostic start when you only need target discovery |
-| `"connect"` | Attach and stop | You will run your own follow-up commands |
+| Value                  | Behavior                                                                  | When to use                                                |
+| ---------------------- | ------------------------------------------------------------------------- | ---------------------------------------------------------- |
+| `"snapshot"` (default) | Attach, verify `get url`, list targets, capture `snapshot -i` in one call | You need interactive refs immediately for clicks/fills     |
+| `"tabs"`               | Attach, verify `get url`, and list targets only                           | Safer diagnostic start when you only need target discovery |
+| `"connect"`            | Attach and stop                                                           | You will run your own follow-up commands                   |
 
 `targetType` defaults to `"page"`; use `"webview"` or `"any"` for apps whose useful UI is exposed as a webview target.
 
@@ -208,12 +209,12 @@ On Pi `quit`, active wrapper-owned Electron launches are best-effort cleaned. On
 
 `agent_browser_electron` with `action: "list"` has no `timeoutMs` field. For every other action, flat `timeoutMs` applies to **different surfaces**, not an end-to-end action deadline. Authoritative rules and env overrides live in the Electron contract in [`TOOL_CONTRACT.md#agent_browser_electron`](TOOL_CONTRACT.md#agent_browser_electron).
 
-| Action | What `timeoutMs` covers when set | Typical default when omitted |
-| --- | --- | --- |
-| `launch` | Host-side wait for `DevToolsActivePort` and CDP readiness | **15 s**, hard-capped at **120 s** (`normalizeTimeoutMs` in `extensions/agent-browser/lib/electron/launch.ts`) |
-| `status` | Each optional managed-session `get url` / `get title` subprocess, including `get cdp-url` when verifying a restored connection | Normal wrapper subprocess budget (**35 s**, or `PI_AGENT_BROWSER_PROCESS_TIMEOUT_MS`); localhost CDP probes use **1000 ms** each (`ELECTRON_CDP_FETCH_TIMEOUT_MS` in `extensions/agent-browser/lib/electron/cdp.ts`) |
+| Action    | What `timeoutMs` covers when set                                                                                                                 | Typical default when omitted                                                                                                                                                                                                                                                                   |
+| --------- | ------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `launch`  | Host-side wait for `DevToolsActivePort` and CDP readiness                                                                                        | **15 s**, hard-capped at **120 s** (`normalizeTimeoutMs` in `extensions/agent-browser/lib/electron/launch.ts`)                                                                                                                                                                                 |
+| `status`  | Each optional managed-session `get url` / `get title` subprocess, including `get cdp-url` when verifying a restored connection                   | Normal wrapper subprocess budget (**35 s**, or `PI_AGENT_BROWSER_PROCESS_TIMEOUT_MS`); localhost CDP probes use **1000 ms** each (`ELECTRON_CDP_FETCH_TIMEOUT_MS` in `extensions/agent-browser/lib/electron/cdp.ts`)                                                                           |
 | `cleanup` | Applied separately to managed-session `close` and the initial tracked-process exit wait; not a deadline for debug-port checks or profile removal | `PI_AGENT_BROWSER_IMPLICIT_SESSION_CLOSE_TIMEOUT_MS` when set, else **35000 ms** (`getImplicitSessionCloseTimeoutMs` in `extensions/agent-browser/lib/runtime.ts`, passed through `cleanupTrackedElectronHostLaunches` in `extensions/agent-browser/lib/orchestration/electron-host/index.ts`) |
-| `probe` | **Each** upstream read: optional `get cdp-url` verification, then `get url`, `get title`, focused `eval --stdin`, `tab list`, and `snapshot -i` | Same wrapper subprocess default (**35 s**, or `PI_AGENT_BROWSER_PROCESS_TIMEOUT_MS`, from `getAgentBrowserProcessTimeoutMs` in `extensions/agent-browser/lib/process.ts`) |
+| `probe`   | **Each** upstream read: optional `get cdp-url` verification, then `get url`, `get title`, focused `eval --stdin`, `tab list`, and `snapshot -i`  | Same wrapper subprocess default (**35 s**, or `PI_AGENT_BROWSER_PROCESS_TIMEOUT_MS`, from `getAgentBrowserProcessTimeoutMs` in `extensions/agent-browser/lib/process.ts`)                                                                                                                      |
 
 ## `qa.attached` — current-session smoke check
 
@@ -221,12 +222,12 @@ On Pi `quit`, active wrapper-owned Electron launches are best-effort cleaned. On
 
 ```json
 {
-  "attached": true,
-  "expectedText": "Explorer",
-  "expectedSelector": "@e1",
-  "checkConsole": true,
-  "checkErrors": true,
-  "screenshotPath": ".dogfood/electron.png"
+	"attached": true,
+	"expectedText": "Explorer",
+	"expectedSelector": "@e1",
+	"checkConsole": true,
+	"checkErrors": true,
+	"screenshotPath": ".dogfood/electron.png"
 }
 ```
 
@@ -275,10 +276,10 @@ Both lists match `appName`, `bundleId`, `desktopId`, `appPath`, or `executablePa
 
 ```json
 {
-  "action": "launch",
-  "appName": "Slack",
-  "allow": ["Slack"],
-  "deny": ["1Password", "Bitwarden"]
+	"action": "launch",
+	"appName": "Slack",
+	"allow": ["Slack"],
+	"deny": ["1Password", "Bitwarden"]
 }
 ```
 
@@ -299,15 +300,15 @@ Policy mismatches fail with `failureCategory: "policy-blocked"` and `details.ele
 
 `details.failureCategory` values you should expect from Electron flows, with the recovery move:
 
-| Category | When | Recovery |
-|---|---|---|
-| `validation-error` | Bad input (missing target, conflicting fields, non-Electron target) | Fix the request; the message names the problem |
-| `policy-blocked` | Caller `allow` / `deny` rejected the launch | Adjust the policy or pick a different target |
-| `timeout` | `DevToolsActivePort` never appeared in time | Inspect `details.electron.failure.diagnostics` (PID, profile path, port file state, elapsed/timeout); retry with a higher `timeoutMs` if the app legitimately needs more time |
-| `upstream-error` | Launch/attach/spawn/CDP failure that does not fit a more specific bucket | Inspect `details.electron.failure.diagnostics`; the app may be missing dependencies or hitting a CDP race |
-| `tab-drift` | A successful-looking command was followed by a dead process / debug port / unrecoverable `about:blank` | Use the appended `status-electron-launch` / `probe-electron-launch` next actions, then decide whether to relaunch |
-| `cleanup-failed` | Cleanup only partially succeeded | Inspect `details.electron.cleanup.results[].steps` for remaining process/port/profile state; `retry-electron-cleanup` references the same `launchId` |
-| `stale-ref` | `@e…` ref reused after a navigation/rerender | Take a fresh `snapshot -i` (or follow `refresh-electron-refs-after-rerender` when the wrapper appends it) |
+| Category           | When                                                                                                   | Recovery                                                                                                                                                                      |
+| ------------------ | ------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `validation-error` | Bad input (missing target, conflicting fields, non-Electron target)                                    | Fix the request; the message names the problem                                                                                                                                |
+| `policy-blocked`   | Caller `allow` / `deny` rejected the launch                                                            | Adjust the policy or pick a different target                                                                                                                                  |
+| `timeout`          | `DevToolsActivePort` never appeared in time                                                            | Inspect `details.electron.failure.diagnostics` (PID, profile path, port file state, elapsed/timeout); retry with a higher `timeoutMs` if the app legitimately needs more time |
+| `upstream-error`   | Launch/attach/spawn/CDP failure that does not fit a more specific bucket                               | Inspect `details.electron.failure.diagnostics`; the app may be missing dependencies or hitting a CDP race                                                                     |
+| `tab-drift`        | A successful-looking command was followed by a dead process / debug port / unrecoverable `about:blank` | Use the appended `status-electron-launch` / `probe-electron-launch` next actions, then decide whether to relaunch                                                             |
+| `cleanup-failed`   | Cleanup only partially succeeded                                                                       | Inspect `details.electron.cleanup.results[].steps` for remaining process/port/profile state; `retry-electron-cleanup` references the same `launchId`                          |
+| `stale-ref`        | `@e…` ref reused after a navigation/rerender                                                           | Take a fresh `snapshot -i` (or follow `refresh-electron-refs-after-rerender` when the wrapper appends it)                                                                     |
 
 Failed startup diagnostics include `outputCaptured`, `stdoutTail` / `stderrTail`, and `stdoutTruncated` / `stderrTruncated`. Each tail reads at most the last **4096 source bytes** before UTF-8 decoding and normal credential redaction, and appears in both visible failure text and structured details. Empty output is reported explicitly; `stdoutError` / `stderrError` report capture-read or close errors without replacing the original startup reason, exit status, or cleanup warning.
 
@@ -318,35 +319,43 @@ Single-instance Electron behavior is a common cause of `timeout` and `upstream-e
 ## Troubleshooting
 
 ### Launch hangs and then times out
+
 - The app is enforcing single-instance; quit the running copy first, then retry.
 - The app may have moved its Electron framework directory; pass `executablePath` explicitly.
 - `timeoutMs` is too short for a heavy app; raise it (`launch.timeoutMs` is bounded but generous).
 - Read the redacted stdout/stderr tails in the failure text or `details.electron.failure.diagnostics` first; dependency and startup errors often explain the failure. `DevToolsActivePort`, port number, PID liveness, and timing provide the remaining context.
 
 ### `electron.list` returns nothing
+
 - On Linux, the binary may be a custom rebrand without `chrome_*.pak` siblings, an AppImage without a `.desktop` entry, or a statically linked fork. Pass `executablePath` directly.
 - On macOS, apps installed outside `/Applications` and `~/Applications` are not scanned in v1. Pass `appPath` or `executablePath` explicitly.
 - Windows hosts report `platform: "unsupported"` from `electron.list`; always pass `executablePath` (or a resolvable `appPath`) for `launch`.
 
 ### Attach succeeds but `snapshot -i` returns no refs
+
 - Some Electron apps take a beat to render. The default `handoff: "snapshot"` already retries briefly; if it still reports no refs, run `tab list`, select the intended stable `t<N>` app tab, then run `snapshot -i` again.
 - For raw `connect`, do the same target check before assuming the signed-in app is ready; the attach can succeed before an active page is available.
 - For apps whose UI lives in a webview, switch `targetType` to `"webview"` or `"any"` so the wrapper attaches to the right CDP target.
 
 ### "I clicked, but nothing happened"
+
 - A successful upstream `click` means the action was dispatched, not that the app handled it. Re-snapshot, check `details.pageChangeSummary`, or use `qa.attached` to verify.
 - Electron apps frequently rerender in place (no URL change). The wrapper may attach `refresh-electron-refs-after-rerender` to remind you to re-snapshot before reusing `@e…` refs.
 
 ### `fill` looks fine but the field is empty
+
 - Custom quick-input controls (VS Code's quick-pick, command palette, etc.) often need focus + keyboard typing rather than a direct `fill`. The wrapper attaches `details.fillVerification` when `get value` disagrees with the requested text; follow `inspect-after-fill-verification` and switch to focus + `keyboard type` before submitting.
 
 ### `get text` returns the whole app
+
 - Broad selectors (`body`, `html`, `main`, `[role=application]`) read the entire shell. Use a current `@ref` or a narrower panel selector. The wrapper attaches `details.electronGetTextScopeWarning` and a `snapshot-for-electron-text-scope` next action when it detects this pattern.
 
 ### `sourceLookup` says `no-candidates` for a packaged app
+
 - Expected when the app's source lives inside `app.asar`. The wrapper does not unpack bundles. Use `electron.probe` / `snapshot-electron-session` / `list-electron-tabs` next actions to inspect the live UI, or pull source separately into the Pi session cwd before re-running the lookup.
 
 ### Mismatch between `status` and the active session
+
 - `electron.status` may report a live wrapper launch while the managed session has drifted to `about:blank`. Follow `reattach-electron-launch`, then refresh refs before reusing old `@e…` handles. For non-wrapper tab drift where `details.nextActions` names `select-intended-tab-after-drift`, use that stable `t<N>` action plus `snapshot-after-tab-recovery` before continuing.
 
 ## Code and shared-session coordination

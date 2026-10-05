@@ -40,7 +40,14 @@ import {
 } from "./managed-session-restore.js";
 
 export type { CommandInfo } from "./argv-descriptor.js";
-export { extractCommandTokens, extractUpstreamCommandTokens, findCommandStartIndex, parseArgvDescriptor, parseCommandInfo, parseWaitCommandTokens } from "./argv-descriptor.js";
+export {
+	extractCommandTokens,
+	extractUpstreamCommandTokens,
+	findCommandStartIndex,
+	parseArgvDescriptor,
+	parseCommandInfo,
+	parseWaitCommandTokens,
+} from "./argv-descriptor.js";
 
 import { isRecord } from "./parsing.js";
 import { getAgentBrowserProcessEnvironment } from "./process-environment.js";
@@ -60,15 +67,20 @@ const SENSITIVE_VALUE_FLAGS = new Set(["--body", "--headers", "--password", "--p
 const SENSITIVE_QUERY_PARAM_PATTERN =
 	/^(?:access(?:_|-)?token|api(?:_|-)?key|auth|authorization|authorization(?:_|-)?session(?:_|-)?id|bearer|client(?:_|-)?secret|code|cookie|id(?:_|-)?token|key|pass(?:word)?|refresh(?:_|-)?token|relay(?:_|-)?state|saml(?:_|-)?request|saml(?:_|-)?response|secret|sentry(?:_|-)?key|session(?:_|-)?id|sig(?:nature)?|token|write(?:_|-)?key)$/i;
 const AUTH_STATE_QUERY_PARAM_PATTERN = /^(?:nonce|state)$/i;
-const AUTH_URL_CONTEXT_PATTERN = /(?:^|[./_-])(?:auth|authorize|callback|login|oauth2?|oidc|saml|sso)(?:[./?#_-]|$)/i;
+const AUTH_URL_CONTEXT_PATTERN =
+	/(?:^|[./_-])(?:auth|authorize|callback|login|oauth2?|oidc|saml|sso)(?:[./?#_-]|$)/i;
 const SENSITIVE_FIELD_NAME_PATTERN =
 	/^(?:[A-Za-z0-9_-]*(?:api[_-]?key|access[_-]?key|private[_-]?key|secret(?:[_-]?(?:key|access[_-]?key))?|token|password|passwd|credentials?|database[_-]?url|db[_-]?url|connection[_-]?string|mongo(?:db)?[_-]?uri|redis[_-]?url)|[A-Za-z0-9]*(?:apiKey|ApiKey|apikey|privateKey|PrivateKey|databaseUrl|DatabaseUrl|dbUrl|DbUrl|connectionString|ConnectionString|mongoUri|MongoUri|mongodbUri|MongodbUri|mongoDbUri|MongoDbUri|redisUrl|RedisUrl|Token|Secret|Password|Credential|Credentials)|auth(?:orization)?|bearer|client(?:_|-)?secret|cookie|id(?:_|-)?token|pass(?:word)?|proxy(?:_|-)?authorization|refresh(?:_|-)?token|sentry(?:_|-)?key|session(?:_|-)?id|set(?:_|-)?cookie|sig(?:nature)?|write(?:_|-)?key|x(?:_|-)?api(?:_|-)?key)$/i;
-const ENV_SECRET_ASSIGNMENT_PATTERN = /\b((?:export\s+)?([A-Za-z_][A-Za-z0-9_-]*)(\s*[:=]\s*))(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s,;]+)/g;
+const ENV_SECRET_ASSIGNMENT_PATTERN =
+	/\b((?:export\s+)?([A-Za-z_][A-Za-z0-9_-]*)(\s*[:=]\s*))(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s,;]+)/g;
 
 const DEFAULT_HEADLESS_COMPAT_USER_AGENT_BY_PLATFORM: Partial<Record<NodeJS.Platform, string>> = {
-	darwin: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
-	linux: "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
-	win32: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
+	darwin:
+		"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
+	linux:
+		"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
+	win32:
+		"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
 };
 const FALLBACK_HEADLESS_COMPAT_USER_AGENT =
 	"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36";
@@ -151,15 +163,23 @@ function redactUrlToken(token: string): string {
 	}
 
 	const originalHref = parsed.href;
-	if (parsed.username.length > 0) parsed.username = "[REDACTED]";
-	if (parsed.password.length > 0) parsed.password = "[REDACTED]";
+	if (parsed.username.length > 0) {
+		parsed.username = "[REDACTED]";
+	}
+	if (parsed.password.length > 0) {
+		parsed.password = "[REDACTED]";
+	}
 
 	const hashText = parsed.hash.startsWith("#") ? parsed.hash.slice(1) : parsed.hash;
 	const hashParams = hashText.includes("=") ? new URLSearchParams(hashText) : undefined;
-	const authContext = AUTH_URL_CONTEXT_PATTERN.test(`${parsed.hostname}${parsed.pathname}`)
-		|| [...parsed.searchParams.keys(), ...(hashParams?.keys() ?? [])].some(shouldRedactQueryParam);
+	const authContext =
+		AUTH_URL_CONTEXT_PATTERN.test(`${parsed.hostname}${parsed.pathname}`) ||
+		[...parsed.searchParams.keys(), ...(hashParams?.keys() ?? [])].some(shouldRedactQueryParam);
 	for (const [name] of parsed.searchParams) {
-		if (shouldRedactQueryParam(name) || (authContext && AUTH_STATE_QUERY_PARAM_PATTERN.test(name))) {
+		if (
+			shouldRedactQueryParam(name) ||
+			(authContext && AUTH_STATE_QUERY_PARAM_PATTERN.test(name))
+		) {
 			parsed.searchParams.set(name, "[REDACTED]");
 		}
 	}
@@ -167,12 +187,17 @@ function redactUrlToken(token: string): string {
 	if (hashParams) {
 		let hashMutated = false;
 		for (const [name] of hashParams) {
-			if (shouldRedactQueryParam(name) || (authContext && AUTH_STATE_QUERY_PARAM_PATTERN.test(name))) {
+			if (
+				shouldRedactQueryParam(name) ||
+				(authContext && AUTH_STATE_QUERY_PARAM_PATTERN.test(name))
+			) {
 				hashParams.set(name, "[REDACTED]");
 				hashMutated = true;
 			}
 		}
-		if (hashMutated) parsed.hash = `#${hashParams.toString()}`;
+		if (hashMutated) {
+			parsed.hash = `#${hashParams.toString()}`;
+		}
 	}
 
 	return parsed.href === originalHref ? token : parsed.href;
@@ -181,40 +206,72 @@ function redactUrlToken(token: string): string {
 function redactLooseUrlParameterText(text: string): string {
 	return text.replace(/(?<![^\s"'`<>\])}])[^\s"'`<>\])}]*[?#&][^\s"'`<>\])}]*/g, (token) => {
 		const queryNames = [...token.matchAll(/[?#&]([^=&#\s"'`<>\])}]+)=/g)].map((match) => {
-			try { return decodeURIComponent((match[1] ?? "").replace(/\+/g, " ")); } catch { return match[1] ?? ""; }
-		});
-		const authContext = AUTH_URL_CONTEXT_PATTERN.test(token) || queryNames.some(shouldRedactQueryParam);
-		return token.replace(/([?#&])([^=&#\s"'`<>\])}]+)=([^&#\s"'`<>\])}]*)/g, (match, separator: string, rawName: string, rawValue: string) => {
-			if (rawValue === "[REDACTED" || rawValue === "[REDACTED]" || /%5Bredacted%5D/i.test(rawValue)) return match;
-			let name = rawName;
 			try {
-				name = decodeURIComponent(rawName.replace(/\+/g, " "));
+				return decodeURIComponent((match[1] ?? "").replace(/\+/g, " "));
 			} catch {
-				// Keep the raw name when percent decoding fails.
+				return match[1] ?? "";
 			}
-			if (!shouldRedactQueryParam(name) && !(authContext && AUTH_STATE_QUERY_PARAM_PATTERN.test(name))) return match;
-			return `${separator}${rawName}=[REDACTED]`;
 		});
+		const authContext =
+			AUTH_URL_CONTEXT_PATTERN.test(token) || queryNames.some(shouldRedactQueryParam);
+		return token.replace(
+			/([?#&])([^=&#\s"'`<>\])}]+)=([^&#\s"'`<>\])}]*)/g,
+			(match, separator: string, rawName: string, rawValue: string) => {
+				if (
+					rawValue === "[REDACTED" ||
+					rawValue === "[REDACTED]" ||
+					/%5Bredacted%5D/i.test(rawValue)
+				) {
+					return match;
+				}
+				let name = rawName;
+				try {
+					name = decodeURIComponent(rawName.replace(/\+/g, " "));
+				} catch {
+					// Keep the raw name when percent decoding fails.
+				}
+				if (
+					!shouldRedactQueryParam(name) &&
+					!(authContext && AUTH_STATE_QUERY_PARAM_PATTERN.test(name))
+				) {
+					return match;
+				}
+				return `${separator}${rawName}=[REDACTED]`;
+			},
+		);
 	});
 }
 
 function redactLooseUrlUserinfo(text: string): string {
-	return text.replace(/\b([A-Za-z][A-Za-z0-9+.-]*:\/\/)([^\s"'`/@]+)@([^\s"'`]+)/g, (match, prefix: string, userinfo: string, suffix: string) => {
-		if (/%5Bredacted%5D/i.test(userinfo)) return match;
-		if (userinfo.includes("[REDACTED]")) return redactLooseUrlParameterText(match);
-		return redactLooseUrlParameterText(`${prefix}${userinfo.includes(":") ? "[REDACTED]:[REDACTED]" : "[REDACTED]"}@${suffix}`);
-	});
+	return text.replace(
+		/\b([A-Za-z][A-Za-z0-9+.-]*:\/\/)([^\s"'`/@]+)@([^\s"'`]+)/g,
+		(match, prefix: string, userinfo: string, suffix: string) => {
+			if (/%5Bredacted%5D/i.test(userinfo)) {
+				return match;
+			}
+			if (userinfo.includes("[REDACTED]")) {
+				return redactLooseUrlParameterText(match);
+			}
+			return redactLooseUrlParameterText(
+				`${prefix}${userinfo.includes(":") ? "[REDACTED]:[REDACTED]" : "[REDACTED]"}@${suffix}`,
+			);
+		},
+	);
 }
 
 function redactLooseUrlMatches(text: string): string {
-	return text.replace(/\b[A-Za-z][A-Za-z0-9+.-]*:\/\/[^\s"'`<>\])]+/g, (match) => redactUrlToken(match));
+	return text.replace(/\b[A-Za-z][A-Za-z0-9+.-]*:\/\/[^\s"'`<>\])]+/g, (match) =>
+		redactUrlToken(match),
+	);
 }
 
 function createBalancedJsonEndFinder(text: string): (startIndex: number) => number | undefined {
 	let boundaries: Int32Array | undefined;
 	return (startIndex) => {
 		const opener = text[startIndex];
-		if (opener !== "{" && opener !== "[") return undefined;
+		if (opener !== "{" && opener !== "[") {
+			return undefined;
+		}
 		if (!boundaries) {
 			// Resolve each suffix once: skip strings and balanced groups to its first unmatched closer.
 			boundaries = new Int32Array(text.length + 1).fill(-1);
@@ -228,7 +285,8 @@ function createBalancedJsonEndFinder(text: string): (startIndex: number) => numb
 					boundaries[index] = quoteAtNext < 0 ? -1 : boundaries[quoteAtNext + 1];
 				} else if (char === "{" || char === "[") {
 					const end = boundaries[index + 1];
-					boundaries[index] = end >= 0 && text[end] === (char === "{" ? "}" : "]") ? boundaries[end + 1] : -1;
+					boundaries[index] =
+						end >= 0 && text[end] === (char === "{" ? "}" : "]") ? boundaries[end + 1] : -1;
 				} else {
 					boundaries[index] = boundaries[index + 1];
 				}
@@ -244,8 +302,12 @@ function createBalancedJsonEndFinder(text: string): (startIndex: number) => numb
 }
 
 function redactSerializedJson(text: string): string | undefined {
-	if (text === "[REDACTED]") return undefined;
-	if (!/^\s*[\[{"\d\-tfn]/.test(text)) return undefined;
+	if (text === "[REDACTED]") {
+		return undefined;
+	}
+	if (!/^\s*[\[{"\d\-tfn]/.test(text)) {
+		return undefined;
+	}
 	// Validate grammar only; rebuilding parsed values loses duplicates and numeric spelling.
 	try {
 		JSON.parse(text);
@@ -266,7 +328,9 @@ function redactSerializedJson(text: string): string | undefined {
 			cursor = end;
 		}
 		const separator = /^\s*:\s*/.exec(text.slice(end));
-		if (!separator || !isSensitiveFieldName(value)) continue;
+		if (!separator || !isSensitiveFieldName(value)) {
+			continue;
+		}
 		const valueStart = end + separator[0].length;
 		let valueEnd = findEnd(valueStart);
 		if (valueEnd !== undefined) {
@@ -275,10 +339,14 @@ function redactSerializedJson(text: string): string | undefined {
 			strings.lastIndex = valueStart;
 			const fieldValue = strings.exec(text)!;
 			valueEnd = strings.lastIndex;
-			if (JSON.parse(fieldValue[0]) === "[REDACTED]") continue;
+			if (JSON.parse(fieldValue[0]) === "[REDACTED]") {
+				continue;
+			}
 		} else {
 			valueEnd = valueStart;
-			while (valueEnd < text.length && !/[\s,\]}]/.test(text[valueEnd])) valueEnd += 1;
+			while (valueEnd < text.length && !/[\s,\]}]/.test(text[valueEnd])) {
+				valueEnd += 1;
+			}
 		}
 		output += text.slice(cursor, valueStart) + '"[REDACTED]"';
 		cursor = valueEnd;
@@ -312,10 +380,15 @@ function redactEmbeddedStructuredText(text: string): string {
 }
 
 function redactStandaloneBasicCredential(text: string): string {
-	return text.replace(/\b(Basic)\s+([A-Za-z0-9+/=]{12,})/gi, (match, label: string, credential: string) => {
-		if (!/[0-9+/=]/.test(credential)) return match;
-		return `${label} [REDACTED]`;
-	});
+	return text.replace(
+		/\b(Basic)\s+([A-Za-z0-9+/=]{12,})/gi,
+		(match, label: string, credential: string) => {
+			if (!/[0-9+/=]/.test(credential)) {
+				return match;
+			}
+			return `${label} [REDACTED]`;
+		},
+	);
 }
 
 function credentialTrailingPunctuation(credential: string): string {
@@ -328,16 +401,29 @@ function formatRedactedCredential(label: string, credential: string, trailing = 
 
 function redactBearerCredentials(text: string): string {
 	return text
-		.replace(/((?:\b([A-Za-z][A-Za-z0-9_-]*)\s*[:=]\s*|(?:^|\s)(?:-H\s*|--header(?:\s+|=)))["']?Bearer)\s+([^\s"',)\[\]]+)([),.]?)/gi, (match, label: string, field: string | undefined, credential: string, trailing: string) => {
-			if (field && !isSensitiveFieldName(field)) return match;
-			return formatRedactedCredential(label, credential, trailing);
-		})
-		.replace(/\b(Bearer)\s+([^\s\\"',)\[\]]+)([),.]?)/gi, (match, label: string, credential: string, trailing: string) => {
-			// Without a credential field/header, require a bearer-token shape, not prose, HTML or a URL.
-			const token = credential.slice(0, credential.length - credentialTrailingPunctuation(credential).length);
-			if (!/^[A-Za-z0-9._~+/-]+=*$/.test(token) || !/[0-9._~+/=-]/.test(token)) return match;
-			return formatRedactedCredential(label, credential, trailing);
-		});
+		.replace(
+			/((?:\b([A-Za-z][A-Za-z0-9_-]*)\s*[:=]\s*|(?:^|\s)(?:-H\s*|--header(?:\s+|=)))["']?Bearer)\s+([^\s"',)\[\]]+)([),.]?)/gi,
+			(match, label: string, field: string | undefined, credential: string, trailing: string) => {
+				if (field && !isSensitiveFieldName(field)) {
+					return match;
+				}
+				return formatRedactedCredential(label, credential, trailing);
+			},
+		)
+		.replace(
+			/\b(Bearer)\s+([^\s\\"',)\[\]]+)([),.]?)/gi,
+			(match, label: string, credential: string, trailing: string) => {
+				// Without a credential field/header, require a bearer-token shape, not prose, HTML or a URL.
+				const token = credential.slice(
+					0,
+					credential.length - credentialTrailingPunctuation(credential).length,
+				);
+				if (!/^[A-Za-z0-9._~+/-]+=*$/.test(token) || !/[0-9._~+/=-]/.test(token)) {
+					return match;
+				}
+				return formatRedactedCredential(label, credential, trailing);
+			},
+		);
 }
 
 function isSensitiveFieldName(key: string): boolean {
@@ -346,38 +432,62 @@ function isSensitiveFieldName(key: string): boolean {
 }
 
 function isEnvSecretAssignmentKey(key: string): boolean {
-	if (!isSensitiveFieldName(key)) return false;
-	if (key === "password" || key.includes("_") || key.includes("-") || key === key.toUpperCase()) return true;
-	return /(?:apiKey|ApiKey|privateKey|PrivateKey|databaseUrl|DatabaseUrl|dbUrl|DbUrl|connectionString|ConnectionString|mongoUri|MongoUri|mongodbUri|MongodbUri|mongoDbUri|MongoDbUri|redisUrl|RedisUrl|Token|Secret|Password|Credential|Credentials)$/.test(key);
+	if (!isSensitiveFieldName(key)) {
+		return false;
+	}
+	if (key === "password" || key.includes("_") || key.includes("-") || key === key.toUpperCase()) {
+		return true;
+	}
+	return /(?:apiKey|ApiKey|privateKey|PrivateKey|databaseUrl|DatabaseUrl|dbUrl|DbUrl|connectionString|ConnectionString|mongoUri|MongoUri|mongodbUri|MongodbUri|mongoDbUri|MongoDbUri|redisUrl|RedisUrl|Token|Secret|Password|Credential|Credentials)$/.test(
+		key,
+	);
 }
 
 function redactEnvSecretAssignments(text: string): string {
-	return text.replace(ENV_SECRET_ASSIGNMENT_PATTERN, (match, prefix: string, key: string, _separator: string, offset: number) => {
-		if (!isEnvSecretAssignmentKey(key)) return match;
-		if (key === "password") {
-			// The loose matcher cannot safely distinguish inline punctuation from password characters.
-			const end = offset + match.length;
-			if ((offset > 0 && text[offset - 1] !== "\n" && text[offset - 1] !== "\r")
-				|| (end < text.length && text[end] !== "\n" && text[end] !== "\r")
-				|| /^(?:\[REDACTED\]|%5Bredacted%5D)/i.test(match.slice(prefix.length))) return match;
-			const value = match.slice(prefix.length);
-			const boundary = value[0] === '"' || value[0] === "'" ? -1 : value.search(/[&#](?=[A-Za-z_][A-Za-z0-9_-]*\s*=)/);
-			return `${prefix}[REDACTED]${boundary < 0 ? "" : value.slice(boundary)}`;
-		}
-		return `${prefix}[REDACTED]`;
-	});
+	return text.replace(
+		ENV_SECRET_ASSIGNMENT_PATTERN,
+		(match, prefix: string, key: string, _separator: string, offset: number) => {
+			if (!isEnvSecretAssignmentKey(key)) {
+				return match;
+			}
+			if (key === "password") {
+				// The loose matcher cannot safely distinguish inline punctuation from password characters.
+				const end = offset + match.length;
+				if (
+					(offset > 0 && text[offset - 1] !== "\n" && text[offset - 1] !== "\r") ||
+					(end < text.length && text[end] !== "\n" && text[end] !== "\r") ||
+					/^(?:\[REDACTED\]|%5Bredacted%5D)/i.test(match.slice(prefix.length))
+				) {
+					return match;
+				}
+				const value = match.slice(prefix.length);
+				const boundary =
+					value[0] === '"' || value[0] === "'"
+						? -1
+						: value.search(/[&#](?=[A-Za-z_][A-Za-z0-9_-]*\s*=)/);
+				return `${prefix}[REDACTED]${boundary < 0 ? "" : value.slice(boundary)}`;
+			}
+			return `${prefix}[REDACTED]`;
+		},
+	);
 }
 
 export function redactSensitiveText(text: string): string {
 	// Redact JSON string literals before text heuristics can consume their escapes.
 	// Non-JSON stays whole so assignments and headers retain their credential context.
 	const serialized = redactSerializedJson(text);
-	if (serialized !== undefined) return serialized;
+	if (serialized !== undefined) {
+		return serialized;
+	}
 	const embeddedRedactedText = redactEmbeddedStructuredText(text);
 	return redactEmbeddedStructuredText(
 		redactEnvSecretAssignments(
 			redactStandaloneBasicCredential(
-				redactBearerCredentials(redactLooseUrlParameterText(redactLooseUrlUserinfo(redactLooseUrlMatches(embeddedRedactedText))))
+				redactBearerCredentials(
+					redactLooseUrlParameterText(
+						redactLooseUrlUserinfo(redactLooseUrlMatches(embeddedRedactedText)),
+					),
+				)
 					.replace(/\b(Authorization\s*:\s*Basic)\s+[^\s",]+/gi, "$1 [REDACTED]")
 					.replace(/\b(Cookie|Set-Cookie)\s*:\s*[^\n\r"]+/gi, "$1: [REDACTED]"),
 			),
@@ -438,7 +548,11 @@ export function redactInvocationArgs(args: string[]): string[] {
 	}
 
 	const commandStartIndex = findCommandStartIndex(args);
-	if (commandStartIndex !== undefined && args[commandStartIndex] === "set" && args[commandStartIndex + 1] === "credentials") {
+	if (
+		commandStartIndex !== undefined &&
+		args[commandStartIndex] === "set" &&
+		args[commandStartIndex + 1] === "credentials"
+	) {
 		for (const index of [commandStartIndex + 2, commandStartIndex + 3]) {
 			if (redacted[index] !== undefined) {
 				redacted[index] = "[REDACTED]";
@@ -446,23 +560,31 @@ export function redactInvocationArgs(args: string[]): string[] {
 		}
 	}
 
-	if (commandStartIndex !== undefined && args[commandStartIndex] === "cookies" && args[commandStartIndex + 1] === "set"
-		&& !extractUpstreamCommandTokens(args).slice(2).includes("--curl")
-		&& redacted[commandStartIndex + 3] !== undefined) {
+	if (
+		commandStartIndex !== undefined &&
+		args[commandStartIndex] === "cookies" &&
+		args[commandStartIndex + 1] === "set" &&
+		!extractUpstreamCommandTokens(args).slice(2).includes("--curl") &&
+		redacted[commandStartIndex + 3] !== undefined
+	) {
 		redacted[commandStartIndex + 3] = "[REDACTED]";
 	}
 
 	if (
-		commandStartIndex !== undefined
-		&& args[commandStartIndex] === "storage"
-		&& ["local", "session"].includes(args[commandStartIndex + 1] ?? "")
-		&& args[commandStartIndex + 2] === "set"
-		&& redacted[commandStartIndex + 4] !== undefined
+		commandStartIndex !== undefined &&
+		args[commandStartIndex] === "storage" &&
+		["local", "session"].includes(args[commandStartIndex + 1] ?? "") &&
+		args[commandStartIndex + 2] === "set" &&
+		redacted[commandStartIndex + 4] !== undefined
 	) {
 		redacted[commandStartIndex + 4] = "[REDACTED]";
 	}
 
-	if (commandStartIndex !== undefined && args[commandStartIndex] === "clipboard" && args[commandStartIndex + 1] === "write") {
+	if (
+		commandStartIndex !== undefined &&
+		args[commandStartIndex] === "clipboard" &&
+		args[commandStartIndex + 1] === "write"
+	) {
 		for (let index = commandStartIndex + 2; index < redacted.length; index += 1) {
 			redacted[index] = "[REDACTED]";
 		}
@@ -471,11 +593,19 @@ export function redactInvocationArgs(args: string[]): string[] {
 	const batch = projectUpstreamGlobalFlags(args);
 	if (batch.tokens[0] === "batch") {
 		for (let index = 1; index < batch.tokens.length; index++) {
-			if (batch.tokens[index] === "--bail") continue;
+			if (batch.tokens[index] === "--bail") {
+				continue;
+			}
 			const step = parseBatchCommandArgument(batch.tokens[index]).step;
-			if (!step) continue;
+			if (!step) {
+				continue;
+			}
 			const safe = redactInvocationArgs(step);
-			if (safe.some((token, offset) => token !== step[offset])) redacted[batch.indices[index]] = safe.map(token => `'${token.replaceAll("'", "'\\''")}'`).join(" ");
+			if (safe.some((token, offset) => token !== step[offset])) {
+				redacted[batch.indices[index]] = safe
+					.map((token) => `'${token.replaceAll("'", "'\\''")}'`)
+					.join(" ");
+			}
 		}
 	}
 	return redacted;
@@ -486,9 +616,13 @@ export function isPlainTextInspectionArgs(args: string[]): boolean {
 }
 
 function parseTimeoutMs(rawValue: string | undefined, minimumValue: number): number | undefined {
-	if (typeof rawValue !== "string") return undefined;
+	if (typeof rawValue !== "string") {
+		return undefined;
+	}
 	const normalizedValue = rawValue.trim();
-	if (!/^\d+$/.test(normalizedValue)) return undefined;
+	if (!/^\d+$/.test(normalizedValue)) {
+		return undefined;
+	}
 	const parsedValue = Number(normalizedValue);
 	if (!Number.isSafeInteger(parsedValue) || parsedValue < minimumValue) {
 		return undefined;
@@ -496,18 +630,27 @@ function parseTimeoutMs(rawValue: string | undefined, minimumValue: number): num
 	return parsedValue;
 }
 
-export function getImplicitSessionIdleTimeoutMs(env: NodeJS.ProcessEnv = getAgentBrowserProcessEnvironment()): number {
-	return parseTimeoutMs(env[IMPLICIT_SESSION_IDLE_TIMEOUT_ENV], 0) ??
+export function getImplicitSessionIdleTimeoutMs(
+	env: NodeJS.ProcessEnv = getAgentBrowserProcessEnvironment(),
+): number {
+	return (
+		parseTimeoutMs(env[IMPLICIT_SESSION_IDLE_TIMEOUT_ENV], 0) ??
 		parseTimeoutMs(env[AGENT_BROWSER_IDLE_TIMEOUT_ENV], 0) ??
-		DEFAULT_IMPLICIT_SESSION_IDLE_TIMEOUT_MS;
+		DEFAULT_IMPLICIT_SESSION_IDLE_TIMEOUT_MS
+	);
 }
 
 function countExplicitGlobalFlags(args: string[], targetFlag: "--namespace" | "--session"): number {
 	return scanUpstreamGlobalFlagOccurrences(args, targetFlag).length;
 }
 
-export function getImplicitSessionCloseTimeoutMs(env: NodeJS.ProcessEnv = getAgentBrowserProcessEnvironment()): number {
-	return parseTimeoutMs(env[IMPLICIT_SESSION_CLOSE_TIMEOUT_ENV], 0) ?? DEFAULT_IMPLICIT_SESSION_CLOSE_TIMEOUT_MS;
+export function getImplicitSessionCloseTimeoutMs(
+	env: NodeJS.ProcessEnv = getAgentBrowserProcessEnvironment(),
+): number {
+	return (
+		parseTimeoutMs(env[IMPLICIT_SESSION_CLOSE_TIMEOUT_ENV], 0) ??
+		DEFAULT_IMPLICIT_SESSION_CLOSE_TIMEOUT_MS
+	);
 }
 
 export function resolveManagedSessionState(options: {
@@ -520,29 +663,55 @@ export function resolveManagedSessionState(options: {
 	succeeded: boolean;
 }): ManagedSessionState {
 	const { command, managedSessionName, priorActive, priorSessionName, succeeded } = options;
-	const managedSessionNamespace = canonicalizeAgentBrowserNamespace(options.managedSessionNamespace);
+	const managedSessionNamespace = canonicalizeAgentBrowserNamespace(
+		options.managedSessionNamespace,
+	);
 	const priorNamespace = canonicalizeAgentBrowserNamespace(options.priorNamespace);
 	if (!managedSessionName) {
-		return { active: priorActive, ...(priorNamespace ? { namespace: priorNamespace } : {}), sessionName: priorSessionName };
+		return {
+			active: priorActive,
+			...(priorNamespace ? { namespace: priorNamespace } : {}),
+			sessionName: priorSessionName,
+		};
 	}
 	if (isCloseCommand(command) && managedSessionName === priorSessionName) {
-		if (managedSessionNamespace !== priorNamespace) return { active: priorActive, ...(priorNamespace ? { namespace: priorNamespace } : {}), sessionName: priorSessionName };
+		if (managedSessionNamespace !== priorNamespace) {
+			return {
+				active: priorActive,
+				...(priorNamespace ? { namespace: priorNamespace } : {}),
+				sessionName: priorSessionName,
+			};
+		}
 		const namespace = succeeded ? undefined : priorNamespace;
-		return { active: succeeded ? false : priorActive, ...(namespace ? { namespace } : {}), sessionName: priorSessionName };
+		return {
+			active: succeeded ? false : priorActive,
+			...(namespace ? { namespace } : {}),
+			sessionName: priorSessionName,
+		};
 	}
 	if (!succeeded) {
-		return { active: priorActive, ...(priorNamespace ? { namespace: priorNamespace } : {}), sessionName: priorSessionName };
+		return {
+			active: priorActive,
+			...(priorNamespace ? { namespace: priorNamespace } : {}),
+			sessionName: priorSessionName,
+		};
 	}
 	return {
 		active: true,
 		...(managedSessionNamespace ? { namespace: managedSessionNamespace } : {}),
-		replacedSessionName: priorActive && priorSessionName !== managedSessionName ? priorSessionName : undefined,
+		replacedSessionName:
+			priorActive && priorSessionName !== managedSessionName ? priorSessionName : undefined,
 		sessionName: managedSessionName,
 	};
 }
 
-export function isRestorableManagedSessionName(sessionName: string, fallbackSessionName: string): boolean {
-	return sessionName === fallbackSessionName || sessionName.startsWith(`${fallbackSessionName}-fresh-`);
+export function isRestorableManagedSessionName(
+	sessionName: string,
+	fallbackSessionName: string,
+): boolean {
+	return (
+		sessionName === fallbackSessionName || sessionName.startsWith(`${fallbackSessionName}-fresh-`)
+	);
 }
 
 function getManagedSessionRestoreRank(options: {
@@ -566,28 +735,48 @@ function getManagedSessionRestoreRank(options: {
 	return nextRank;
 }
 
-function getRestorableManagedSessionName(value: unknown, fallbackSessionName: string): string | undefined {
-	return typeof value === "string" && isRestorableManagedSessionName(value, fallbackSessionName) ? value : undefined;
+function getRestorableManagedSessionName(
+	value: unknown,
+	fallbackSessionName: string,
+): string | undefined {
+	return typeof value === "string" && isRestorableManagedSessionName(value, fallbackSessionName)
+		? value
+		: undefined;
 }
 
-function getElectronCleanupClosedManagedSessions(details: Record<string, unknown>, fallbackSessionName: string): Array<{ namespace?: string; sessionName: string }> {
+function getElectronCleanupClosedManagedSessions(
+	details: Record<string, unknown>,
+	fallbackSessionName: string,
+): Array<{ namespace?: string; sessionName: string }> {
 	const electron = isRecord(details.electron) ? details.electron : undefined;
 	const cleanup = isRecord(electron?.cleanup) ? electron.cleanup : undefined;
 	const results = Array.isArray(cleanup?.results) ? cleanup.results : [];
 	const closedSessions: Array<{ namespace?: string; sessionName: string }> = [];
 	for (const result of results) {
-		if (!isRecord(result) || !Array.isArray(result.steps)) continue;
+		if (!isRecord(result) || !Array.isArray(result.steps)) {
+			continue;
+		}
 		const record = isRecord(result.record) ? result.record : undefined;
-		const fallbackNamespace = typeof record?.namespace === "string"
-			? record.namespace
-			: typeof details.namespace === "string" ? details.namespace : undefined;
+		const fallbackNamespace =
+			typeof record?.namespace === "string"
+				? record.namespace
+				: typeof details.namespace === "string"
+					? details.namespace
+					: undefined;
 		for (const step of result.steps) {
-			if (!isRecord(step) || step.resource !== "managed-session") continue;
-			if (step.state !== "removed" && step.state !== "already-gone") continue;
-			const sessionName = getRestorableManagedSessionName(step.sessionName, fallbackSessionName)
-				?? getRestorableManagedSessionName(record?.sessionName, fallbackSessionName);
+			if (!isRecord(step) || step.resource !== "managed-session") {
+				continue;
+			}
+			if (step.state !== "removed" && step.state !== "already-gone") {
+				continue;
+			}
+			const sessionName =
+				getRestorableManagedSessionName(step.sessionName, fallbackSessionName) ??
+				getRestorableManagedSessionName(record?.sessionName, fallbackSessionName);
 			const namespace = typeof step.namespace === "string" ? step.namespace : fallbackNamespace;
-			if (sessionName) closedSessions.push({ namespace, sessionName });
+			if (sessionName) {
+				closedSessions.push({ namespace, sessionName });
+			}
 		}
 	}
 	return closedSessions;
@@ -614,7 +803,13 @@ export function restoreManagedSessionStateFromBranch(
 			freshSessionRanks,
 			sessionName,
 		});
-		if (restoreRank === undefined || sessionName !== restoredState.sessionName || namespace !== restoredState.namespace) return;
+		if (
+			restoreRank === undefined ||
+			sessionName !== restoredState.sessionName ||
+			namespace !== restoredState.namespace
+		) {
+			return;
+		}
 		restoredState = { active: false, sessionName: restoredState.sessionName };
 		closedSessionName = sessionName;
 	};
@@ -633,57 +828,94 @@ export function restoreManagedSessionStateFromBranch(
 			continue;
 		}
 
-		for (const cleanupSession of getElectronCleanupClosedManagedSessions(details, fallbackSessionName)) {
+		for (const cleanupSession of getElectronCleanupClosedManagedSessions(
+			details,
+			fallbackSessionName,
+		)) {
 			applyManagedClose(cleanupSession.sessionName, cleanupSession.namespace);
 		}
 
 		const explicitSessionName = extractExplicitSessionName(args);
 		const sessionName = typeof details.sessionName === "string" ? details.sessionName : undefined;
-		const namespace = canonicalizeAgentBrowserNamespace(typeof details.namespace === "string" ? details.namespace : undefined);
-		const sessionMode = details.sessionMode === "fresh" || details.sessionMode === "auto" ? details.sessionMode : undefined;
+		const namespace = canonicalizeAgentBrowserNamespace(
+			typeof details.namespace === "string" ? details.namespace : undefined,
+		);
+		const sessionMode =
+			details.sessionMode === "fresh" || details.sessionMode === "auto"
+				? details.sessionMode
+				: undefined;
 		const usedImplicitSession = details.usedImplicitSession === true;
 		const commandTokens = extractUpstreamCommandTokens(args);
-		const command = typeof details.command === "string" ? details.command : parseCommandInfo(args).command;
+		const command =
+			typeof details.command === "string" ? details.command : parseCommandInfo(args).command;
 		const batchCloseLifecycle = getSuccessfulBatchCloseLifecycle(details.batchSteps);
 		const nestedBatchEndsClosed = batchCloseLifecycle?.endsClosed === true;
 		const nestedBatchRemainsActive = batchCloseLifecycle?.endsClosed === false;
-		const closeAllApplied = details.closeAllApplied === true
-			|| (message.isError !== true && isCloseAllCommand(commandTokens))
-			|| batchHasSuccessfulCloseAll(details.batchSteps);
+		const closeAllApplied =
+			details.closeAllApplied === true ||
+			(message.isError !== true && isCloseAllCommand(commandTokens)) ||
+			batchHasSuccessfulCloseAll(details.batchSteps);
 		const commandClosesSession = isCloseCommand(command) || nestedBatchEndsClosed;
-		const outcome = typeof details.managedSessionOutcome === "object" && details.managedSessionOutcome !== null ? details.managedSessionOutcome as Record<string, unknown> : undefined;
+		const outcome =
+			typeof details.managedSessionOutcome === "object" && details.managedSessionOutcome !== null
+				? (details.managedSessionOutcome as Record<string, unknown>)
+				: undefined;
 		const outcomeStatus = typeof outcome?.status === "string" ? outcome.status : undefined;
-		const outcomeCurrentSessionName = typeof outcome?.currentSessionName === "string" ? outcome.currentSessionName : undefined;
-		const outcomeAttemptedSessionName = getRestorableManagedSessionName(outcome?.attemptedSessionName, fallbackSessionName);
-		const outcomeClosedSessionName = outcomeStatus === "closed" && outcome?.succeeded === true
-			? outcomeAttemptedSessionName ?? getRestorableManagedSessionName(outcomeCurrentSessionName, fallbackSessionName) ?? getRestorableManagedSessionName(sessionName, fallbackSessionName)
-			: undefined;
-		const restorableDetailSessionName = getRestorableManagedSessionName(sessionName, fallbackSessionName);
+		const outcomeCurrentSessionName =
+			typeof outcome?.currentSessionName === "string" ? outcome.currentSessionName : undefined;
+		const outcomeAttemptedSessionName = getRestorableManagedSessionName(
+			outcome?.attemptedSessionName,
+			fallbackSessionName,
+		);
+		const outcomeClosedSessionName =
+			outcomeStatus === "closed" && outcome?.succeeded === true
+				? (outcomeAttemptedSessionName ??
+					getRestorableManagedSessionName(outcomeCurrentSessionName, fallbackSessionName) ??
+					getRestorableManagedSessionName(sessionName, fallbackSessionName))
+				: undefined;
+		const restorableDetailSessionName = getRestorableManagedSessionName(
+			sessionName,
+			fallbackSessionName,
+		);
 		if (closeAllApplied && restoredState.active) {
-			const restoredKey = getAgentBrowserSessionIdentityKey(restoredState.sessionName, restoredState.namespace);
-			const resultKey = restorableDetailSessionName ? getAgentBrowserSessionIdentityKey(restorableDetailSessionName, namespace) : undefined;
+			const restoredKey = getAgentBrowserSessionIdentityKey(
+				restoredState.sessionName,
+				restoredState.namespace,
+			);
+			const resultKey = restorableDetailSessionName
+				? getAgentBrowserSessionIdentityKey(restorableDetailSessionName, namespace)
+				: undefined;
 			const retainsCurrentSession = nestedBatchRemainsActive && resultKey === restoredKey;
-			if (isAgentBrowserSessionIdentityKeyInNamespace(restoredKey, namespace) && !retainsCurrentSession) {
+			if (
+				isAgentBrowserSessionIdentityKeyInNamespace(restoredKey, namespace) &&
+				!retainsCurrentSession
+			) {
 				applyManagedClose(restoredState.sessionName, restoredState.namespace);
 			}
 		}
-		const explicitCloseSessionName = commandClosesSession && explicitSessionName && restorableDetailSessionName === explicitSessionName
-			? restorableDetailSessionName
-			: undefined;
+		const explicitCloseSessionName =
+			commandClosesSession &&
+			explicitSessionName &&
+			restorableDetailSessionName === explicitSessionName
+				? restorableDetailSessionName
+				: undefined;
 		// Sticky restore policy is session-identity state and must apply even for explicit
 		// `--session <current-managed>` rows that are not used for managed-session lifecycle replay.
 		if (details.managedSessionRestoreDisabled === true && typeof sessionName === "string") {
-			restoreDisabledIdentities.set(getAgentBrowserSessionIdentityKey(sessionName, namespace), { namespace, sessionName });
+			restoreDisabledIdentities.set(getAgentBrowserSessionIdentityKey(sessionName, namespace), {
+				namespace,
+				sessionName,
+			});
 		}
-		const managedSessionName = outcomeClosedSessionName ?? (
-			!explicitSessionName &&
+		const managedSessionName =
+			outcomeClosedSessionName ??
+			(!explicitSessionName &&
 			restorableDetailSessionName &&
 			(usedImplicitSession || sessionMode === "fresh")
 				? restorableDetailSessionName
 				: commandClosesSession
 					? explicitCloseSessionName
-					: undefined
-		);
+					: undefined);
 		if (!managedSessionName) {
 			continue;
 		}
@@ -701,13 +933,23 @@ export function restoreManagedSessionStateFromBranch(
 		const messageIsError = typeof message.isError === "boolean" ? message.isError : undefined;
 		const exitCode = typeof details.exitCode === "number" ? details.exitCode : undefined;
 		const outcomeActiveAfter = outcome?.activeAfter === true;
-		const outcomeRepresentsActiveCurrentSession = outcomeActiveAfter && outcomeCurrentSessionName === managedSessionName && (outcomeStatus === "created" || outcomeStatus === "replaced" || outcomeStatus === "unchanged");
-		const succeeded = outcomeRepresentsActiveCurrentSession || nestedBatchRemainsActive
-			? true
-			: messageIsError === undefined ? exitCode === undefined || exitCode === 0 : !messageIsError;
+		const outcomeRepresentsActiveCurrentSession =
+			outcomeActiveAfter &&
+			outcomeCurrentSessionName === managedSessionName &&
+			(outcomeStatus === "created" ||
+				outcomeStatus === "replaced" ||
+				outcomeStatus === "unchanged");
+		const succeeded =
+			outcomeRepresentsActiveCurrentSession || nestedBatchRemainsActive
+				? true
+				: messageIsError === undefined
+					? exitCode === undefined || exitCode === 0
+					: !messageIsError;
 		if (commandClosesSession || outcomeClosedSessionName) {
 			if (nestedBatchEndsClosed || outcomeClosedSessionName || succeeded) {
-				restoreDisabledIdentities.delete(getAgentBrowserSessionIdentityKey(managedSessionName, namespace));
+				restoreDisabledIdentities.delete(
+					getAgentBrowserSessionIdentityKey(managedSessionName, namespace),
+				);
 				applyManagedClose(managedSessionName, namespace);
 			}
 			continue;
@@ -745,7 +987,10 @@ export function createEphemeralSessionSeed(): string {
 }
 
 function createCwdHash(cwd: string): string {
-	return createHash("sha256").update(`cwd:${cwd}`).digest("hex").slice(0, SESSION_NAME_CWD_HASH_LENGTH);
+	return createHash("sha256")
+		.update(`cwd:${cwd}`)
+		.digest("hex")
+		.slice(0, SESSION_NAME_CWD_HASH_LENGTH);
 }
 
 export function createImplicitSessionName(
@@ -756,8 +1001,13 @@ export function createImplicitSessionName(
 ): string {
 	const normalizedSessionId = sessionId?.replaceAll("-", "").toLowerCase();
 	if (platform === "android") {
-		const identity = normalizedSessionId ? `session:${normalizedSessionId}:cwd:${cwd}` : `ephemeral:${cwd}:${ephemeralSeed}`;
-		const digest = createHash("sha256").update(identity).digest("hex").slice(0, ANDROID_SESSION_NAME_IDENTITY_LENGTH);
+		const identity = normalizedSessionId
+			? `session:${normalizedSessionId}:cwd:${cwd}`
+			: `ephemeral:${cwd}:${ephemeralSeed}`;
+		const digest = createHash("sha256")
+			.update(identity)
+			.digest("hex")
+			.slice(0, ANDROID_SESSION_NAME_IDENTITY_LENGTH);
 		return `${MANAGED_SESSION_NAME_PREFIX}${digest}`;
 	}
 
@@ -783,7 +1033,11 @@ export function createImplicitSessionName(
 	return `${MANAGED_SESSION_NAME_PREFIX}${slug}-${digest}-${cwdHash}`;
 }
 
-export function createFreshSessionName(baseSessionName: string, ephemeralSeed: string, ordinal: number): string {
+export function createFreshSessionName(
+	baseSessionName: string,
+	ephemeralSeed: string,
+	ordinal: number,
+): string {
 	const suffix = createHash("sha256")
 		.update(`fresh:${baseSessionName}:${ephemeralSeed}:${ordinal}`)
 		.digest("hex")
@@ -794,22 +1048,35 @@ export function createFreshSessionName(baseSessionName: string, ephemeralSeed: s
 function getSingleKeyCommandValidationError(args: string[]): string | undefined {
 	const { commandInfo, upstreamCommandTokens: commandTokens } = parseArgvDescriptor(args);
 	const command = commandInfo.command;
-	if (command !== "press" && command !== "key" && command !== "keydown" && command !== "keyup") return undefined;
-	if (commandTokens.length === 2) return undefined;
+	if (command !== "press" && command !== "key" && command !== "keydown" && command !== "keyup") {
+		return undefined;
+	}
+	if (commandTokens.length === 2) {
+		return undefined;
+	}
 	const label = command === "key" ? "key/press" : command;
 	return `agent-browser ${label} accepts exactly one key argument. Do not pass a selector or ref to ${label}; focus or click the target first, then run ${command} <key> (for example: focus @e1, then press Enter).`;
 }
 
 function getBareMcpValidationError(args: string[]): string | undefined {
 	const { commandInfo, upstreamCommandTokens: commandTokens } = parseArgvDescriptor(args);
-	if (commandInfo.command !== "mcp") return undefined;
-	if (commandTokens.includes("--help") || commandTokens.includes("-h")) return undefined;
+	if (commandInfo.command !== "mcp") {
+		return undefined;
+	}
+	if (commandTokens.includes("--help") || commandTokens.includes("-h")) {
+		return undefined;
+	}
 	return "agent-browser mcp starts a stdio MCP server for external MCP clients, not a one-shot native agent_browser tool workflow. Use the native agent_browser tool modes directly, or configure an MCP client to launch `agent-browser mcp`. Use `mcp --help` for help.";
 }
 
 function getUnsupportedInlineWaitDownloadError(args: string[]): string | undefined {
 	const descriptor = parseArgvDescriptor(args);
-	if (descriptor.commandInfo.command !== "wait" || !descriptor.upstreamCommandTokens.some((token) => token.startsWith("--download="))) return undefined;
+	if (
+		descriptor.commandInfo.command !== "wait" ||
+		!descriptor.upstreamCommandTokens.some((token) => token.startsWith("--download="))
+	) {
+		return undefined;
+	}
 	return `agent-browser ${TARGET_AGENT_BROWSER_VERSION} does not support \`wait --download=<path>\`. Pass the optional path as a separate argument: \`wait --download <path>\` (or \`wait -d <path>\`).`;
 }
 
@@ -818,14 +1085,22 @@ function getBareNoSandboxValidationError(args: string[], batchStep: boolean): st
 	const tokens = batchStep ? args : stripUpstreamGlobalFlags(args);
 	const command = tokens[0];
 	const leading = command === "--no-sandbox";
-	if (!leading && (!isOpenNavigationCommand(command) || !tokens.slice(1).includes("--no-sandbox"))) return undefined;
+	if (
+		!leading &&
+		(!isOpenNavigationCommand(command) || !tokens.slice(1).includes("--no-sandbox"))
+	) {
+		return undefined;
+	}
 	const explanation = leading
 		? "`--no-sandbox` is not an agent-browser command."
 		: `\`--no-sandbox\` is ignored as an option by \`${command}\`.`;
 	return `${explanation} It is a Chromium launch argument. Put it in top-level \`--args\` and start a fresh session: { args: ["--args", "--no-sandbox", "open", "https://example.com"], sessionMode: "fresh" }. For batch, put --args before batch, not inside a step.`;
 }
 
-export function validateToolArgs(args: string[], options: { batchStep?: boolean } = {}): string | undefined {
+export function validateToolArgs(
+	args: string[],
+	options: { batchStep?: boolean } = {},
+): string | undefined {
 	if (args.length === 0) {
 		return "`args` must contain at least one agent-browser command token.";
 	}
@@ -835,20 +1110,33 @@ export function validateToolArgs(args: string[], options: { batchStep?: boolean 
 		return `Do not pass shell operators like \`${shellOperator}\`. Pass exact agent-browser CLI arguments only.`;
 	}
 
-	const sessionModeArg = args.find((token) => token === "--session-mode" || token.startsWith("--session-mode="));
+	const sessionModeArg = args.find(
+		(token) => token === "--session-mode" || token.startsWith("--session-mode="),
+	);
 	if (sessionModeArg) {
-		return "Do not pass `--session-mode` in args. Use the top-level agent_browser `sessionMode` field instead, for example { args: [\"--profile\", \"Default\", \"open\", \"https://example.com\"], sessionMode: \"fresh\" }.";
+		return 'Do not pass `--session-mode` in args. Use the top-level agent_browser `sessionMode` field instead, for example { args: ["--profile", "Default", "open", "https://example.com"], sessionMode: "fresh" }.';
 	}
 
 	const inspection = !options.batchStep && isPlainTextInspectionArgs(args);
-	const invalidValueFlag = inspection ? undefined : getInvalidValueFlagDetails(args, !options.batchStep);
-	if (invalidValueFlag?.reason === "unsupported-assignment") return formatInvalidValueFlagError(invalidValueFlag, options.batchStep);
+	const invalidValueFlag = inspection
+		? undefined
+		: getInvalidValueFlagDetails(args, !options.batchStep);
+	if (invalidValueFlag?.reason === "unsupported-assignment") {
+		return formatInvalidValueFlagError(invalidValueFlag, options.batchStep);
+	}
 
-	return (inspection ? undefined : getBareNoSandboxValidationError(args, options.batchStep === true))
-		?? getBareMcpValidationError(args) ?? getSingleKeyCommandValidationError(args) ?? getUnsupportedInlineWaitDownloadError(args);
+	return (
+		(inspection ? undefined : getBareNoSandboxValidationError(args, options.batchStep === true)) ??
+		getBareMcpValidationError(args) ??
+		getSingleKeyCommandValidationError(args) ??
+		getUnsupportedInlineWaitDownloadError(args)
+	);
 }
 
-function getInvalidValueFlagDetails(args: string[], allowRestoreAssignment = true): InvalidValueFlagDetails | undefined {
+function getInvalidValueFlagDetails(
+	args: string[],
+	allowRestoreAssignment = true,
+): InvalidValueFlagDetails | undefined {
 	for (let index = 0; index < args.length; index += 1) {
 		const token = args[index];
 		if (!token.startsWith("-")) {
@@ -856,12 +1144,10 @@ function getInvalidValueFlagDetails(args: string[], allowRestoreAssignment = tru
 		}
 		const normalizedToken = token.split("=", 1)[0] ?? token;
 		if (
-			token.includes("=")
-			&& (
-				PREVALIDATED_VALUE_FLAGS.has(normalizedToken)
-				|| GLOBAL_BOOLEAN_FLAGS_WITH_OPTIONAL_VALUES.has(normalizedToken)
-				|| (!allowRestoreAssignment && normalizedToken === "--restore")
-			)
+			token.includes("=") &&
+			(PREVALIDATED_VALUE_FLAGS.has(normalizedToken) ||
+				GLOBAL_BOOLEAN_FLAGS_WITH_OPTIONAL_VALUES.has(normalizedToken) ||
+				(!allowRestoreAssignment && normalizedToken === "--restore"))
 		) {
 			return {
 				flag: normalizedToken,
@@ -873,14 +1159,20 @@ function getInvalidValueFlagDetails(args: string[], allowRestoreAssignment = tru
 			continue;
 		}
 		const receivedToken = args[index + 1];
-		if (receivedToken === undefined || (normalizedToken === "--args" && receivedToken.length === 0)) {
+		if (
+			receivedToken === undefined ||
+			(normalizedToken === "--args" && receivedToken.length === 0)
+		) {
 			return {
 				flag: normalizedToken,
 				index,
 				reason: "missing-value",
 			};
 		}
-		if (receivedToken.startsWith("-") && !GLOBAL_VALUE_FLAGS_ALLOWING_DASH_VALUE.has(normalizedToken)) {
+		if (
+			receivedToken.startsWith("-") &&
+			!GLOBAL_VALUE_FLAGS_ALLOWING_DASH_VALUE.has(normalizedToken)
+		) {
 			return {
 				flag: normalizedToken,
 				index,
@@ -931,7 +1223,11 @@ function normalizeTabSelectionValue(value: string | undefined): string | undefin
 	return normalizedValue && normalizedValue.length > 0 ? normalizedValue : undefined;
 }
 
-function extractTabSelection(tab: { index?: number; label?: string; tabId?: string }): Pick<OpenResultTabCorrection, "selectedTab" | "selectionKind"> | undefined {
+function extractTabSelection(tab: {
+	index?: number;
+	label?: string;
+	tabId?: string;
+}): Pick<OpenResultTabCorrection, "selectedTab" | "selectionKind"> | undefined {
 	const tabId = normalizeTabSelectionValue(tab.tabId);
 	if (tabId) {
 		return { selectedTab: tabId, selectionKind: "tabId" };
@@ -958,33 +1254,74 @@ function parseComparableNavigationUrl(url: string): URL | undefined {
 	}
 }
 
-export function getDefaultHeadlessCompatUserAgent(platform: NodeJS.Platform = process.platform): string {
-	return DEFAULT_HEADLESS_COMPAT_USER_AGENT_BY_PLATFORM[platform] ?? FALLBACK_HEADLESS_COMPAT_USER_AGENT;
+export function getDefaultHeadlessCompatUserAgent(
+	platform: NodeJS.Platform = process.platform,
+): string {
+	return (
+		DEFAULT_HEADLESS_COMPAT_USER_AGENT_BY_PLATFORM[platform] ?? FALLBACK_HEADLESS_COMPAT_USER_AGENT
+	);
 }
 
-export function canUseHeadlessCompatibilityUserAgent(args: string[], env: NodeJS.ProcessEnv = getAgentBrowserProcessEnvironment()): boolean {
-	if (env.AGENT_BROWSER_SESSION !== undefined) return false;
-	if (hasFlagToken(args, "--user-agent") || hasFlagToken(args, "--args")) return false;
-	if (hasFlagToken(args, "--cdp") || hasFlagToken(args, "--provider") || hasFlagToken(args, "-p")) return false;
-	if (env.AGENT_BROWSER_USER_AGENT !== undefined || env.AGENT_BROWSER_ARGS !== undefined || env.AGENT_BROWSER_CDP !== undefined || env.AGENT_BROWSER_PROVIDER !== undefined) return false;
-	if ((getBooleanFlagValue(args, "--headed") ?? isUpstreamEnvFlagEnabled(env.AGENT_BROWSER_HEADED))
-		|| (getBooleanFlagValue(args, "--auto-connect") ?? isUpstreamEnvFlagEnabled(env.AGENT_BROWSER_AUTO_CONNECT))) return false;
-	const engine = scanUpstreamGlobalFlagOccurrences(args, "--engine").at(-1)?.value ?? env.AGENT_BROWSER_ENGINE;
+export function canUseHeadlessCompatibilityUserAgent(
+	args: string[],
+	env: NodeJS.ProcessEnv = getAgentBrowserProcessEnvironment(),
+): boolean {
+	if (env.AGENT_BROWSER_SESSION !== undefined) {
+		return false;
+	}
+	if (hasFlagToken(args, "--user-agent") || hasFlagToken(args, "--args")) {
+		return false;
+	}
+	if (hasFlagToken(args, "--cdp") || hasFlagToken(args, "--provider") || hasFlagToken(args, "-p")) {
+		return false;
+	}
+	if (
+		env.AGENT_BROWSER_USER_AGENT !== undefined ||
+		env.AGENT_BROWSER_ARGS !== undefined ||
+		env.AGENT_BROWSER_CDP !== undefined ||
+		env.AGENT_BROWSER_PROVIDER !== undefined
+	) {
+		return false;
+	}
+	if (
+		(getBooleanFlagValue(args, "--headed") ?? isUpstreamEnvFlagEnabled(env.AGENT_BROWSER_HEADED)) ||
+		(getBooleanFlagValue(args, "--auto-connect") ??
+			isUpstreamEnvFlagEnabled(env.AGENT_BROWSER_AUTO_CONNECT))
+	) {
+		return false;
+	}
+	const engine =
+		scanUpstreamGlobalFlagOccurrences(args, "--engine").at(-1)?.value ?? env.AGENT_BROWSER_ENGINE;
 	return !engine || engine === "chrome";
 }
 
-function getCompatibilityWorkaround(args: string[], commandInfo: CommandInfo): CompatibilityWorkaround | undefined {
-	if (!commandInfo.command || !isOpenNavigationCommand(commandInfo.command) || !commandInfo.subcommand || !canUseHeadlessCompatibilityUserAgent(args)) return undefined;
+function getCompatibilityWorkaround(
+	args: string[],
+	commandInfo: CommandInfo,
+): CompatibilityWorkaround | undefined {
+	if (
+		!commandInfo.command ||
+		!isOpenNavigationCommand(commandInfo.command) ||
+		!commandInfo.subcommand ||
+		!canUseHeadlessCompatibilityUserAgent(args)
+	) {
+		return undefined;
+	}
 	const parsedTargetUrl = parseComparableNavigationUrl(commandInfo.subcommand);
-	if (!parsedTargetUrl || !["http:", "https:"].includes(parsedTargetUrl.protocol)) return undefined;
+	if (!parsedTargetUrl || !["http:", "https:"].includes(parsedTargetUrl.protocol)) {
+		return undefined;
+	}
 	const hostname = parsedTargetUrl.hostname.toLowerCase();
 	if (hostname === CLOUDFLARE_HEADLESS_COMPAT_HOST) {
 		return {
 			id: "cloudflare-headless-user-agent",
-			reason: "Cloudflare Dashboard challenges the default headless Chrome user agent; inject a normal Chrome user agent so authenticated headless browsing reaches the dashboard instead of Turnstile.",
+			reason:
+				"Cloudflare Dashboard challenges the default headless Chrome user agent; inject a normal Chrome user agent so authenticated headless browsing reaches the dashboard instead of Turnstile.",
 		};
 	}
-	if (!OPENAI_HEADLESS_COMPAT_HOSTS.has(hostname)) return undefined;
+	if (!OPENAI_HEADLESS_COMPAT_HOSTS.has(hostname)) {
+		return undefined;
+	}
 	return {
 		id: "chatgpt-headless-user-agent",
 		reason:
@@ -1011,9 +1348,9 @@ function stripExplicitNamespaceArgs(args: string[]): string[] {
 }
 
 export function getStartupScopedFlags(args: string[]): string[] {
-	return LAUNCH_SCOPED_FLAG_DEFINITIONS
-		.map((definition) => definition.flag)
-		.filter((flag) => hasLaunchScopedFlagToken(args, flag));
+	return LAUNCH_SCOPED_FLAG_DEFINITIONS.map((definition) => definition.flag).filter((flag) =>
+		hasLaunchScopedFlagToken(args, flag),
+	);
 }
 
 export function buildExecutionPlan(
@@ -1030,18 +1367,41 @@ export function buildExecutionPlan(
 	},
 ): ExecutionPlan {
 	const nativeSession = getAgentBrowserProcessEnvironment().AGENT_BROWSER_SESSION;
-	if (nativeSession !== undefined && !isPlainTextInspectionArgs(args) && extractExplicitSessionName(args) === undefined) args = ["--session", nativeSession, ...args];
+	if (
+		nativeSession !== undefined &&
+		!isPlainTextInspectionArgs(args) &&
+		extractExplicitSessionName(args) === undefined
+	) {
+		args = ["--session", nativeSession, ...args];
+	}
 	const invalidValueFlag = getInvalidValueFlagDetails(args);
-	const explicitNamespacePresent = scanUpstreamGlobalFlagOccurrences(args, "--namespace").length > 0;
+	const explicitNamespacePresent =
+		scanUpstreamGlobalFlagOccurrences(args, "--namespace").length > 0;
 	const explicitNamespace = extractExplicitNamespace(args);
-	const managedSessionNamespace = canonicalizeAgentBrowserNamespace(options.managedSessionNamespace);
-	const startupScopedFlags = getStartupScopedFlags(args).filter((flag) => !(flag === "--namespace" && explicitNamespacePresent && explicitNamespace === managedSessionNamespace));
+	const managedSessionNamespace = canonicalizeAgentBrowserNamespace(
+		options.managedSessionNamespace,
+	);
+	const startupScopedFlags = getStartupScopedFlags(args).filter(
+		(flag) =>
+			!(
+				flag === "--namespace" &&
+				explicitNamespacePresent &&
+				explicitNamespace === managedSessionNamespace
+			),
+	);
 	const plainTextInspection = isPlainTextInspectionArgs(args);
 	const argvDescriptor = parseArgvDescriptor(args);
 	const commandInfo = argvDescriptor.commandInfo;
-	const commandNeedsManagedSession = !plainTextInspection && !options.browserIndependentReadConfirmation && needsManagedSession(argvDescriptor, options.stdin);
-	const effectiveArgs = plainTextInspection ? [...args] : getBooleanFlagValue(args, "--json") !== undefined ? [] : ["--json"];
-	let namespace = explicitNamespacePresent ? explicitNamespace ?? "" : undefined;
+	const commandNeedsManagedSession =
+		!plainTextInspection &&
+		!options.browserIndependentReadConfirmation &&
+		needsManagedSession(argvDescriptor, options.stdin);
+	const effectiveArgs = plainTextInspection
+		? [...args]
+		: getBooleanFlagValue(args, "--json") !== undefined
+			? []
+			: ["--json"];
+	let namespace = explicitNamespacePresent ? (explicitNamespace ?? "") : undefined;
 	if (plainTextInspection) {
 		return {
 			commandInfo,
@@ -1066,29 +1426,37 @@ export function buildExecutionPlan(
 	}
 
 	for (const flag of ["--session", "--namespace"] as const) {
-		if (countExplicitGlobalFlags(args, flag) <= 1) continue;
+		if (countExplicitGlobalFlags(args, flag) <= 1) {
+			continue;
+		}
 		return {
 			commandInfo: {},
 			effectiveArgs,
 			plainTextInspection: false,
 			startupScopedFlags: [],
 			usedImplicitSession: false,
-			validationError:
-				`Multiple ${flag} flags are not supported. Pass a single ${flag} value; upstream uses the last occurrence while this wrapper would otherwise mis-attribute managed-session ownership.`,
+			validationError: `Multiple ${flag} flags are not supported. Pass a single ${flag} value; upstream uses the last occurrence while this wrapper would otherwise mis-attribute managed-session ownership.`,
 		};
 	}
 
 	const explicitSessionName = extractExplicitSessionName(args);
 	if (explicitSessionName && !explicitNamespacePresent) {
-		const targetsCurrentManagedSession = options.managedSessionActive
-			&& getAgentBrowserSessionIdentityKey(explicitSessionName, managedSessionNamespace)
-				=== getAgentBrowserSessionIdentityKey(options.managedSessionName, managedSessionNamespace);
+		const targetsCurrentManagedSession =
+			options.managedSessionActive &&
+			getAgentBrowserSessionIdentityKey(explicitSessionName, managedSessionNamespace) ===
+				getAgentBrowserSessionIdentityKey(options.managedSessionName, managedSessionNamespace);
 		namespace = targetsCurrentManagedSession
 			? managedSessionNamespace
-			: resolveAgentBrowserNamespace(args, getAgentBrowserProcessEnvironment().AGENT_BROWSER_NAMESPACE);
+			: resolveAgentBrowserNamespace(
+					args,
+					getAgentBrowserProcessEnvironment().AGENT_BROWSER_NAMESPACE,
+				);
 	}
 	const shouldCreateFreshManagedSession =
-		!explicitSessionName && options.sessionMode === "fresh" && commandInfo.command !== undefined && !isCloseCommand(commandInfo.command);
+		!explicitSessionName &&
+		options.sessionMode === "fresh" &&
+		commandInfo.command !== undefined &&
+		!isCloseCommand(commandInfo.command);
 	let argsToAppend = args;
 	const requestedCompatibilityWorkaround = getCompatibilityWorkaround(args, commandInfo);
 	let compatibilityWorkaround = requestedCompatibilityWorkaround;
@@ -1107,40 +1475,60 @@ export function buildExecutionPlan(
 			recoveryHint = {
 				exampleArgs: args,
 				exampleParams: { args, sessionMode: "fresh" },
-				reason:
-					`Launch-scoped flags (${LAUNCH_SCOPED_FLAG_LABEL}) need a fresh upstream launch once the extension-managed session is already active.`,
+				reason: `Launch-scoped flags (${LAUNCH_SCOPED_FLAG_LABEL}) need a fresh upstream launch once the extension-managed session is already active.`,
 				recommendedSessionMode: "fresh",
 			};
 			validationError = [
 				`The current extension-managed agent-browser session is already running, so launch-scoped flags ${startupScopedFlags.join(", ")} would be ignored by upstream agent-browser.`,
-				"Retry this call with `sessionMode: \"fresh\"` to force a fresh upstream launch, or pass an explicit `--session ...` if you want to name the new session yourself.",
+				'Retry this call with `sessionMode: "fresh"` to force a fresh upstream launch, or pass an explicit `--session ...` if you want to name the new session yourself.',
 			].join(" ");
 		} else {
-			namespace = explicitNamespacePresent ? explicitNamespace ?? "" : managedSessionNamespace;
-			if (namespace !== undefined) effectiveArgs.push("--namespace", namespace);
+			namespace = explicitNamespacePresent ? (explicitNamespace ?? "") : managedSessionNamespace;
+			if (namespace !== undefined) {
+				effectiveArgs.push("--namespace", namespace);
+			}
 			effectiveArgs.push("--session", options.managedSessionName);
-			if (explicitNamespacePresent) argsToAppend = stripExplicitNamespaceArgs(args);
+			if (explicitNamespacePresent) {
+				argsToAppend = stripExplicitNamespaceArgs(args);
+			}
 			managedSessionName = options.managedSessionName;
 			sessionName = options.managedSessionName;
 			usedImplicitSession = true;
 		}
 	} else if (shouldCreateFreshManagedSession && commandNeedsManagedSession) {
-		if (namespace !== undefined) effectiveArgs.push("--namespace", namespace);
+		if (namespace !== undefined) {
+			effectiveArgs.push("--namespace", namespace);
+		}
 		effectiveArgs.push("--session", options.freshSessionName);
-		if (explicitNamespacePresent) argsToAppend = stripExplicitNamespaceArgs(args);
+		if (explicitNamespacePresent) {
+			argsToAppend = stripExplicitNamespaceArgs(args);
+		}
 		managedSessionName = options.freshSessionName;
 		sessionName = options.freshSessionName;
 	}
 
 	if (commandInfo.command !== undefined && !sessionName && !explicitNamespacePresent) {
-		namespace = resolveAgentBrowserNamespace(args, getAgentBrowserProcessEnvironment().AGENT_BROWSER_NAMESPACE);
+		namespace = resolveAgentBrowserNamespace(
+			args,
+			getAgentBrowserProcessEnvironment().AGENT_BROWSER_NAMESPACE,
+		);
 	}
 
-	const targetsActiveManagedSession = options.managedSessionActive
-		&& commandNeedsManagedSession
-		&& sessionName
-		&& getAgentBrowserSessionIdentityKey(sessionName, namespace) === getAgentBrowserSessionIdentityKey(options.managedSessionName, options.managedSessionNamespace);
-	if (targetsActiveManagedSession && startupScopedFlags.length > 0 && !isCloseCommand(commandInfo.command) && !validationError) {
+	const targetsActiveManagedSession =
+		options.managedSessionActive &&
+		commandNeedsManagedSession &&
+		sessionName &&
+		getAgentBrowserSessionIdentityKey(sessionName, namespace) ===
+			getAgentBrowserSessionIdentityKey(
+				options.managedSessionName,
+				options.managedSessionNamespace,
+			);
+	if (
+		targetsActiveManagedSession &&
+		startupScopedFlags.length > 0 &&
+		!isCloseCommand(commandInfo.command) &&
+		!validationError
+	) {
 		const recoveryArgs = explicitSessionName ? stripExplicitSessionArgs(args) : args;
 		recoveryHint = {
 			exampleArgs: recoveryArgs,
@@ -1151,25 +1539,31 @@ export function buildExecutionPlan(
 		validationError = [
 			`The current extension-managed agent-browser session is already running, so launch-scoped flags ${startupScopedFlags.join(", ")} would replace or be ignored by upstream agent-browser.`,
 			explicitSessionName
-				? "Remove the explicit `--session` and retry with `sessionMode: \"fresh\"` to force a fresh upstream launch."
-				: "Retry this call with `sessionMode: \"fresh\"` to force a fresh upstream launch.",
+				? 'Remove the explicit `--session` and retry with `sessionMode: "fresh"` to force a fresh upstream launch.'
+				: 'Retry this call with `sessionMode: "fresh"` to force a fresh upstream launch.',
 		].join(" ");
 	}
 	if (targetsActiveManagedSession && canUseHeadlessCompatibilityUserAgent(args)) {
-		if (requestedCompatibilityWorkaround && !options.managedSessionCompatibilityWorkaround && !validationError) {
+		if (
+			requestedCompatibilityWorkaround &&
+			!options.managedSessionCompatibilityWorkaround &&
+			!validationError
+		) {
 			compatibilityWorkaround = undefined;
 			const recoveryArgs = explicitSessionName ? stripExplicitSessionArgs(args) : args;
 			recoveryHint = {
 				exampleArgs: recoveryArgs,
 				exampleParams: { args: recoveryArgs, sessionMode: "fresh" },
-				reason: "The requested site compatibility user agent is launch-scoped and needs a fresh browser session.",
+				reason:
+					"The requested site compatibility user agent is launch-scoped and needs a fresh browser session.",
 				recommendedSessionMode: "fresh",
 			};
 			validationError = explicitSessionName
-				? "The current extension-managed agent-browser session is already running without the user agent required by this site. Remove the explicit `--session` and retry with `sessionMode: \"fresh\"` so the compatibility user agent is applied at launch."
-				: "The current extension-managed agent-browser session is already running without the user agent required by this site. Retry this call with `sessionMode: \"fresh\"` so the compatibility user agent is applied at launch.";
+				? 'The current extension-managed agent-browser session is already running without the user agent required by this site. Remove the explicit `--session` and retry with `sessionMode: "fresh"` so the compatibility user agent is applied at launch.'
+				: 'The current extension-managed agent-browser session is already running without the user agent required by this site. Retry this call with `sessionMode: "fresh"` so the compatibility user agent is applied at launch.';
 		} else {
-			compatibilityWorkaround = requestedCompatibilityWorkaround ?? options.managedSessionCompatibilityWorkaround;
+			compatibilityWorkaround =
+				requestedCompatibilityWorkaround ?? options.managedSessionCompatibilityWorkaround;
 		}
 	}
 	if (compatibilityWorkaround && !targetsActiveManagedSession) {
@@ -1194,7 +1588,14 @@ export function buildExecutionPlan(
 
 export function chooseOpenResultTabCorrection(options: {
 	activeTabIndex?: number;
-	tabs: Array<{ active?: boolean; index?: number; label?: string; tabId?: string; title?: string; url?: string }>;
+	tabs: Array<{
+		active?: boolean;
+		index?: number;
+		label?: string;
+		tabId?: string;
+		title?: string;
+		url?: string;
+	}>;
 	targetTitle?: string;
 	targetUrl?: string;
 }): OpenResultTabCorrection | undefined {
@@ -1212,27 +1613,34 @@ export function chooseOpenResultTabCorrection(options: {
 	}));
 	const activeTab =
 		tabsWithIndices.find((tab) => tab.active === true) ??
-		(typeof options.activeTabIndex === "number" ? tabsWithIndices.find((tab) => tab.index === options.activeTabIndex) : undefined);
+		(typeof options.activeTabIndex === "number"
+			? tabsWithIndices.find((tab) => tab.index === options.activeTabIndex)
+			: undefined);
 	if (activeTab && normalizeComparableUrl(activeTab.url ?? "") === normalizedTargetUrl) {
 		return undefined;
 	}
 
-	const matchingTabs = tabsWithIndices.filter((tab) => normalizeComparableUrl(tab.url ?? "") === normalizedTargetUrl);
+	const matchingTabs = tabsWithIndices.filter(
+		(tab) => normalizeComparableUrl(tab.url ?? "") === normalizedTargetUrl,
+	);
 	if (matchingTabs.length === 0) {
 		return undefined;
 	}
-	const trimmedTargetTitle = typeof options.targetTitle === "string" ? options.targetTitle.trim() : "";
+	const trimmedTargetTitle =
+		typeof options.targetTitle === "string" ? options.targetTitle.trim() : "";
 	const titledMatch =
 		trimmedTargetTitle.length === 0
 			? undefined
-			: matchingTabs.find((tab) => typeof tab.title === "string" && tab.title.trim() === trimmedTargetTitle);
+			: matchingTabs.find(
+					(tab) => typeof tab.title === "string" && tab.title.trim() === trimmedTargetTitle,
+				);
 	const selectedTab = titledMatch ?? matchingTabs[0];
 	const tabSelection = extractTabSelection(selectedTab);
 	return tabSelection
 		? {
-			...tabSelection,
-			targetTitle: trimmedTargetTitle.length > 0 ? trimmedTargetTitle : undefined,
-			targetUrl: normalizedTargetUrl,
-		}
+				...tabSelection,
+				targetTitle: trimmedTargetTitle.length > 0 ? trimmedTargetTitle : undefined,
+				targetUrl: normalizedTargetUrl,
+			}
 		: undefined;
 }

@@ -11,7 +11,11 @@ import { join } from "node:path";
 import test from "node:test";
 import { runInNewContext } from "node:vm";
 
-import { cleanupClickDispatchProbe, collectClickDispatchDiagnostic, prepareClickDispatchProbe } from "../extensions/agent-browser/lib/orchestration/browser-run/click-dispatch.js";
+import {
+	cleanupClickDispatchProbe,
+	collectClickDispatchDiagnostic,
+	prepareClickDispatchProbe,
+} from "../extensions/agent-browser/lib/orchestration/browser-run/click-dispatch.js";
 
 import {
 	createExtensionHarness,
@@ -40,12 +44,25 @@ function fakeIdentityCommands(logPath: string): string {
 	return fakeClickIdentityCommands.replace("LOG_PATH", JSON.stringify(logPath));
 }
 
-for (const mode of ["match", "mismatch", "lookup-failure", "install-failure", "removal-failure", "abort", "expiry"] as const) {
-	test(`click dispatch identity ${mode} cleans up the exact candidate`, { concurrency: false }, async () => {
-		const tempDir = await mkdtemp(join(tmpdir(), "pi-agent-browser-click-identity-"));
-		const logPath = join(tempDir, "invocations.log");
-		const controller = new AbortController();
-		await writeFakeAgentBrowserBinary(tempDir, `
+for (const mode of [
+	"match",
+	"mismatch",
+	"lookup-failure",
+	"install-failure",
+	"removal-failure",
+	"abort",
+	"expiry",
+] as const) {
+	test(
+		`click dispatch identity ${mode} cleans up the exact candidate`,
+		{ concurrency: false },
+		async () => {
+			const tempDir = await mkdtemp(join(tmpdir(), "pi-agent-browser-click-identity-"));
+			const logPath = join(tempDir, "invocations.log");
+			const controller = new AbortController();
+			await writeFakeAgentBrowserBinary(
+				tempDir,
+				`
 const fs = require("node:fs");
 const args = process.argv.slice(2);
 const stdin = fs.readFileSync(0, "utf8");
@@ -66,118 +83,183 @@ if (args.includes("attr") && mode === "abort") {
   else if (stdin.includes("no-native-event-observed")) reply({ result: { status: "no-native-event-observed", nativeEventCount: 0 } });
   else reply({ result: { status: "cleaned-up" } });
 }
-`);
-		try {
-			await withPatchedEnv({ PATH: `${tempDir}:${process.env.PATH ?? ""}` }, async () => {
-				const options = {
-					commandTokens: ["click", "ref=e1"], cwd: tempDir, namespace: "identity-fixture", sessionName: "click-fixture", signal: controller.signal, timeoutMs: 3000,
-					refSnapshot: { refIds: ["e1"], refs: { e1: { role: "button", name: "Save" } } },
-				};
-				const pending = prepareClickDispatchProbe(options);
-				if (mode === "abort") {
-					try {
-						const deadline = Date.now() + 5000;
-						while (!(await readInvocationLog(logPath)).some((entry) => entry.args.includes("attr"))) {
-							assert.ok(Date.now() < deadline, "identity lookup must start before abort");
-							await new Promise((resolve) => setTimeout(resolve, 10));
+`,
+			);
+			try {
+				await withPatchedEnv({ PATH: `${tempDir}:${process.env.PATH ?? ""}` }, async () => {
+					const options = {
+						commandTokens: ["click", "ref=e1"],
+						cwd: tempDir,
+						namespace: "identity-fixture",
+						sessionName: "click-fixture",
+						signal: controller.signal,
+						timeoutMs: 3000,
+						refSnapshot: { refIds: ["e1"], refs: { e1: { role: "button", name: "Save" } } },
+					};
+					const pending = prepareClickDispatchProbe(options);
+					if (mode === "abort") {
+						try {
+							const deadline = Date.now() + 5000;
+							while (
+								!(await readInvocationLog(logPath)).some((entry) => entry.args.includes("attr"))
+							) {
+								assert.ok(Date.now() < deadline, "identity lookup must start before abort");
+								await new Promise((resolve) => setTimeout(resolve, 10));
+							}
+						} finally {
+							controller.abort();
 						}
-					} finally {
-						controller.abort();
 					}
-				}
-				const probe = await pending;
-				if (mode === "match" || mode === "expiry") {
-					assert.ok(probe);
-				}
-				if (mode === "match") {
-					const diagnostic = await collectClickDispatchDiagnostic({ ...options, probe });
-					assert.equal(diagnostic?.status, "no-native-event-observed", "confirmed refs retain true no-dispatch detection");
-					await cleanupClickDispatchProbe({ ...options, probe });
-				} else if (mode !== "expiry") {
-					assert.equal(probe, undefined, "unconfirmed candidates cannot diagnose a click failure");
-				}
-				const invocations = await readInvocationLog(logPath);
-				const identityCall = invocations.find((entry) => entry.args.includes("attr"));
-				if (mode !== "install-failure") {
-					assert.ok(identityCall);
-					assert.deepEqual(identityCall.args.slice(-4, -1), ["get", "attr", "@e1"]);
-					assert.ok(identityCall.args.includes("identity-fixture"));
-					assert.ok(identityCall.args.includes("click-fixture"));
-				}
-				const scripts = invocations.filter((entry) => entry.args.includes("eval")).map((entry) => entry.stdin ?? "");
-				assert.equal(scripts.some((script) => script.includes("cleaned-up")), mode !== "match" && mode !== "expiry");
-				assert.equal(scripts.some((script) => script.includes("no-native-event-observed")), mode === "match");
+					const probe = await pending;
+					if (mode === "match" || mode === "expiry") {
+						assert.ok(probe);
+					}
+					if (mode === "match") {
+						const diagnostic = await collectClickDispatchDiagnostic({ ...options, probe });
+						assert.equal(
+							diagnostic?.status,
+							"no-native-event-observed",
+							"confirmed refs retain true no-dispatch detection",
+						);
+						await cleanupClickDispatchProbe({ ...options, probe });
+					} else if (mode !== "expiry") {
+						assert.equal(
+							probe,
+							undefined,
+							"unconfirmed candidates cannot diagnose a click failure",
+						);
+					}
+					const invocations = await readInvocationLog(logPath);
+					const identityCall = invocations.find((entry) => entry.args.includes("attr"));
+					if (mode !== "install-failure") {
+						assert.ok(identityCall);
+						assert.deepEqual(identityCall.args.slice(-4, -1), ["get", "attr", "@e1"]);
+						assert.ok(identityCall.args.includes("identity-fixture"));
+						assert.ok(identityCall.args.includes("click-fixture"));
+					}
+					const scripts = invocations
+						.filter((entry) => entry.args.includes("eval"))
+						.map((entry) => entry.stdin ?? "");
+					assert.equal(
+						scripts.some((script) => script.includes("cleaned-up")),
+						mode !== "match" && mode !== "expiry",
+					);
+					assert.equal(
+						scripts.some((script) => script.includes("no-native-event-observed")),
+						mode === "match",
+					);
 
-				// Execute the emitted scripts, not just their fake receipts. The collision
-				// intentionally picks Copy; cleanup must retain that exact node even detached.
-				class FixtureElement {
-					tagName = "BUTTON";
-					textContent = "Save";
-					parentElement = null;
-					attributes = new Map<string, string>();
-					getAttribute(name: string) { return this.attributes.get(name) ?? null; }
-					hasAttribute(name: string) { return this.attributes.has(name); }
-					setAttribute(name: string, value: string) { this.attributes.set(name, value); }
-					removeAttribute(name: string) { this.attributes.delete(name); }
-					getClientRects() { return [this.getBoundingClientRect()]; }
-					getBoundingClientRect() { return { bottom: 20, left: 0, right: 80, top: 0 }; }
-				}
-				const save = new FixtureElement();
-				save.setAttribute("title", "Save changes");
-				const copy = new FixtureElement();
-				copy.setAttribute("aria-labelledby", "copy-label");
-				let candidates = mode === "mismatch" ? [save, copy] : [copy];
-				const listeners = new Map<string, unknown>();
-				const window: Record<string, unknown> = { innerHeight: 100, innerWidth: 100, getComputedStyle: () => ({ display: "block", visibility: "visible", opacity: "1" }) };
-				let expire: (() => void) | undefined;
-				const timers = new Set<unknown>();
-				const context = { window, Element: FixtureElement, Node: FixtureElement,
-					setTimeout: (callback: () => void, ms: number) => { assert.equal(ms, 5000); expire = callback; timers.add(callback); return callback; },
-					clearTimeout: (timer: unknown) => timers.delete(timer), document: {
-					querySelectorAll: () => candidates,
-					addEventListener: (type: string, listener: unknown) => listeners.set(type, listener),
-					removeEventListener: (type: string) => listeners.delete(type),
-				} };
-				const installed = runInNewContext(scripts[0], context);
-				assert.equal(installed.status, "installed");
-				const attribute = [...copy.attributes.keys()].find((key) => key.startsWith("data-pi-click-dispatch-"));
-				assert.ok(attribute);
-				assert.equal(copy.getAttribute(attribute), installed.marker);
-				if (identityCall) assert.equal(identityCall.args.at(-1), attribute);
-				assert.equal(save.getAttribute(attribute), null);
-				assert.equal(listeners.size, 5);
-				candidates = []; // Detached nodes still need their marker removed.
-				for (const script of scripts.slice(1)) {
-					runInNewContext(script, context);
-					if (script.includes('status: "identity-marker-removed"')) {
-						assert.equal(copy.getAttribute(attribute), null, "marker is removed before the click");
-						assert.equal(listeners.size, 5, "identity confirmation retains event monitoring");
+					// Execute the emitted scripts, not just their fake receipts. The collision
+					// intentionally picks Copy; cleanup must retain that exact node even detached.
+					class FixtureElement {
+						tagName = "BUTTON";
+						textContent = "Save";
+						parentElement = null;
+						attributes = new Map<string, string>();
+						getAttribute(name: string) {
+							return this.attributes.get(name) ?? null;
+						}
+						hasAttribute(name: string) {
+							return this.attributes.has(name);
+						}
+						setAttribute(name: string, value: string) {
+							this.attributes.set(name, value);
+						}
+						removeAttribute(name: string) {
+							this.attributes.delete(name);
+						}
+						getClientRects() {
+							return [this.getBoundingClientRect()];
+						}
+						getBoundingClientRect() {
+							return { bottom: 20, left: 0, right: 80, top: 0 };
+						}
 					}
-				}
-				if (mode === "expiry") {
-					assert.ok(expire, "lost or confirmation-blocked cleanup must not leave permanent listeners");
-					expire();
-				}
-				assert.equal(timers.size, 0, "normal cleanup cancels the expiry timer too");
-				assert.equal(copy.getAttribute(attribute), null);
-				assert.equal(copy.getAttribute("aria-labelledby"), "copy-label");
-				assert.equal(window[installed.marker], undefined);
-				assert.equal(listeners.size, 0);
-			});
-		} finally {
-			controller.abort();
-			await rm(tempDir, { force: true, recursive: true });
-		}
-	});
+					const save = new FixtureElement();
+					save.setAttribute("title", "Save changes");
+					const copy = new FixtureElement();
+					copy.setAttribute("aria-labelledby", "copy-label");
+					let candidates = mode === "mismatch" ? [save, copy] : [copy];
+					const listeners = new Map<string, unknown>();
+					const window: Record<string, unknown> = {
+						innerHeight: 100,
+						innerWidth: 100,
+						getComputedStyle: () => ({ display: "block", visibility: "visible", opacity: "1" }),
+					};
+					let expire: (() => void) | undefined;
+					const timers = new Set<unknown>();
+					const context = {
+						window,
+						Element: FixtureElement,
+						Node: FixtureElement,
+						setTimeout: (callback: () => void, ms: number) => {
+							assert.equal(ms, 5000);
+							expire = callback;
+							timers.add(callback);
+							return callback;
+						},
+						clearTimeout: (timer: unknown) => timers.delete(timer),
+						document: {
+							querySelectorAll: () => candidates,
+							addEventListener: (type: string, listener: unknown) => listeners.set(type, listener),
+							removeEventListener: (type: string) => listeners.delete(type),
+						},
+					};
+					const installed = runInNewContext(scripts[0], context);
+					assert.equal(installed.status, "installed");
+					const attribute = [...copy.attributes.keys()].find((key) =>
+						key.startsWith("data-pi-click-dispatch-"),
+					);
+					assert.ok(attribute);
+					assert.equal(copy.getAttribute(attribute), installed.marker);
+					if (identityCall) {
+						assert.equal(identityCall.args.at(-1), attribute);
+					}
+					assert.equal(save.getAttribute(attribute), null);
+					assert.equal(listeners.size, 5);
+					candidates = []; // Detached nodes still need their marker removed.
+					for (const script of scripts.slice(1)) {
+						runInNewContext(script, context);
+						if (script.includes('status: "identity-marker-removed"')) {
+							assert.equal(
+								copy.getAttribute(attribute),
+								null,
+								"marker is removed before the click",
+							);
+							assert.equal(listeners.size, 5, "identity confirmation retains event monitoring");
+						}
+					}
+					if (mode === "expiry") {
+						assert.ok(
+							expire,
+							"lost or confirmation-blocked cleanup must not leave permanent listeners",
+						);
+						expire();
+					}
+					assert.equal(timers.size, 0, "normal cleanup cancels the expiry timer too");
+					assert.equal(copy.getAttribute(attribute), null);
+					assert.equal(copy.getAttribute("aria-labelledby"), "copy-label");
+					assert.equal(window[installed.marker], undefined);
+					assert.equal(listeners.size, 0);
+				});
+			} finally {
+				controller.abort();
+				await rm(tempDir, { force: true, recursive: true });
+			}
+		},
+	);
 }
 
-test("agentBrowserExtension cleans up click dispatch probes after failed clicks", { concurrency: false }, async () => {
-	const tempDir = await mkdtemp(join(tmpdir(), "pi-agent-browser-click-dispatch-failure-"));
-	const logPath = join(tempDir, "invocations.log");
-	const basePath = process.env.PATH ?? "";
-	await writeFakeAgentBrowserBinary(
-		tempDir,
-		`const fs = require("node:fs");
+test(
+	"agentBrowserExtension cleans up click dispatch probes after failed clicks",
+	{ concurrency: false },
+	async () => {
+		const tempDir = await mkdtemp(join(tmpdir(), "pi-agent-browser-click-dispatch-failure-"));
+		const logPath = join(tempDir, "invocations.log");
+		const basePath = process.env.PATH ?? "";
+		await writeFakeAgentBrowserBinary(
+			tempDir,
+			`const fs = require("node:fs");
 const args = process.argv.slice(2);
 const stdin = fs.readFileSync(0, "utf8");
 fs.appendFileSync(${JSON.stringify(logPath)}, JSON.stringify({ args, stdin }) + "\\n");
@@ -198,37 +280,61 @@ if (args.includes("eval")) {
 } else {
   process.stdout.write(JSON.stringify({ success: true, data: "ok" }));
 }`,
-	);
+		);
 
-	try {
-		await withPatchedEnv({ PATH: `${tempDir}:${basePath}`, PI_AGENT_BROWSER_TEST_PAGE_URL: "https://fixture.invalid/" }, async () => {
-			const harness = createExtensionHarness({ cwd: tempDir });
-			await runExtensionEvent(harness.handlers, "session_start", { reason: "new" }, harness.ctx);
+		try {
+			await withPatchedEnv(
+				{
+					PATH: `${tempDir}:${basePath}`,
+					PI_AGENT_BROWSER_TEST_PAGE_URL: "https://fixture.invalid/",
+				},
+				async () => {
+					const harness = createExtensionHarness({ cwd: tempDir });
+					await runExtensionEvent(
+						harness.handlers,
+						"session_start",
+						{ reason: "new" },
+						harness.ctx,
+					);
 
-			await executeRegisteredTool(harness.tool, harness.ctx, { args: ["snapshot", "-i"] });
-			const click = await executeRegisteredTool(harness.tool, harness.ctx, { args: ["click", "@e1"] });
-			assert.equal(click.isError, true);
-			assert.equal(click.details?.clickDispatch, undefined);
+					await executeRegisteredTool(harness.tool, harness.ctx, { args: ["snapshot", "-i"] });
+					const click = await executeRegisteredTool(harness.tool, harness.ctx, {
+						args: ["click", "@e1"],
+					});
+					assert.equal(click.isError, true);
+					assert.equal(click.details?.clickDispatch, undefined);
 
-			const invocations = await readInvocationLog(logPath);
-			const evalInvocations = invocations.filter((entry) => entry.args.includes("eval"));
-			assert.equal(invocations.filter((entry) => entry.args.includes("click")).length, 1);
-			assert.ok(evalInvocations.some((entry) => (entry.stdin ?? "").includes("window[marker] = state")));
-			assert.ok(evalInvocations.some((entry) => (entry.stdin ?? "").includes("cleaned-up")));
-			assert.equal(evalInvocations.some((entry) => (entry.stdin ?? "").includes("no-native-event-observed")), false);
-		});
-	} finally {
-		await rm(tempDir, { force: true, recursive: true });
-	}
-});
+					const invocations = await readInvocationLog(logPath);
+					const evalInvocations = invocations.filter((entry) => entry.args.includes("eval"));
+					assert.equal(invocations.filter((entry) => entry.args.includes("click")).length, 1);
+					assert.ok(
+						evalInvocations.some((entry) => (entry.stdin ?? "").includes("window[marker] = state")),
+					);
+					assert.ok(evalInvocations.some((entry) => (entry.stdin ?? "").includes("cleaned-up")));
+					assert.equal(
+						evalInvocations.some((entry) =>
+							(entry.stdin ?? "").includes("no-native-event-observed"),
+						),
+						false,
+					);
+				},
+			);
+		} finally {
+			await rm(tempDir, { force: true, recursive: true });
+		}
+	},
+);
 
-test("agentBrowserExtension cleans up click dispatch probes during successful dispatch checks", { concurrency: false }, async () => {
-	const tempDir = await mkdtemp(join(tmpdir(), "pi-agent-browser-click-dispatch-success-"));
-	const logPath = join(tempDir, "invocations.log");
-	const basePath = process.env.PATH ?? "";
-	await writeFakeAgentBrowserBinary(
-		tempDir,
-		`const fs = require("node:fs");
+test(
+	"agentBrowserExtension cleans up click dispatch probes during successful dispatch checks",
+	{ concurrency: false },
+	async () => {
+		const tempDir = await mkdtemp(join(tmpdir(), "pi-agent-browser-click-dispatch-success-"));
+		const logPath = join(tempDir, "invocations.log");
+		const basePath = process.env.PATH ?? "";
+		await writeFakeAgentBrowserBinary(
+			tempDir,
+			`const fs = require("node:fs");
 const args = process.argv.slice(2);
 const stdin = fs.readFileSync(0, "utf8");
 fs.appendFileSync(${JSON.stringify(logPath)}, JSON.stringify({ args, stdin }) + "\\n");
@@ -250,39 +356,65 @@ if (args.includes("eval")) {
 } else {
   process.stdout.write(JSON.stringify({ success: true, data: "ok" }));
 }`,
-	);
+		);
 
-	try {
-		await withPatchedEnv({ PATH: `${tempDir}:${basePath}`, PI_AGENT_BROWSER_TEST_PAGE_URL: "https://fixture.invalid/" }, async () => {
-			const harness = createExtensionHarness({ cwd: tempDir });
-			await runExtensionEvent(harness.handlers, "session_start", { reason: "new" }, harness.ctx);
+		try {
+			await withPatchedEnv(
+				{
+					PATH: `${tempDir}:${basePath}`,
+					PI_AGENT_BROWSER_TEST_PAGE_URL: "https://fixture.invalid/",
+				},
+				async () => {
+					const harness = createExtensionHarness({ cwd: tempDir });
+					await runExtensionEvent(
+						harness.handlers,
+						"session_start",
+						{ reason: "new" },
+						harness.ctx,
+					);
 
-			await executeRegisteredTool(harness.tool, harness.ctx, { args: ["snapshot", "-i"] });
-			const click = await executeRegisteredTool(harness.tool, harness.ctx, { args: ["click", "@e1"] });
-			assert.equal(click.isError, false);
-			assert.equal(click.details?.clickDispatch, undefined);
+					await executeRegisteredTool(harness.tool, harness.ctx, { args: ["snapshot", "-i"] });
+					const click = await executeRegisteredTool(harness.tool, harness.ctx, {
+						args: ["click", "@e1"],
+					});
+					assert.equal(click.isError, false);
+					assert.equal(click.details?.clickDispatch, undefined);
 
-			const invocations = await readInvocationLog(logPath);
-			const evalInvocations = invocations.filter((entry) => entry.args.includes("eval"));
-			const checkInvocation = evalInvocations.find((entry) => (entry.stdin ?? "").includes("native-event-observed"));
-			assert.equal(evalInvocations.length, 3, "install, identity-marker removal, and check need no redundant cleanup eval");
-			assert.equal(evalInvocations.some((entry) => (entry.stdin ?? "").includes("cleaned-up")), false);
-			assert.ok(checkInvocation, "expected a click dispatch check eval");
-			assert.ok((checkInvocation.stdin ?? "").includes("state.cleanup"));
-			assert.ok((checkInvocation.stdin ?? "").includes("delete window[marker]"));
-		});
-	} finally {
-		await rm(tempDir, { force: true, recursive: true });
-	}
-});
+					const invocations = await readInvocationLog(logPath);
+					const evalInvocations = invocations.filter((entry) => entry.args.includes("eval"));
+					const checkInvocation = evalInvocations.find((entry) =>
+						(entry.stdin ?? "").includes("native-event-observed"),
+					);
+					assert.equal(
+						evalInvocations.length,
+						3,
+						"install, identity-marker removal, and check need no redundant cleanup eval",
+					);
+					assert.equal(
+						evalInvocations.some((entry) => (entry.stdin ?? "").includes("cleaned-up")),
+						false,
+					);
+					assert.ok(checkInvocation, "expected a click dispatch check eval");
+					assert.ok((checkInvocation.stdin ?? "").includes("state.cleanup"));
+					assert.ok((checkInvocation.stdin ?? "").includes("delete window[marker]"));
+				},
+			);
+		} finally {
+			await rm(tempDir, { force: true, recursive: true });
+		}
+	},
+);
 
-test("agentBrowserExtension probes ref clicks with current snapshot accessibility metadata", { concurrency: false }, async () => {
-	const tempDir = await mkdtemp(join(tmpdir(), "pi-agent-browser-click-dispatch-ref-"));
-	const logPath = join(tempDir, "invocations.log");
-	const basePath = process.env.PATH ?? "";
-	await writeFakeAgentBrowserBinary(
-		tempDir,
-		`const fs = require("node:fs");
+test(
+	"agentBrowserExtension probes ref clicks with current snapshot accessibility metadata",
+	{ concurrency: false },
+	async () => {
+		const tempDir = await mkdtemp(join(tmpdir(), "pi-agent-browser-click-dispatch-ref-"));
+		const logPath = join(tempDir, "invocations.log");
+		const basePath = process.env.PATH ?? "";
+		await writeFakeAgentBrowserBinary(
+			tempDir,
+			`const fs = require("node:fs");
 const args = process.argv.slice(2);
 const stdin = fs.readFileSync(0, "utf8");
 fs.appendFileSync(${JSON.stringify(logPath)}, JSON.stringify({ args, stdin }) + "\\n");
@@ -306,38 +438,70 @@ if (args.includes("snapshot")) {
 } else {
   process.stdout.write(JSON.stringify({ success: true, data: "ok" }));
 }`,
-	);
+		);
 
-	try {
-		await withPatchedEnv({ PATH: `${tempDir}:${basePath}`, PI_AGENT_BROWSER_TEST_PAGE_URL: "https://fixture.invalid/" }, async () => {
-			const harness = createExtensionHarness({ cwd: tempDir });
-			await runExtensionEvent(harness.handlers, "session_start", { reason: "new" }, harness.ctx);
+		try {
+			await withPatchedEnv(
+				{
+					PATH: `${tempDir}:${basePath}`,
+					PI_AGENT_BROWSER_TEST_PAGE_URL: "https://fixture.invalid/",
+				},
+				async () => {
+					const harness = createExtensionHarness({ cwd: tempDir });
+					await runExtensionEvent(
+						harness.handlers,
+						"session_start",
+						{ reason: "new" },
+						harness.ctx,
+					);
 
-			const snapshot = await executeRegisteredTool(harness.tool, harness.ctx, { args: ["snapshot", "-i"] });
-			assert.equal(snapshot.isError, false);
+					const snapshot = await executeRegisteredTool(harness.tool, harness.ctx, {
+						args: ["snapshot", "-i"],
+					});
+					assert.equal(snapshot.isError, false);
 
-			const click = await executeRegisteredTool(harness.tool, harness.ctx, { args: ["click", "@e4"] });
-			assert.equal(click.isError, true);
-			assert.match((click.content[0] as { text: string }).text, /Click dispatch diagnostic:/);
-			assert.deepEqual((click.details?.clickDispatch as { target?: unknown } | undefined)?.target, {
-				kind: "accessible",
-				name: "RPS (3)",
-				refId: "e4",
-				role: "button",
-			});
+					const click = await executeRegisteredTool(harness.tool, harness.ctx, {
+						args: ["click", "@e4"],
+					});
+					assert.equal(click.isError, true);
+					assert.match((click.content[0] as { text: string }).text, /Click dispatch diagnostic:/);
+					assert.deepEqual(
+						(click.details?.clickDispatch as { target?: unknown } | undefined)?.target,
+						{
+							kind: "accessible",
+							name: "RPS (3)",
+							refId: "e4",
+							role: "button",
+						},
+					);
 
-			const invocations = await readInvocationLog(logPath);
-			assert.ok(invocations.some((entry) => entry.args.includes("eval") && (entry.stdin ?? "").includes("expectedRole") && (entry.stdin ?? "").includes("RPS (3)")));
-		});
-	} finally {
-		await rm(tempDir, { force: true, recursive: true });
-	}
-});
+					const invocations = await readInvocationLog(logPath);
+					assert.ok(
+						invocations.some(
+							(entry) =>
+								entry.args.includes("eval") &&
+								(entry.stdin ?? "").includes("expectedRole") &&
+								(entry.stdin ?? "").includes("RPS (3)"),
+						),
+					);
+				},
+			);
+		} finally {
+			await rm(tempDir, { force: true, recursive: true });
+		}
+	},
+);
 
-for (const guardedClick of [false, true]) test(`evaluate-gated optional probes do not prevent native ref or XPath clicks (click guarded=${guardedClick})`, { concurrency: false }, async () => {
-	const tempDir = await mkdtemp(join(tmpdir(), "pi-agent-browser-click-policy-"));
-	const logPath = join(tempDir, "calls.jsonl");
-	await writeFakeAgentBrowserBinary(tempDir, `
+for (const guardedClick of [false, true]) {
+	test(
+		`evaluate-gated optional probes do not prevent native ref or XPath clicks (click guarded=${guardedClick})`,
+		{ concurrency: false },
+		async () => {
+			const tempDir = await mkdtemp(join(tmpdir(), "pi-agent-browser-click-policy-"));
+			const logPath = join(tempDir, "calls.jsonl");
+			await writeFakeAgentBrowserBinary(
+				tempDir,
+				`
 const fs = require("node:fs");
 const args = process.argv.slice(2);
 const stdin = fs.readFileSync(0, "utf8");
@@ -350,40 +514,94 @@ else if (args.includes("snapshot")) data = { origin: "https://fixture.invalid/",
 else if (args.includes("session")) data = { active: false };
 else data = { url: "https://fixture.invalid/", title: "Fixture" };
 process.stdout.write(JSON.stringify({ success: true, data }));
-`);
-	try {
-		await withPatchedEnv({ PATH: `${tempDir}:${process.env.PATH ?? ""}`, AGENT_BROWSER_CONFIRM_ACTIONS: undefined }, async () => {
-			const harness = createExtensionHarness({ cwd: tempDir });
-			await runExtensionEvent(harness.handlers, "session_start", { reason: "new" }, harness.ctx);
-			const prefix = ["--session", "click-policy"];
-			await executeRegisteredTool(harness.tool, harness.ctx, { args: [...prefix, "--confirm-actions", guardedClick ? " evaluate , click " : " EvAlUaTe ", "open", "https://fixture.invalid/"] });
-			for (const selector of ["@e1", "xpath=//button"]) {
-				await executeRegisteredTool(harness.tool, harness.ctx, { args: [...prefix, "snapshot", "-i"] });
-				const clicked = await executeRegisteredTool(harness.tool, harness.ctx, { args: [...prefix, "click", selector] });
-				assert.equal(clicked.isError, guardedClick, clicked.content[0]?.text);
-				if (guardedClick) {
-					assert.equal((clicked.details?.readConfirmation as { action: string }).action, "click", "native click policy remains enforced, rather than approving the diagnostic");
-					const action = (clicked.details?.nextActions as Array<{ id: string; params: { args: string[] } }>).find(row => row.id === "approve-confirmation");
-					assert.ok(action);
-					const completed = await executeRegisteredTool(harness.tool, harness.ctx, action.params);
-					assert.equal(completed.isError, false, completed.content[0]?.text);
-				}
+`,
+			);
+			try {
+				await withPatchedEnv(
+					{
+						PATH: `${tempDir}:${process.env.PATH ?? ""}`,
+						AGENT_BROWSER_CONFIRM_ACTIONS: undefined,
+					},
+					async () => {
+						const harness = createExtensionHarness({ cwd: tempDir });
+						await runExtensionEvent(
+							harness.handlers,
+							"session_start",
+							{ reason: "new" },
+							harness.ctx,
+						);
+						const prefix = ["--session", "click-policy"];
+						await executeRegisteredTool(harness.tool, harness.ctx, {
+							args: [
+								...prefix,
+								"--confirm-actions",
+								guardedClick ? " evaluate , click " : " EvAlUaTe ",
+								"open",
+								"https://fixture.invalid/",
+							],
+						});
+						for (const selector of ["@e1", "xpath=//button"]) {
+							await executeRegisteredTool(harness.tool, harness.ctx, {
+								args: [...prefix, "snapshot", "-i"],
+							});
+							const clicked = await executeRegisteredTool(harness.tool, harness.ctx, {
+								args: [...prefix, "click", selector],
+							});
+							assert.equal(clicked.isError, guardedClick, clicked.content[0]?.text);
+							if (guardedClick) {
+								assert.equal(
+									(clicked.details?.readConfirmation as { action: string }).action,
+									"click",
+									"native click policy remains enforced, rather than approving the diagnostic",
+								);
+								const action = (
+									clicked.details?.nextActions as Array<{ id: string; params: { args: string[] } }>
+								).find((row) => row.id === "approve-confirmation");
+								assert.ok(action);
+								const completed = await executeRegisteredTool(
+									harness.tool,
+									harness.ctx,
+									action.params,
+								);
+								assert.equal(completed.isError, false, completed.content[0]?.text);
+							}
+						}
+						const invocations = await readInvocationLog(logPath);
+						assert.equal(
+							invocations.filter((row) => row.args.includes("click")).length,
+							2,
+							"both native targets must dispatch",
+						);
+						assert.equal(
+							invocations.some((row) => row.stdin?.includes("window[marker] = state")),
+							false,
+							"retained evaluate policy must not cause a retry loop in optional probe installation",
+						);
+						await runExtensionEvent(
+							harness.handlers,
+							"session_shutdown",
+							{ reason: "quit" },
+							harness.ctx,
+						);
+					},
+				);
+			} finally {
+				await rm(tempDir, { recursive: true, force: true });
 			}
-			const invocations = await readInvocationLog(logPath);
-			assert.equal(invocations.filter(row => row.args.includes("click")).length, 2, "both native targets must dispatch");
-			assert.equal(invocations.some(row => row.stdin?.includes("window[marker] = state")), false, "retained evaluate policy must not cause a retry loop in optional probe installation");
-			await runExtensionEvent(harness.handlers, "session_shutdown", { reason: "quit" }, harness.ctx);
-		});
-	} finally { await rm(tempDir, { recursive: true, force: true }); }
-});
+		},
+	);
+}
 
-test("agentBrowserExtension leaves duplicate-name ref clicks upstream-owned", { concurrency: false }, async () => {
-	const tempDir = await mkdtemp(join(tmpdir(), "pi-agent-browser-click-dispatch-duplicate-ref-"));
-	const logPath = join(tempDir, "invocations.log");
-	const basePath = process.env.PATH ?? "";
-	await writeFakeAgentBrowserBinary(
-		tempDir,
-		`const fs = require("node:fs");
+test(
+	"agentBrowserExtension leaves duplicate-name ref clicks upstream-owned",
+	{ concurrency: false },
+	async () => {
+		const tempDir = await mkdtemp(join(tmpdir(), "pi-agent-browser-click-dispatch-duplicate-ref-"));
+		const logPath = join(tempDir, "invocations.log");
+		const basePath = process.env.PATH ?? "";
+		await writeFakeAgentBrowserBinary(
+			tempDir,
+			`const fs = require("node:fs");
 const args = process.argv.slice(2);
 const stdin = fs.readFileSync(0, "utf8");
 fs.appendFileSync(${JSON.stringify(logPath)}, JSON.stringify({ args, stdin }) + "\\n");
@@ -409,36 +627,62 @@ if (args.includes("snapshot")) {
 } else {
   process.stdout.write(JSON.stringify({ success: true, data: "ok" }));
 }`,
-	);
+		);
 
-	try {
-		await withPatchedEnv({ PATH: `${tempDir}:${basePath}`, PI_AGENT_BROWSER_TEST_PAGE_URL: "https://shop.example/inventory" }, async () => {
-			const harness = createExtensionHarness({ cwd: tempDir });
-			await runExtensionEvent(harness.handlers, "session_start", { reason: "new" }, harness.ctx);
+		try {
+			await withPatchedEnv(
+				{
+					PATH: `${tempDir}:${basePath}`,
+					PI_AGENT_BROWSER_TEST_PAGE_URL: "https://shop.example/inventory",
+				},
+				async () => {
+					const harness = createExtensionHarness({ cwd: tempDir });
+					await runExtensionEvent(
+						harness.handlers,
+						"session_start",
+						{ reason: "new" },
+						harness.ctx,
+					);
 
-			const snapshot = await executeRegisteredTool(harness.tool, harness.ctx, { args: ["snapshot", "-i"] });
-			assert.equal(snapshot.isError, false);
+					const snapshot = await executeRegisteredTool(harness.tool, harness.ctx, {
+						args: ["snapshot", "-i"],
+					});
+					assert.equal(snapshot.isError, false);
 
-			const click = await executeRegisteredTool(harness.tool, harness.ctx, { args: ["click", "@e2"] });
-			assert.equal(click.isError, false);
-			assert.equal(click.details?.clickDispatch, undefined);
+					const click = await executeRegisteredTool(harness.tool, harness.ctx, {
+						args: ["click", "@e2"],
+					});
+					assert.equal(click.isError, false);
+					assert.equal(click.details?.clickDispatch, undefined);
 
-			const invocations = await readInvocationLog(logPath);
-			assert.equal(invocations.some((entry) => entry.args.includes("eval") && (entry.stdin ?? "").includes("window[marker] = state")), false);
-			assert.equal(invocations.filter((entry) => entry.args.includes("click")).length, 1);
-		});
-	} finally {
-		await rm(tempDir, { force: true, recursive: true });
-	}
-});
+					const invocations = await readInvocationLog(logPath);
+					assert.equal(
+						invocations.some(
+							(entry) =>
+								entry.args.includes("eval") &&
+								(entry.stdin ?? "").includes("window[marker] = state"),
+						),
+						false,
+					);
+					assert.equal(invocations.filter((entry) => entry.args.includes("click")).length, 1);
+				},
+			);
+		} finally {
+			await rm(tempDir, { force: true, recursive: true });
+		}
+	},
+);
 
-test("agentBrowserExtension does not run click-dispatch probes for unresolved find locators", { concurrency: false }, async () => {
-	const tempDir = await mkdtemp(join(tmpdir(), "pi-agent-browser-click-dispatch-find-"));
-	const logPath = join(tempDir, "invocations.log");
-	const basePath = process.env.PATH ?? "";
-	await writeFakeAgentBrowserBinary(
-		tempDir,
-		`const fs = require("node:fs");
+test(
+	"agentBrowserExtension does not run click-dispatch probes for unresolved find locators",
+	{ concurrency: false },
+	async () => {
+		const tempDir = await mkdtemp(join(tmpdir(), "pi-agent-browser-click-dispatch-find-"));
+		const logPath = join(tempDir, "invocations.log");
+		const basePath = process.env.PATH ?? "";
+		await writeFakeAgentBrowserBinary(
+			tempDir,
+			`const fs = require("node:fs");
 const args = process.argv.slice(2);
 const stdin = fs.readFileSync(0, "utf8");
 fs.appendFileSync(${JSON.stringify(logPath)}, JSON.stringify({ args, stdin }) + "\\n");
@@ -449,31 +693,43 @@ if (args.includes("eval")) {
 } else {
   process.stdout.write(JSON.stringify({ success: true, data: "ok" }));
 }`,
-	);
+		);
 
-	try {
-		await withPatchedEnv({ PATH: `${tempDir}:${basePath}` }, async () => {
-			const harness = createExtensionHarness({ cwd: tempDir });
-			await runExtensionEvent(harness.handlers, "session_start", { reason: "new" }, harness.ctx);
+		try {
+			await withPatchedEnv({ PATH: `${tempDir}:${basePath}` }, async () => {
+				const harness = createExtensionHarness({ cwd: tempDir });
+				await runExtensionEvent(harness.handlers, "session_start", { reason: "new" }, harness.ctx);
 
-			const click = await executeRegisteredTool(harness.tool, harness.ctx, { args: ["find", "text", "Add to cart", "click"] });
-			assert.equal(click.isError, false);
-			assert.equal(click.details?.clickDispatch, undefined);
-			const invocations = await readInvocationLog(logPath);
-			assert.equal(invocations.some((entry) => entry.args.includes("eval") && (entry.stdin ?? "").includes("window[marker] = state")), false);
-		});
-	} finally {
-		await rm(tempDir, { force: true, recursive: true });
-	}
-});
+				const click = await executeRegisteredTool(harness.tool, harness.ctx, {
+					args: ["find", "text", "Add to cart", "click"],
+				});
+				assert.equal(click.isError, false);
+				assert.equal(click.details?.clickDispatch, undefined);
+				const invocations = await readInvocationLog(logPath);
+				assert.equal(
+					invocations.some(
+						(entry) =>
+							entry.args.includes("eval") && (entry.stdin ?? "").includes("window[marker] = state"),
+					),
+					false,
+				);
+			});
+		} finally {
+			await rm(tempDir, { force: true, recursive: true });
+		}
+	},
+);
 
-test("agentBrowserExtension reports click dispatch diagnostic when upstream reports success without dispatching DOM events", { concurrency: false }, async () => {
-	const tempDir = await mkdtemp(join(tmpdir(), "pi-agent-browser-click-dispatch-"));
-	const logPath = join(tempDir, "invocations.log");
-	const basePath = process.env.PATH ?? "";
-	await writeFakeAgentBrowserBinary(
-		tempDir,
-		`const fs = require("node:fs");
+test(
+	"agentBrowserExtension reports click dispatch diagnostic when upstream reports success without dispatching DOM events",
+	{ concurrency: false },
+	async () => {
+		const tempDir = await mkdtemp(join(tmpdir(), "pi-agent-browser-click-dispatch-"));
+		const logPath = join(tempDir, "invocations.log");
+		const basePath = process.env.PATH ?? "";
+		await writeFakeAgentBrowserBinary(
+			tempDir,
+			`const fs = require("node:fs");
 const args = process.argv.slice(2);
 const stdin = fs.readFileSync(0, "utf8");
 fs.appendFileSync(${JSON.stringify(logPath)}, JSON.stringify({ args, stdin }) + "\\n");
@@ -500,52 +756,85 @@ if (args.includes("snapshot")) {
 } else {
   process.stdout.write(JSON.stringify({ success: true, data: "ok" }));
 }`,
-	);
+		);
 
-	try {
-		await withPatchedEnv({ PATH: `${tempDir}:${basePath}` }, async () => {
-			const harness = createExtensionHarness({ cwd: tempDir });
-			await runExtensionEvent(harness.handlers, "session_start", { reason: "new" }, harness.ctx);
+		try {
+			await withPatchedEnv({ PATH: `${tempDir}:${basePath}` }, async () => {
+				const harness = createExtensionHarness({ cwd: tempDir });
+				await runExtensionEvent(harness.handlers, "session_start", { reason: "new" }, harness.ctx);
 
-			await executeRegisteredTool(harness.tool, harness.ctx, { args: ["snapshot", "-i"] });
-			const click = await executeRegisteredTool(harness.tool, harness.ctx, { args: ["click", "xpath=//*[@id='add-to-cart']"] });
-			assert.equal(click.isError, true);
-			assert.match((click.content[0] as { text: string }).text, /Click dispatch diagnostic:/);
-			assert.equal((click.details?.clickDispatch as { status?: string } | undefined)?.status, "no-native-event-observed");
-			assert.deepEqual((click.details?.clickDispatch as { target?: unknown } | undefined)?.target, { kind: "xpath", selector: "//*[@id='add-to-cart']" });
-			assert.deepEqual((click.details?.clickDispatch as { scrollContainer?: unknown } | undefined)?.scrollContainer, {
-				selector: "#todos",
-				summary: "Target appears outside nested scroll container #todos; use scrollintoview on the target or scroll that container before retrying.",
-				targetOutsideContainer: true,
-				targetOutsideViewport: true,
+				await executeRegisteredTool(harness.tool, harness.ctx, { args: ["snapshot", "-i"] });
+				const click = await executeRegisteredTool(harness.tool, harness.ctx, {
+					args: ["click", "xpath=//*[@id='add-to-cart']"],
+				});
+				assert.equal(click.isError, true);
+				assert.match((click.content[0] as { text: string }).text, /Click dispatch diagnostic:/);
+				assert.equal(
+					(click.details?.clickDispatch as { status?: string } | undefined)?.status,
+					"no-native-event-observed",
+				);
+				assert.deepEqual(
+					(click.details?.clickDispatch as { target?: unknown } | undefined)?.target,
+					{ kind: "xpath", selector: "//*[@id='add-to-cart']" },
+				);
+				assert.deepEqual(
+					(click.details?.clickDispatch as { scrollContainer?: unknown } | undefined)
+						?.scrollContainer,
+					{
+						selector: "#todos",
+						summary:
+							"Target appears outside nested scroll container #todos; use scrollintoview on the target or scroll that container before retrying.",
+						targetOutsideContainer: true,
+						targetOutsideViewport: true,
+					},
+				);
+				assert.match(click.content[0]?.text ?? "", /nested scroll container #todos/);
+				const nextActionIds = (
+					(click.details?.nextActions as Array<{ id?: string }> | undefined) ?? []
+				).map((action) => action.id);
+				assert.ok(nextActionIds.includes("scroll-target-into-view-after-dispatch-miss"));
+				assert.ok(nextActionIds.includes("retry-click-after-dispatch-miss"));
+
+				const invocations = await readInvocationLog(logPath);
+				assert.equal(invocations.filter((entry) => entry.args.includes("click")).length, 1);
+				assert.ok(
+					invocations.some(
+						(entry) =>
+							entry.args.includes("attr") && entry.args.includes("xpath=//*[@id='add-to-cart']"),
+					),
+					"native XPath must confirm the same frame-scoped candidate",
+				);
+				assert.ok(
+					invocations.some(
+						(entry) =>
+							entry.args.includes("eval") && (entry.stdin ?? "").includes("window[marker] = state"),
+					),
+				);
+				const checkInvocation = invocations.find(
+					(entry) =>
+						entry.args.includes("eval") && (entry.stdin ?? "").includes("no-native-event-observed"),
+				);
+				assert.ok(checkInvocation, "expected a click dispatch check eval");
+				assert.ok((checkInvocation.stdin ?? "").includes("state.cleanup"));
+				assert.ok((checkInvocation.stdin ?? "").includes("delete window[marker]"));
 			});
-			assert.match(click.content[0]?.text ?? "", /nested scroll container #todos/);
-			const nextActionIds = ((click.details?.nextActions as Array<{ id?: string }> | undefined) ?? []).map((action) => action.id);
-			assert.ok(nextActionIds.includes("scroll-target-into-view-after-dispatch-miss"));
-			assert.ok(nextActionIds.includes("retry-click-after-dispatch-miss"));
+		} finally {
+			await rm(tempDir, { force: true, recursive: true });
+		}
+	},
+);
 
-			const invocations = await readInvocationLog(logPath);
-			assert.equal(invocations.filter((entry) => entry.args.includes("click")).length, 1);
-			assert.ok(invocations.some((entry) => entry.args.includes("attr") && entry.args.includes("xpath=//*[@id='add-to-cart']")), "native XPath must confirm the same frame-scoped candidate");
-			assert.ok(invocations.some((entry) => entry.args.includes("eval") && (entry.stdin ?? "").includes("window[marker] = state")));
-			const checkInvocation = invocations.find((entry) => entry.args.includes("eval") && (entry.stdin ?? "").includes("no-native-event-observed"));
-			assert.ok(checkInvocation, "expected a click dispatch check eval");
-			assert.ok((checkInvocation.stdin ?? "").includes("state.cleanup"));
-			assert.ok((checkInvocation.stdin ?? "").includes("delete window[marker]"));
-		});
-	} finally {
-		await rm(tempDir, { force: true, recursive: true });
-	}
-});
-
-test("agentBrowserExtension observes live URL after href-less CSS clicks", { concurrency: false }, async () => {
-	const tempDir = await mkdtemp(join(tmpdir(), "pi-agent-browser-css-click-url-"));
-	const logPath = join(tempDir, "invocations.log");
-	const urlPath = join(tempDir, "url.txt");
-	const basePath = process.env.PATH ?? "";
-	await writeFakeAgentBrowserBinary(
-		tempDir,
-		`const fs = require("node:fs");
+test(
+	"agentBrowserExtension observes live URL after href-less CSS clicks",
+	{ concurrency: false },
+	async () => {
+		const tempDir = await mkdtemp(join(tmpdir(), "pi-agent-browser-css-click-url-"));
+		const logPath = join(tempDir, "invocations.log");
+		const urlPath = join(tempDir, "url.txt");
+		const basePath = process.env.PATH ?? "";
+		await writeFakeAgentBrowserBinary(
+			tempDir,
+			`const fs = require("node:fs");
 const args = process.argv.slice(2);
 fs.appendFileSync(${JSON.stringify(logPath)}, JSON.stringify({ args }) + "\\n");
 if (args.includes("open")) {
@@ -561,30 +850,53 @@ if (args.includes("open")) {
 } else {
   process.stdout.write(JSON.stringify({ success: true, data: "ok" }));
 }`,
-	);
+		);
 
-	try {
-		await withPatchedEnv({ PATH: `${tempDir}:${basePath}` }, async () => {
-			const harness = createExtensionHarness({ cwd: tempDir });
-			await runExtensionEvent(harness.handlers, "session_start", { reason: "new" }, harness.ctx);
+		try {
+			await withPatchedEnv({ PATH: `${tempDir}:${basePath}` }, async () => {
+				const harness = createExtensionHarness({ cwd: tempDir });
+				await runExtensionEvent(harness.handlers, "session_start", { reason: "new" }, harness.ctx);
 
-			const opened = await executeRegisteredTool(harness.tool, harness.ctx, { args: ["open", "https://shop.example/login"] });
-			assert.equal(opened.isError, false);
-			assert.equal((opened.details?.sessionTabTarget as { url?: string } | undefined)?.url, "https://shop.example/login");
+				const opened = await executeRegisteredTool(harness.tool, harness.ctx, {
+					args: ["open", "https://shop.example/login"],
+				});
+				assert.equal(opened.isError, false);
+				assert.equal(
+					(opened.details?.sessionTabTarget as { url?: string } | undefined)?.url,
+					"https://shop.example/login",
+				);
 
-			const click = await executeRegisteredTool(harness.tool, harness.ctx, { args: ["click", "#login-button"] });
-			assert.equal(click.isError, false);
-			assert.equal(click.details?.clickDispatch, undefined);
-			assert.deepEqual(click.details?.sessionTabTarget, { title: "Inventory", url: "https://shop.example/inventory" });
-			assert.equal((click.details?.pageChangeSummary as { changeType?: string; url?: string } | undefined)?.changeType, "navigation");
-			assert.equal((click.details?.pageChangeSummary as { url?: string } | undefined)?.url, "https://shop.example/inventory");
+				const click = await executeRegisteredTool(harness.tool, harness.ctx, {
+					args: ["click", "#login-button"],
+				});
+				assert.equal(click.isError, false);
+				assert.equal(click.details?.clickDispatch, undefined);
+				assert.deepEqual(click.details?.sessionTabTarget, {
+					title: "Inventory",
+					url: "https://shop.example/inventory",
+				});
+				assert.equal(
+					(click.details?.pageChangeSummary as { changeType?: string; url?: string } | undefined)
+						?.changeType,
+					"navigation",
+				);
+				assert.equal(
+					(click.details?.pageChangeSummary as { url?: string } | undefined)?.url,
+					"https://shop.example/inventory",
+				);
 
-			const invocations = await readInvocationLog(logPath);
-			assert.equal(invocations.filter((entry) => entry.args.includes("click")).length, 1);
-			assert.ok(invocations.some((entry) => entry.args.includes("get") && entry.args.includes("url")));
-			assert.equal(invocations.some((entry) => entry.args.includes("eval")), false);
-		});
-	} finally {
-		await rm(tempDir, { force: true, recursive: true });
-	}
-});
+				const invocations = await readInvocationLog(logPath);
+				assert.equal(invocations.filter((entry) => entry.args.includes("click")).length, 1);
+				assert.ok(
+					invocations.some((entry) => entry.args.includes("get") && entry.args.includes("url")),
+				);
+				assert.equal(
+					invocations.some((entry) => entry.args.includes("eval")),
+					false,
+				);
+			});
+		} finally {
+			await rm(tempDir, { force: true, recursive: true });
+		}
+	},
+);

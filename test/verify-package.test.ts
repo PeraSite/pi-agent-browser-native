@@ -36,7 +36,10 @@ interface PublishContract {
 const verifyPackageModule = (await import(verifyPackageModulePath)) as {
 	FORBIDDEN_PACKED_FILES: string[];
 	FORBIDDEN_REPO_FILES: string[];
-	collectPackedMarkdownLinkFailures: (options: { cwd?: string; packedPaths: Set<string> }) => Promise<string[]>;
+	collectPackedMarkdownLinkFailures: (options: {
+		cwd?: string;
+		packedPaths: Set<string>;
+	}) => Promise<string[]>;
 	loadPublishContract: (options?: { cwd?: string }) => Promise<PublishContract>;
 	packToTemporaryPackageDir: (cwd?: string) => Promise<{
 		cleanup: () => Promise<void>;
@@ -61,7 +64,12 @@ const verifyPackageModule = (await import(verifyPackageModulePath)) as {
 	};
 	evaluatePiSmokeResult: (options: {
 		packageDir: string;
-		tools: Array<{ name: string; path?: string; source?: { path?: string }; sourceInfo?: { path?: string } }>;
+		tools: Array<{
+			name: string;
+			path?: string;
+			source?: { path?: string };
+			sourceInfo?: { path?: string };
+		}>;
 	}) => string[];
 	executePackagedAgentBrowserSmoke: (options: {
 		packageDir: string;
@@ -103,8 +111,16 @@ const {
 
 test("parseCliArgs supports help, list-files, and smoke-pi modes", () => {
 	assert.deepEqual(parseCliArgs([]), { listFiles: false, showHelp: false, smokePi: false });
-	assert.deepEqual(parseCliArgs(["--list-files"]), { listFiles: true, showHelp: false, smokePi: false });
-	assert.deepEqual(parseCliArgs(["--smoke-pi"]), { listFiles: false, showHelp: false, smokePi: true });
+	assert.deepEqual(parseCliArgs(["--list-files"]), {
+		listFiles: true,
+		showHelp: false,
+		smokePi: false,
+	});
+	assert.deepEqual(parseCliArgs(["--smoke-pi"]), {
+		listFiles: false,
+		showHelp: false,
+		smokePi: true,
+	});
 	assert.deepEqual(parseCliArgs(["--list-files", "--smoke-pi"]), {
 		listFiles: true,
 		showHelp: false,
@@ -161,7 +177,9 @@ test("evaluatePiSmokeResult requires exactly one packaged agent_browser source a
 	assert.match(
 		evaluatePiSmokeResult({
 			packageDir: "/tmp/pkg/package",
-			tools: [{ name: "agent_browser", sourceInfo: { path: "/repo/extensions/agent-browser/index.ts" } }],
+			tools: [
+				{ name: "agent_browser", sourceInfo: { path: "/repo/extensions/agent-browser/index.ts" } },
+			],
 		})[0] ?? "",
 		/expected a source inside packed package/,
 	);
@@ -185,7 +203,9 @@ test("executePackagedAgentBrowserSmoke invokes the packaged agent_browser tool w
 				name === "agent_browser"
 					? {
 							execute: async (toolCallId, params, _signal, onUpdate, ctx) => {
-								onUpdate?.({ content: [{ type: "text", text: "Running agent-browser --version" }] });
+								onUpdate?.({
+									content: [{ type: "text", text: "Running agent-browser --version" }],
+								});
 								calls.push({ ctx, params, toolCallId });
 								return {
 									content: [{ type: "text", text: "agent-browser 0.0.0-packaged-smoke" }],
@@ -248,21 +268,50 @@ test("package metadata keeps Pi peers host-provided and declares the qualified r
 		scripts?: Record<string, string>;
 	};
 
-	assert.equal(packageJson.dependencies?.["cross-spawn"], "7.0.6", "the spawner must not rely on Pi's private transitive dependencies");
-	assert.equal(packageJson.dependencies?.["path-key"], "3.1.1", "launcher PATH selection must match cross-spawn 7");
-	assert.equal(packageJson.dependencies?.which, "2.0.2", "launcher resolution must match cross-spawn 7");
+	assert.equal(
+		packageJson.dependencies?.["cross-spawn"],
+		"7.0.6",
+		"the spawner must not rely on Pi's private transitive dependencies",
+	);
+	assert.equal(
+		packageJson.dependencies?.["path-key"],
+		"3.1.1",
+		"launcher PATH selection must match cross-spawn 7",
+	);
+	assert.equal(
+		packageJson.dependencies?.which,
+		"2.0.2",
+		"launcher resolution must match cross-spawn 7",
+	);
 	assert.equal(packageJson.engines?.node, ">=24.21.0");
 	assert.equal(packageJson.packageManager, "npm@12.2.0");
-	assert.equal(packageJson.overrides, undefined, "transitive owners should select their compatible dependency versions");
-	for (const packageName of ["@earendil-works/pi-ai", "@earendil-works/pi-coding-agent", "@earendil-works/pi-tui", "typebox"]) {
-		assert.equal(packageJson.peerDependencies?.[packageName], "*", `${packageName} should stay host-provided per Pi package docs`);
+	assert.equal(
+		packageJson.overrides,
+		undefined,
+		"transitive owners should select their compatible dependency versions",
+	);
+	for (const packageName of [
+		"@earendil-works/pi-ai",
+		"@earendil-works/pi-coding-agent",
+		"@earendil-works/pi-tui",
+		"typebox",
+	]) {
+		assert.equal(
+			packageJson.peerDependencies?.[packageName],
+			"*",
+			`${packageName} should stay host-provided per Pi package docs`,
+		);
 	}
 	assert.equal(
 		packageJson.scripts?.prepare,
 		"node ./scripts/prepare.mjs",
 		"Packed and GitHub/source installs must build the ignored dist entrypoint before Pi loads it, even when Pi installs with --omit=dev",
 	);
-	assert.equal(packageJson.scripts?.prepack, undefined, "npm pack must not duplicate the prepare-owned build");
+	assert.equal(
+		packageJson.scripts?.prepack,
+		undefined,
+		"npm pack must not duplicate the prepare-owned build",
+	);
 });
 
 test("publish contract derives required packed files from package.json", async () => {
@@ -272,18 +321,44 @@ test("publish contract derives required packed files from package.json", async (
 	assert.equal(FORBIDDEN_PACKED_FILES.includes(".pi/extensions/agent-browser.ts"), true);
 	assert.equal(FORBIDDEN_PACKED_FILES.includes("docs/plans/"), true);
 	assert.equal(FORBIDDEN_PACKED_FILES.includes("extensions/agent-browser/index.ts"), true);
-	assert.equal(publishContract.forbiddenRepoFiles.includes(".pi/extensions/agent-browser.ts"), true);
-	assert.equal(publishContract.forbiddenPackedFiles.includes(".pi/extensions/agent-browser.ts"), true);
+	assert.equal(
+		publishContract.forbiddenRepoFiles.includes(".pi/extensions/agent-browser.ts"),
+		true,
+	);
+	assert.equal(
+		publishContract.forbiddenPackedFiles.includes(".pi/extensions/agent-browser.ts"),
+		true,
+	);
 	assert.equal(publishContract.requiredPackedFiles.includes("package.json"), true);
 	assert.equal(publishContract.requiredPackedFiles.includes("scripts/doctor.mjs"), true);
 	assert.equal(publishContract.requiredPackedFiles.includes("scripts/prepare.mjs"), true);
-	assert.equal(publishContract.requiredPackedFiles.includes("scripts/agent-browser-capability-baseline.mjs"), true);
+	assert.equal(
+		publishContract.requiredPackedFiles.includes("scripts/agent-browser-capability-baseline.mjs"),
+		true,
+	);
 	assert.equal(publishContract.requiredPackedFiles.includes("docs/COMMAND_REFERENCE.md"), true);
-	assert.equal(publishContract.requiredPackedFiles.includes("dist/extensions/agent-browser/index.js"), true);
-	assert.equal(publishContract.requiredPackedFiles.includes("dist/extensions/agent-browser/script-worker.js"), true);
-	assert.equal(publishContract.requiredPackedFiles.includes("dist/extensions/agent-browser/lib/parsing.js"), true);
-	assert.equal(publishContract.requiredPackedFiles.includes("dist/extensions/agent-browser/lib/playbook.js"), true);
-	assert.equal(publishContract.requiredPackedFiles.includes("dist/extensions/agent-browser/lib/results/snapshot.js"), true);
+	assert.equal(
+		publishContract.requiredPackedFiles.includes("dist/extensions/agent-browser/index.js"),
+		true,
+	);
+	assert.equal(
+		publishContract.requiredPackedFiles.includes("dist/extensions/agent-browser/script-worker.js"),
+		true,
+	);
+	assert.equal(
+		publishContract.requiredPackedFiles.includes("dist/extensions/agent-browser/lib/parsing.js"),
+		true,
+	);
+	assert.equal(
+		publishContract.requiredPackedFiles.includes("dist/extensions/agent-browser/lib/playbook.js"),
+		true,
+	);
+	assert.equal(
+		publishContract.requiredPackedFiles.includes(
+			"dist/extensions/agent-browser/lib/results/snapshot.js",
+		),
+		true,
+	);
 	for (const path of [
 		"docs/platform-smoke.md",
 		"platform-smoke.config.mjs",
@@ -296,16 +371,29 @@ test("publish contract derives required packed files from package.json", async (
 		"scripts/platform-smoke/browser-dogfood-windows.ps1",
 		"scripts/platform-smoke/linux-image/Dockerfile",
 	]) {
-		assert.ok(publishContract.requiredPackedFiles.includes(path), `expected publish contract to require ${path}`);
+		assert.ok(
+			publishContract.requiredPackedFiles.includes(path),
+			`expected publish contract to require ${path}`,
+		);
 	}
-	assert.equal(publishContract.requiredPackedFiles.includes("extensions/agent-browser/index.ts"), false);
+	assert.equal(
+		publishContract.requiredPackedFiles.includes("extensions/agent-browser/index.ts"),
+		false,
+	);
 });
 
 test("loadPublishContract reports missing package.json files entries clearly", async () => {
 	const tempDir = await mkdtemp(join(tmpdir(), "publish-contract-test-"));
 	try {
-		await writeFile(join(tempDir, "package.json"), JSON.stringify({ files: ["missing.md"] }), "utf8");
-		await assert.rejects(() => loadPublishContract({ cwd: tempDir }), /package\.json files entry "missing\.md" does not exist/);
+		await writeFile(
+			join(tempDir, "package.json"),
+			JSON.stringify({ files: ["missing.md"] }),
+			"utf8",
+		);
+		await assert.rejects(
+			() => loadPublishContract({ cwd: tempDir }),
+			/package\.json files entry "missing\.md" does not exist/,
+		);
 	} finally {
 		await rm(tempDir, { force: true, recursive: true });
 	}
@@ -314,7 +402,11 @@ test("loadPublishContract reports missing package.json files entries clearly", a
 test("collectPackedMarkdownLinkFailures reports local links absent from the packed tarball", async () => {
 	const tempDir = await mkdtemp(join(tmpdir(), "packed-doc-links-test-"));
 	try {
-		await writeFile(join(tempDir, "README.md"), "[ok](docs/TOOL_CONTRACT.md) [missing](docs/support-notes.md) [anchor](#usage) [external](https://example.com)\n", "utf8");
+		await writeFile(
+			join(tempDir, "README.md"),
+			"[ok](docs/TOOL_CONTRACT.md) [missing](docs/support-notes.md) [anchor](#usage) [external](https://example.com)\n",
+			"utf8",
+		);
 		await writeFile(join(tempDir, "CHANGELOG.md"), "[root](README.md)\n", "utf8");
 		await mkdir(join(tempDir, "docs"));
 		await writeFile(join(tempDir, "docs", "TOOL_CONTRACT.md"), "# Contract\n", "utf8");
@@ -392,10 +484,17 @@ test("evaluatePackResult rejects private paths and tarballs without rejecting ne
 				size: 123,
 				unpackedSize: 456,
 			},
-			publishContract: { forbiddenPackedFiles: publishContract.forbiddenPackedFiles, requiredPackedFiles: ["package.json"] },
+			publishContract: {
+				forbiddenPackedFiles: publishContract.forbiddenPackedFiles,
+				requiredPackedFiles: ["package.json"],
+			},
 		});
 		assert.deepEqual(report.forbiddenPackedFiles, [...forbidden], path);
-		assert.deepEqual(report.failures, forbidden.length ? [`Forbidden packed file present: ${forbidden.join(", ")}`] : [], path);
+		assert.deepEqual(
+			report.failures,
+			forbidden.length ? [`Forbidden packed file present: ${forbidden.join(", ")}`] : [],
+			path,
+		);
 	}
 });
 
@@ -403,8 +502,16 @@ test("verifyPackageRelease lets prepare create a missing dist directory", async 
 	const tempDir = await mkdtemp(join(tmpdir(), "pi-agent-browser-package-build-owner-"));
 	try {
 		await writeFile(join(tempDir, "LICENSE"), "fixture\n", "utf8");
-		await writeFile(join(tempDir, "build.mjs"), 'import { mkdirSync, writeFileSync } from "node:fs"; mkdirSync("dist", { recursive: true }); writeFileSync("dist/index.js", "export {};\\n");\n', "utf8");
-		await writeFile(join(tempDir, "package.json"), `${JSON.stringify({ name: "pi-agent-browser-package-build-owner-fixture", version: "1.0.0", type: "module", files: ["dist"], scripts: { prepare: "node build.mjs" } }, null, 2)}\n`, "utf8");
+		await writeFile(
+			join(tempDir, "build.mjs"),
+			'import { mkdirSync, writeFileSync } from "node:fs"; mkdirSync("dist", { recursive: true }); writeFileSync("dist/index.js", "export {};\\n");\n',
+			"utf8",
+		);
+		await writeFile(
+			join(tempDir, "package.json"),
+			`${JSON.stringify({ name: "pi-agent-browser-package-build-owner-fixture", version: "1.0.0", type: "module", files: ["dist"], scripts: { prepare: "node build.mjs" } }, null, 2)}\n`,
+			"utf8",
+		);
 
 		await assert.rejects(access(join(tempDir, "dist")));
 		const report = await verifyPackageRelease({ cwd: tempDir });
@@ -430,7 +537,11 @@ test("packToTemporaryPackageDir writes a tarball even under npm publish dry-run 
 			packResult: packed.packResult,
 			publishContract: await loadPublishContract(),
 		});
-		assert.deepEqual(report.failures, [], "real tarball must satisfy the canonical required and forbidden paths");
+		assert.deepEqual(
+			report.failures,
+			[],
+			"real tarball must satisfy the canonical required and forbidden paths",
+		);
 	} finally {
 		if (previousDryRun === undefined) {
 			delete process.env.npm_config_dry_run;

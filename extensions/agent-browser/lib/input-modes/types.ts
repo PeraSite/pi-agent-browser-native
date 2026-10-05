@@ -4,13 +4,39 @@ export const AGENT_BROWSER_CODE_MAX_TIMEOUT_MS = 300_000;
 
 export const AGENT_BROWSER_SEMANTIC_ACTIONS = ["check", "click", "fill", "select"] as const;
 
-export const AGENT_BROWSER_SEMANTIC_LOCATORS = ["alt", "label", "placeholder", "role", "testid", "text", "title"] as const;
+export const AGENT_BROWSER_SEMANTIC_LOCATORS = [
+	"alt",
+	"label",
+	"placeholder",
+	"role",
+	"testid",
+	"text",
+	"title",
+] as const;
 
-const AGENT_BROWSER_JOB_STEP_ACTIONS = ["open", "click", "fill", "type", "select", "wait", "assertText", "assertUrl", "waitForDownload", "screenshot", "snapshot"] as const;
+const AGENT_BROWSER_JOB_STEP_ACTIONS = [
+	"open",
+	"click",
+	"fill",
+	"type",
+	"select",
+	"wait",
+	"assertText",
+	"assertUrl",
+	"waitForDownload",
+	"screenshot",
+	"snapshot",
+] as const;
 
 export const AGENT_BROWSER_QA_LOAD_STATES = ["domcontentloaded", "load", "networkidle"] as const;
 
-export const AGENT_BROWSER_ELECTRON_ACTIONS = ["list", "launch", "status", "cleanup", "probe"] as const;
+export const AGENT_BROWSER_ELECTRON_ACTIONS = [
+	"list",
+	"launch",
+	"status",
+	"cleanup",
+	"probe",
+] as const;
 
 export const AGENT_BROWSER_ELECTRON_HANDOFFS = ["connect", "tabs", "snapshot"] as const;
 
@@ -20,11 +46,26 @@ export const AGENT_BROWSER_ELECTRON_LIST_FIELDS = new Set(["action", "query", "m
 
 export const AGENT_BROWSER_ELECTRON_PROBE_FIELDS = new Set(["action", "launchId", "timeoutMs"]);
 
-export const AGENT_BROWSER_ELECTRON_RESERVED_APP_ARGS = ["--user-data-dir", "--remote-debugging-port", "--remote-debugging-address", "--remote-debugging-pipe"] as const;
+export const AGENT_BROWSER_ELECTRON_RESERVED_APP_ARGS = [
+	"--user-data-dir",
+	"--remote-debugging-port",
+	"--remote-debugging-address",
+	"--remote-debugging-pipe",
+] as const;
 
 export const SOURCE_LOOKUP_WORKSPACE_EXTENSIONS = new Set([".ts", ".tsx", ".js", ".jsx"]);
 
-export const SOURCE_LOOKUP_IGNORED_DIRECTORIES = new Set([".git", "node_modules", "dist", "build", "coverage", ".next", "out", "tmp", "temp"]);
+export const SOURCE_LOOKUP_IGNORED_DIRECTORIES = new Set([
+	".git",
+	"node_modules",
+	"dist",
+	"build",
+	"coverage",
+	".next",
+	"out",
+	"tmp",
+	"temp",
+]);
 
 export const SOURCE_LOOKUP_DEFAULT_MAX_WORKSPACE_FILES = 2_000;
 
@@ -42,38 +83,41 @@ export type AgentBrowserElectronAction = (typeof AGENT_BROWSER_ELECTRON_ACTIONS)
 
 export type AgentBrowserSourceLookupStatus = "candidates-found" | "no-candidates" | "unsupported";
 
-export type AgentBrowserNetworkSourceLookupStatus = "failed-requests-found" | "no-failed-requests" | "no-candidates";
+export type AgentBrowserNetworkSourceLookupStatus =
+	| "failed-requests-found"
+	| "no-failed-requests"
+	| "no-candidates";
 
 export type CompiledAgentBrowserElectron =
 	| {
-		action: "list";
-		maxResults?: number;
-		query?: string;
-	}
+			action: "list";
+			maxResults?: number;
+			query?: string;
+	  }
 	| {
-		action: "launch";
-		allow?: string[];
-		appArgs?: string[];
-		deny?: string[];
-		appName?: string;
-		appPath?: string;
-		bundleId?: string;
-		executablePath?: string;
-		handoff: "connect" | "snapshot" | "tabs";
-		targetType: "any" | "page" | "webview";
-		timeoutMs?: number;
-	}
+			action: "launch";
+			allow?: string[];
+			appArgs?: string[];
+			deny?: string[];
+			appName?: string;
+			appPath?: string;
+			bundleId?: string;
+			executablePath?: string;
+			handoff: "connect" | "snapshot" | "tabs";
+			targetType: "any" | "page" | "webview";
+			timeoutMs?: number;
+	  }
 	| {
-		action: "cleanup" | "status";
-		all?: boolean;
-		launchId?: string;
-		timeoutMs?: number;
-	}
+			action: "cleanup" | "status";
+			all?: boolean;
+			launchId?: string;
+			timeoutMs?: number;
+	  }
 	| {
-		action: "probe";
-		launchId?: string;
-		timeoutMs?: number;
-	};
+			action: "probe";
+			launchId?: string;
+			timeoutMs?: number;
+	  };
 
 export interface CompiledAgentBrowserSemanticAction {
 	action: AgentBrowserSemanticActionName;

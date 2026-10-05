@@ -27,7 +27,9 @@ test("formatSemanticActionPresentationText prefers compact action line over loca
 
 test("shouldCaptureSemanticActionNavigationSummary probes find click without title or url", () => {
 	assert.equal(
-		shouldCaptureSemanticActionNavigationSummary(semanticClick, { clicked: "[data-agent-browser-located='true']" }),
+		shouldCaptureSemanticActionNavigationSummary(semanticClick, {
+			clicked: "[data-agent-browser-located='true']",
+		}),
 		true,
 	);
 	assert.equal(
@@ -38,7 +40,13 @@ test("shouldCaptureSemanticActionNavigationSummary probes find click without tit
 		}),
 		false,
 	);
-	assert.equal(shouldCaptureSemanticActionNavigationSummary({ ...semanticClick, action: "fill" }, { filled: true }), false);
+	assert.equal(
+		shouldCaptureSemanticActionNavigationSummary(
+			{ ...semanticClick, action: "fill" },
+			{ filled: true },
+		),
+		false,
+	);
 });
 
 test("buildToolPresentation enriches semanticAction find click like direct click", async () => {

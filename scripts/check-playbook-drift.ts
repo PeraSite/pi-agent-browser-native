@@ -26,10 +26,14 @@ type Target = {
 const TARGETS: Target[] = [
 	{ path: "README.md", blocks: ["inspection", "wrapper-tab-recovery"] },
 	{ path: "docs/COMMAND_REFERENCE.md", blocks: ["inspection", "wrapper-tab-recovery"] },
-	{ path: "docs/TOOL_CONTRACT.md", blocks: ["shared-guidelines", "wrapper-tab-recovery", "inspection"] },
+	{
+		path: "docs/TOOL_CONTRACT.md",
+		blocks: ["shared-guidelines", "wrapper-tab-recovery", "inspection"],
+	},
 ];
 
-const GENERATED_NOTICE = "<!-- Generated from extensions/agent-browser/lib/playbook.ts. Run `npm run docs -- playbook write` to update. -->";
+const GENERATED_NOTICE =
+	"<!-- Generated from extensions/agent-browser/lib/playbook.ts. Run `npm run docs -- playbook write` to update. -->";
 
 function printHelp(): void {
 	console.log(`Usage: tsx ./scripts/check-playbook-drift.ts [--check|--write]
@@ -51,10 +55,18 @@ Exit codes:
 }
 
 function parseMode(argv: string[]): Mode | "help" {
-	if (argv.length === 0) return "check";
-	if (argv.length === 1 && argv[0] === "--check") return "check";
-	if (argv.length === 1 && argv[0] === "--write") return "write";
-	if (argv.length === 1 && (argv[0] === "-h" || argv[0] === "--help")) return "help";
+	if (argv.length === 0) {
+		return "check";
+	}
+	if (argv.length === 1 && argv[0] === "--check") {
+		return "check";
+	}
+	if (argv.length === 1 && argv[0] === "--write") {
+		return "write";
+	}
+	if (argv.length === 1 && (argv[0] === "-h" || argv[0] === "--help")) {
+		return "help";
+	}
 	throw new Error(`Invalid arguments: ${argv.join(" ")}`);
 }
 
@@ -80,10 +92,19 @@ function renderBlock(id: BlockId): string {
 }
 
 function markedBlock(id: BlockId): string {
-	return [`<!-- agent-browser-playbook:start ${id} -->`, GENERATED_NOTICE, renderBlock(id), `<!-- agent-browser-playbook:end ${id} -->`].join("\n");
+	return [
+		`<!-- agent-browser-playbook:start ${id} -->`,
+		GENERATED_NOTICE,
+		renderBlock(id),
+		`<!-- agent-browser-playbook:end ${id} -->`,
+	].join("\n");
 }
 
-function replaceBlock(content: string, id: BlockId, path: string): { next: string; drifted: boolean } {
+function replaceBlock(
+	content: string,
+	id: BlockId,
+	path: string,
+): { next: string; drifted: boolean } {
 	const start = `<!-- agent-browser-playbook:start ${id} -->`;
 	const end = `<!-- agent-browser-playbook:end ${id} -->`;
 	const startIndex = content.indexOf(start);
@@ -106,7 +127,9 @@ async function processTarget(target: Target, mode: Mode): Promise<string[]> {
 	for (const block of target.blocks) {
 		const result = replaceBlock(content, block, target.path);
 		content = result.next;
-		if (result.drifted) staleBlocks.push(`${target.path}#${block}`);
+		if (result.drifted) {
+			staleBlocks.push(`${target.path}#${block}`);
+		}
 	}
 	if (mode === "write" && staleBlocks.length > 0) {
 		await writeFile(target.path, content, "utf8");
@@ -120,16 +143,22 @@ async function main(): Promise<void> {
 		printHelp();
 		return;
 	}
-	const staleBlocks = (await Promise.all(TARGETS.map((target) => processTarget(target, mode)))).flat();
+	const staleBlocks = (
+		await Promise.all(TARGETS.map((target) => processTarget(target, mode)))
+	).flat();
 	if (staleBlocks.length === 0) {
 		console.log(`agent_browser playbook docs are ${mode === "check" ? "in sync" : "up to date"}.`);
 		return;
 	}
 	if (mode === "write") {
-		console.log(`Updated generated playbook blocks:\n${staleBlocks.map((block) => `- ${block}`).join("\n")}`);
+		console.log(
+			`Updated generated playbook blocks:\n${staleBlocks.map((block) => `- ${block}`).join("\n")}`,
+		);
 		return;
 	}
-	throw new Error(`Generated playbook blocks are stale. Run \`npm run docs -- playbook write\`.\n${staleBlocks.map((block) => `- ${block}`).join("\n")}`);
+	throw new Error(
+		`Generated playbook blocks are stale. Run \`npm run docs -- playbook write\`.\n${staleBlocks.map((block) => `- ${block}`).join("\n")}`,
+	);
 }
 
 main().catch((error: unknown) => {

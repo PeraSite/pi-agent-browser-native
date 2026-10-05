@@ -3,7 +3,8 @@ import { join } from "node:path";
 
 const DIRECT_AGENT_BROWSER_BASH_BYPASS_ENV = "PI_AGENT_BROWSER_ALLOW_DIRECT_BASH";
 const DIRECT_AGENT_BROWSER_EXECUTABLE_PATTERN = /^(?:[.~]|\.\.?|\/)?(?:[^\s;&|]+\/)?agent-browser$/;
-const HARMLESS_AGENT_BROWSER_INSPECTION_PATTERN = /^\s*(?:command\s+-v|which|type\s+-P)\s+agent-browser\s*$/;
+const HARMLESS_AGENT_BROWSER_INSPECTION_PATTERN =
+	/^\s*(?:command\s+-v|which|type\s+-P)\s+agent-browser\s*$/;
 const PACKAGE_NAME = "pi-agent-browser-native";
 
 type ShellQuoteState = "double" | "single" | undefined;
@@ -13,7 +14,11 @@ function isShellAssignmentToken(token: string): boolean {
 }
 
 function stripOuterQuotes(token: string): string {
-	if (token.length >= 2 && ((token.startsWith('"') && token.endsWith('"')) || (token.startsWith("'") && token.endsWith("'")))) {
+	if (
+		token.length >= 2 &&
+		((token.startsWith('"') && token.endsWith('"')) ||
+			(token.startsWith("'") && token.endsWith("'")))
+	) {
 		return token.slice(1, -1);
 	}
 	return token;
@@ -95,7 +100,9 @@ export function looksLikeDirectAgentBrowserBash(command: string): boolean {
 		const char = command[index];
 		if (pendingHeredoc) {
 			if (char === "\n") {
-				const candidate = pendingHeredoc.stripTabs ? pendingHeredocLine.replace(/^\t+/, "") : pendingHeredocLine;
+				const candidate = pendingHeredoc.stripTabs
+					? pendingHeredocLine.replace(/^\t+/, "")
+					: pendingHeredocLine;
 				if (candidate === pendingHeredoc.delimiter) {
 					pendingHeredoc = undefined;
 				}
@@ -193,7 +200,9 @@ function isTruthyEnvValue(value: string | undefined): boolean {
 
 async function isPackageDevelopmentCwd(cwd: string): Promise<boolean> {
 	try {
-		const packageJson = JSON.parse(await readFile(join(cwd, "package.json"), "utf8")) as { name?: unknown };
+		const packageJson = JSON.parse(await readFile(join(cwd, "package.json"), "utf8")) as {
+			name?: unknown;
+		};
 		return packageJson.name === PACKAGE_NAME;
 	} catch {
 		return false;
@@ -201,5 +210,8 @@ async function isPackageDevelopmentCwd(cwd: string): Promise<boolean> {
 }
 
 export async function isDirectAgentBrowserBashAllowed(cwd: string): Promise<boolean> {
-	return isTruthyEnvValue(process.env[DIRECT_AGENT_BROWSER_BASH_BYPASS_ENV]) || await isPackageDevelopmentCwd(cwd);
+	return (
+		isTruthyEnvValue(process.env[DIRECT_AGENT_BROWSER_BASH_BYPASS_ENV]) ||
+		(await isPackageDevelopmentCwd(cwd))
+	);
 }

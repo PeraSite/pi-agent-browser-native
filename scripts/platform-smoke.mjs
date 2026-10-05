@@ -17,7 +17,9 @@ const require = createRequire(import.meta.url);
 let config;
 try {
 	config = require(resolve(repoRoot, "platform-smoke.config.mjs"));
-	if (config.default) config = config.default;
+	if (config.default) {
+		config = config.default;
+	}
 } catch {
 	config = null;
 }
@@ -80,20 +82,26 @@ export function parseArgs(argv = process.argv.slice(2)) {
 			return parsed;
 		}
 		if (arg === "doctor" || arg === "run") {
-			if (parsed.command) throw new Error(`multiple commands provided: ${parsed.command}, ${arg}`);
+			if (parsed.command) {
+				throw new Error(`multiple commands provided: ${parsed.command}, ${arg}`);
+			}
 			parsed.command = arg;
 			continue;
 		}
 		if (arg === "--target") {
 			const value = argv[index + 1];
-			if (!value || value.startsWith("-")) throw new Error("--target requires a value");
+			if (!value || value.startsWith("-")) {
+				throw new Error("--target requires a value");
+			}
 			parsed.target = value;
 			index += 1;
 			continue;
 		}
 		if (arg === "--suite") {
 			const value = argv[index + 1];
-			if (!value || value.startsWith("-")) throw new Error("--suite requires a value");
+			if (!value || value.startsWith("-")) {
+				throw new Error("--suite requires a value");
+			}
 			parsed.suite = value;
 			index += 1;
 			continue;
@@ -105,7 +113,9 @@ export function parseArgs(argv = process.argv.slice(2)) {
 
 function validateNames(kind, names, allowed) {
 	const invalid = names.filter((name) => !allowed.includes(name));
-	if (invalid.length > 0) throw new Error(`unknown ${kind}: ${invalid.join(", ")}`);
+	if (invalid.length > 0) {
+		throw new Error(`unknown ${kind}: ${invalid.join(", ")}`);
+	}
 }
 
 export async function main(argv = process.argv.slice(2)) {
@@ -114,7 +124,9 @@ export async function main(argv = process.argv.slice(2)) {
 		printHelp();
 		return args.command === "help" ? 0 : 2;
 	}
-	if (!config) throw new Error("platform-smoke.config.mjs not found or invalid");
+	if (!config) {
+		throw new Error("platform-smoke.config.mjs not found or invalid");
+	}
 
 	if (args.command === "doctor") {
 		const { runDoctor } = await import("./platform-smoke/doctor.mjs");
@@ -124,7 +136,12 @@ export async function main(argv = process.argv.slice(2)) {
 
 	if (args.command === "run") {
 		const { runTargetSuites } = await import("./platform-smoke/targets.mjs");
-		const targets = args.target ? args.target.split(",").map((name) => name.trim()).filter(Boolean) : config.requiredTargets;
+		const targets = args.target
+			? args.target
+					.split(",")
+					.map((name) => name.trim())
+					.filter(Boolean)
+			: config.requiredTargets;
 		const suites = args.suite ? [args.suite] : config.requiredSuites;
 		validateNames("target", targets, config.requiredTargets);
 		validateNames("suite", suites, config.requiredSuites);
@@ -136,10 +153,14 @@ export async function main(argv = process.argv.slice(2)) {
 		const results = await Promise.all(runs);
 		const failed = results.filter(({ result }) => !result.ok);
 		if (failed.length > 0) {
-			console.error(`\nPlatform smoke failed for ${failed.map(({ targetName }) => targetName).join(", ")}. See ${config.artifactRoot}.`);
+			console.error(
+				`\nPlatform smoke failed for ${failed.map(({ targetName }) => targetName).join(", ")}. See ${config.artifactRoot}.`,
+			);
 			return 1;
 		}
-		console.log(`\nPlatform smoke passed for ${results.map(({ targetName }) => targetName).join(", ")}.`);
+		console.log(
+			`\nPlatform smoke passed for ${results.map(({ targetName }) => targetName).join(", ")}.`,
+		);
 		return 0;
 	}
 

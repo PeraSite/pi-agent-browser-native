@@ -1,6 +1,10 @@
 import { JsonSchema, type JsonSchemaBuilder } from "./json-schema.js";
 import { isRecord } from "./parsing.js";
-import { AGENT_BROWSER_NAMESPACE, AGENT_BROWSER_OUTPUT_SCHEMA, finalizeAgentBrowserNativeResult } from "./native-output.js";
+import {
+	AGENT_BROWSER_NAMESPACE,
+	AGENT_BROWSER_OUTPUT_SCHEMA,
+	finalizeAgentBrowserNativeResult,
+} from "./native-output.js";
 import { redactSensitiveText } from "./runtime.js";
 import type { AgentToolResult } from "@earendil-works/pi-coding-agent";
 import { StringEnum as localStringEnum, type StringEnumBuilder } from "./string-enum-schema.js";
@@ -25,16 +29,24 @@ const EXA_DEEP_SEARCH_REQUEST_TIMEOUT_MS = 60_000;
 const EXA_DEEP_REASONING_SEARCH_REQUEST_TIMEOUT_MS = 90_000;
 const EXA_DYNAMIC_HIGHLIGHTS_BETA = "dynamic-highlights-2026-08-28";
 export const WEB_SEARCH_MIN_REQUEST_INTERVAL_MS = 1_100;
-export const EXA_SEARCH_SYSTEM_PROMPT = "Prefer primary, official sources. Respect any requested version or date. Avoid duplicate or equivalent results.";
+export const EXA_SEARCH_SYSTEM_PROMPT =
+	"Prefer primary, official sources. Respect any requested version or date. Avoid duplicate or equivalent results.";
 export { EXA_SEARCH_TYPES };
 export type { ExaSearchType };
 const WEB_SEARCH_PROVIDER_PARAM_VALUES = ["auto", ...WEB_SEARCH_PROVIDERS] as const;
-export type WebSearchProviderParam = typeof WEB_SEARCH_PROVIDER_PARAM_VALUES[number];
+export type WebSearchProviderParam = (typeof WEB_SEARCH_PROVIDER_PARAM_VALUES)[number];
 
 type SearchFreshness = "pd" | "pw" | "pm" | "py";
 
-const EXA_SEARCH_CATEGORIES = ["company", "people", "publication", "news", "personal site", "financial report"] as const;
-export type ExaSearchCategory = typeof EXA_SEARCH_CATEGORIES[number];
+const EXA_SEARCH_CATEGORIES = [
+	"company",
+	"people",
+	"publication",
+	"news",
+	"personal site",
+	"financial report",
+] as const;
+export type ExaSearchCategory = (typeof EXA_SEARCH_CATEGORIES)[number];
 const MAX_EXA_DOMAIN_FILTERS = 20;
 const MAX_EXA_ADDITIONAL_QUERIES = 10;
 
@@ -130,7 +142,10 @@ type NormalizedProviderResponse = {
 export interface WebSearchProviderAdapter<Request = unknown, Response = unknown> {
 	buildRequest(params: WebSearchExecutionParams): Request;
 	fetchJson(request: Request, apiKey: string, signal?: AbortSignal): Promise<Response>;
-	normalizeResponse(response: Response, params: WebSearchExecutionParams): NormalizedProviderResponse;
+	normalizeResponse(
+		response: Response,
+		params: WebSearchExecutionParams,
+	): NormalizedProviderResponse;
 	provider: WebSearchProvider;
 }
 
@@ -140,88 +155,93 @@ export function createAgentBrowserWebSearchParamsSchema(
 ) {
 	return Type.Object(
 		{
-		query: Type.String({
-			minLength: 1,
-			description: "Search query to run with the configured Exa or Brave web search provider.",
-		}),
-		provider: Type.Optional(
-			StringEnum(WEB_SEARCH_PROVIDER_PARAM_VALUES, {
-				description: `Optional provider override. auto uses configured keys and preferredProvider; when both Exa and Brave are available, the default preferred provider is ${DEFAULT_WEB_SEARCH_PROVIDER}.`,
+			query: Type.String({
+				minLength: 1,
+				description: "Search query to run with the configured Exa or Brave web search provider.",
 			}),
-		),
-		searchType: Type.Optional(
-			StringEnum(EXA_SEARCH_TYPES, {
-				description: "Exa mode; omitted uses webSearch.defaultSearchType, then auto. instant (~250ms) is only for trivial lookups; fast (~450ms) favors latency; auto (~1s) is balanced. Pass searchType: deep-lite (~4s) for research before implementation unless config already defaults it; do not assume auto is deep enough. deep (4–15s) handles hard multi-source research; deep-reasoning (12–40s) is only for the hardest work. Brave ignores this field.",
-			}),
-		),
-		includeDomains: Type.Optional(
-			Type.Array(Type.String({ minLength: 1 }), {
-				minItems: 1,
-				maxItems: MAX_EXA_DOMAIN_FILTERS,
-				description: `Exa only. Limit results to 1–${MAX_EXA_DOMAIN_FILTERS} hostnames, path prefixes (exa.ai/docs), or wildcard subdomains (*.substack.com).`,
-			}),
-		),
-		excludeDomains: Type.Optional(
-			Type.Array(Type.String({ minLength: 1 }), {
-				minItems: 1,
-				maxItems: MAX_EXA_DOMAIN_FILTERS,
-				description: `Exa only. Exclude 1–${MAX_EXA_DOMAIN_FILTERS} hostnames, path prefixes, or wildcard subdomains. Not compatible with category company or people.`,
-			}),
-		),
-		category: Type.Optional(
-			StringEnum(EXA_SEARCH_CATEGORIES, {
-				description: "Exa-only result category. company and people cannot be combined with freshness or excludeDomains.",
-			}),
-		),
-		additionalQueries: Type.Optional(
-			Type.Array(Type.String({ minLength: 1 }), {
-				minItems: 1,
-				maxItems: MAX_EXA_ADDITIONAL_QUERIES,
-				description: `Exa only. Add 1–${MAX_EXA_ADDITIONAL_QUERIES} query variations when the effective searchType is deep-lite, deep, or deep-reasoning.`,
-			}),
-		),
-		highlightsDynamic: Type.Optional(
-			Type.Boolean({
-				description: "Exa-only research preview. Allocate one highlight budget across all results; the wrapper sends the required Exa-Beta header. Regular per-page highlights remain the default.",
-			}),
-		),
-		count: Type.Optional(
-			Type.Integer({
-				minimum: 1,
-				maximum: MAX_SEARCH_RESULT_COUNT,
-				description: `Number of web results to return. Defaults to ${DEFAULT_SEARCH_RESULT_COUNT}; max ${MAX_SEARCH_RESULT_COUNT}.`,
-			}),
-		),
-		offset: Type.Optional(
-			Type.Integer({
-				minimum: 0,
-				maximum: 9,
-				description: "Zero-based result offset for pagination. Defaults to 0.",
-			}),
-		),
-		country: Type.Optional(
-			Type.String({
-				pattern: "^[A-Za-z]{2}$",
-				description: "Optional 2-letter country code, such as US or GB.",
-			}),
-		),
-		searchLang: Type.Optional(
-			Type.String({
-				minLength: 2,
-				maxLength: 8,
-				description: "Optional Brave search language code, such as en or en-US.",
-			}),
-		),
-		safesearch: Type.Optional(
-			StringEnum(["off", "moderate", "strict"] as const, {
-				description: "Optional search safety setting. Brave forwards this as safesearch; Exa maps moderate/strict to moderation=true.",
-			}),
-		),
-		freshness: Type.Optional(
-			StringEnum(["pd", "pw", "pm", "py"] as const, {
-				description: "Optional freshness window: pd=past day, pw=past week, pm=past month, py=past year.",
-			}),
-		),
+			provider: Type.Optional(
+				StringEnum(WEB_SEARCH_PROVIDER_PARAM_VALUES, {
+					description: `Optional provider override. auto uses configured keys and preferredProvider; when both Exa and Brave are available, the default preferred provider is ${DEFAULT_WEB_SEARCH_PROVIDER}.`,
+				}),
+			),
+			searchType: Type.Optional(
+				StringEnum(EXA_SEARCH_TYPES, {
+					description:
+						"Exa mode; omitted uses webSearch.defaultSearchType, then auto. instant (~250ms) is only for trivial lookups; fast (~450ms) favors latency; auto (~1s) is balanced. Pass searchType: deep-lite (~4s) for research before implementation unless config already defaults it; do not assume auto is deep enough. deep (4–15s) handles hard multi-source research; deep-reasoning (12–40s) is only for the hardest work. Brave ignores this field.",
+				}),
+			),
+			includeDomains: Type.Optional(
+				Type.Array(Type.String({ minLength: 1 }), {
+					minItems: 1,
+					maxItems: MAX_EXA_DOMAIN_FILTERS,
+					description: `Exa only. Limit results to 1–${MAX_EXA_DOMAIN_FILTERS} hostnames, path prefixes (exa.ai/docs), or wildcard subdomains (*.substack.com).`,
+				}),
+			),
+			excludeDomains: Type.Optional(
+				Type.Array(Type.String({ minLength: 1 }), {
+					minItems: 1,
+					maxItems: MAX_EXA_DOMAIN_FILTERS,
+					description: `Exa only. Exclude 1–${MAX_EXA_DOMAIN_FILTERS} hostnames, path prefixes, or wildcard subdomains. Not compatible with category company or people.`,
+				}),
+			),
+			category: Type.Optional(
+				StringEnum(EXA_SEARCH_CATEGORIES, {
+					description:
+						"Exa-only result category. company and people cannot be combined with freshness or excludeDomains.",
+				}),
+			),
+			additionalQueries: Type.Optional(
+				Type.Array(Type.String({ minLength: 1 }), {
+					minItems: 1,
+					maxItems: MAX_EXA_ADDITIONAL_QUERIES,
+					description: `Exa only. Add 1–${MAX_EXA_ADDITIONAL_QUERIES} query variations when the effective searchType is deep-lite, deep, or deep-reasoning.`,
+				}),
+			),
+			highlightsDynamic: Type.Optional(
+				Type.Boolean({
+					description:
+						"Exa-only research preview. Allocate one highlight budget across all results; the wrapper sends the required Exa-Beta header. Regular per-page highlights remain the default.",
+				}),
+			),
+			count: Type.Optional(
+				Type.Integer({
+					minimum: 1,
+					maximum: MAX_SEARCH_RESULT_COUNT,
+					description: `Number of web results to return. Defaults to ${DEFAULT_SEARCH_RESULT_COUNT}; max ${MAX_SEARCH_RESULT_COUNT}.`,
+				}),
+			),
+			offset: Type.Optional(
+				Type.Integer({
+					minimum: 0,
+					maximum: 9,
+					description: "Zero-based result offset for pagination. Defaults to 0.",
+				}),
+			),
+			country: Type.Optional(
+				Type.String({
+					pattern: "^[A-Za-z]{2}$",
+					description: "Optional 2-letter country code, such as US or GB.",
+				}),
+			),
+			searchLang: Type.Optional(
+				Type.String({
+					minLength: 2,
+					maxLength: 8,
+					description: "Optional Brave search language code, such as en or en-US.",
+				}),
+			),
+			safesearch: Type.Optional(
+				StringEnum(["off", "moderate", "strict"] as const, {
+					description:
+						"Optional search safety setting. Brave forwards this as safesearch; Exa maps moderate/strict to moderation=true.",
+				}),
+			),
+			freshness: Type.Optional(
+				StringEnum(["pd", "pw", "pm", "py"] as const, {
+					description:
+						"Optional freshness window: pd=past day, pw=past week, pm=past month, py=past year.",
+				}),
+			),
 		},
 		{ additionalProperties: false },
 	);
@@ -306,11 +326,19 @@ const HTML_TAG_NAMES_TO_STRIP = new Set([
 
 function decodeHtmlEntity(entity: string): string {
 	const named = HTML_ENTITY_REPLACEMENTS[entity.toLowerCase()];
-	if (named !== undefined) return named;
+	if (named !== undefined) {
+		return named;
+	}
 	const decimalMatch = /^#(\d+)$/.exec(entity);
 	const hexMatch = /^#x([0-9a-f]+)$/i.exec(entity);
-	const codePoint = decimalMatch ? Number.parseInt(decimalMatch[1] ?? "", 10) : hexMatch ? Number.parseInt(hexMatch[1] ?? "", 16) : undefined;
-	if (codePoint === undefined || !Number.isFinite(codePoint)) return `&${entity};`;
+	const codePoint = decimalMatch
+		? Number.parseInt(decimalMatch[1] ?? "", 10)
+		: hexMatch
+			? Number.parseInt(hexMatch[1] ?? "", 16)
+			: undefined;
+	if (codePoint === undefined || !Number.isFinite(codePoint)) {
+		return `&${entity};`;
+	}
 	try {
 		return String.fromCodePoint(codePoint);
 	} catch {
@@ -319,31 +347,54 @@ function decodeHtmlEntity(entity: string): string {
 }
 
 export function decodeHtmlEntities(value: string): string {
-	return value.replace(/&([a-z][a-z0-9]+|#\d+|#x[0-9a-f]+);/gi, (_match, entity: string) => decodeHtmlEntity(entity));
+	return value.replace(/&([a-z][a-z0-9]+|#\d+|#x[0-9a-f]+);/gi, (_match, entity: string) =>
+		decodeHtmlEntity(entity),
+	);
 }
 
 function stripDecodedHtmlTags(value: string): string {
-	return value.replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1>/gi, " ").replace(/<\/?([a-z][a-z0-9-]*)(\s[^>]*)?>/gi, (match, tagName: string, attributes: string | undefined) => {
-		if (attributes || match.startsWith("</") || HTML_TAG_NAMES_TO_STRIP.has(tagName.toLowerCase())) return " ";
-		return match;
-	});
+	return value
+		.replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1>/gi, " ")
+		.replace(
+			/<\/?([a-z][a-z0-9-]*)(\s[^>]*)?>/gi,
+			(match, tagName: string, attributes: string | undefined) => {
+				if (
+					attributes ||
+					match.startsWith("</") ||
+					HTML_TAG_NAMES_TO_STRIP.has(tagName.toLowerCase())
+				) {
+					return " ";
+				}
+				return match;
+			},
+		);
 }
 
 export function cleanSearchText(value: unknown, maxLength = 500): string | undefined {
-	if (typeof value !== "string") return undefined;
+	if (typeof value !== "string") {
+		return undefined;
+	}
 	const cleaned = stripDecodedHtmlTags(decodeHtmlEntities(value.replace(/<[^>]*>/g, " ")))
 		.replace(/\s+/g, " ")
 		.trim();
-	if (!cleaned) return undefined;
-	if (cleaned.length <= maxLength) return cleaned;
+	if (!cleaned) {
+		return undefined;
+	}
+	if (cleaned.length <= maxLength) {
+		return cleaned;
+	}
 	return `${cleaned.slice(0, Math.max(0, maxLength - 1)).trimEnd()}…`;
 }
 
 function normalizeSearchUrl(value: unknown): string | undefined {
-	if (typeof value !== "string") return undefined;
+	if (typeof value !== "string") {
+		return undefined;
+	}
 	try {
 		const url = new URL(value);
-		if (url.protocol !== "http:" && url.protocol !== "https:") return undefined;
+		if (url.protocol !== "http:" && url.protocol !== "https:") {
+			return undefined;
+		}
 		return url.toString();
 	} catch {
 		return undefined;
@@ -359,7 +410,9 @@ function getHostname(url: string): string | undefined {
 }
 
 function normalizeHighlightList(value: unknown): string[] | undefined {
-	if (!Array.isArray(value)) return undefined;
+	if (!Array.isArray(value)) {
+		return undefined;
+	}
 	const highlights = value
 		.map((entry) => cleanSearchText(entry, 320))
 		.filter((entry): entry is string => Boolean(entry))
@@ -367,32 +420,42 @@ function normalizeHighlightList(value: unknown): string[] | undefined {
 	return highlights.length > 0 ? highlights : undefined;
 }
 
-export function normalizeBraveSearchResult(result: BraveWebSearchResult): NormalizedSearchResult | undefined {
+export function normalizeBraveSearchResult(
+	result: BraveWebSearchResult,
+): NormalizedSearchResult | undefined {
 	const title = cleanSearchText(result.title, 180);
 	const url = normalizeSearchUrl(result.url);
-	if (!title || !url) return undefined;
+	if (!title || !url) {
+		return undefined;
+	}
 	const pageDate = cleanSearchText(result.page_age, 80);
 	return {
 		title,
 		url,
 		description: cleanSearchText(result.description, 320),
-		source: cleanSearchText(result.profile?.name, 120) ?? cleanSearchText(result.meta_url?.hostname, 120),
+		source:
+			cleanSearchText(result.profile?.name, 120) ?? cleanSearchText(result.meta_url?.hostname, 120),
 		age: cleanSearchText(result.age, 80),
 		...(pageDate ? { pageDate } : {}),
 		language: cleanSearchText(result.language, 40),
 	};
 }
 
-export function normalizeExaSearchResult(result: ExaWebSearchResult): NormalizedSearchResult | undefined {
+export function normalizeExaSearchResult(
+	result: ExaWebSearchResult,
+): NormalizedSearchResult | undefined {
 	const title = cleanSearchText(result.title, 180);
 	const url = normalizeSearchUrl(result.url);
-	if (!title || !url) return undefined;
+	if (!title || !url) {
+		return undefined;
+	}
 	const highlights = normalizeHighlightList(result.highlights);
 	const pageDate = cleanSearchText(result.publishedDate, 80);
 	return {
 		title,
 		url,
-		description: cleanSearchText(result.summary, 320) ?? highlights?.[0] ?? cleanSearchText(result.text, 320),
+		description:
+			cleanSearchText(result.summary, 320) ?? highlights?.[0] ?? cleanSearchText(result.text, 320),
 		highlights,
 		source: cleanSearchText(result.author, 120) ?? cleanSearchText(getHostname(url), 120),
 		...(pageDate ? { pageDate } : {}),
@@ -403,7 +466,11 @@ function getProviderLabel(provider: WebSearchProvider): string {
 	return provider === "exa" ? "Exa" : "Brave";
 }
 
-function formatSearchResults(provider: WebSearchProvider, query: string, results: NormalizedSearchResult[]): string {
+function formatSearchResults(
+	provider: WebSearchProvider,
+	query: string,
+	results: NormalizedSearchResult[],
+): string {
 	const providerLabel = getProviderLabel(provider);
 	if (results.length === 0) {
 		return `No ${providerLabel} web results found for: ${query}`;
@@ -412,13 +479,23 @@ function formatSearchResults(provider: WebSearchProvider, query: string, results
 	results.forEach((result, index) => {
 		lines.push(`${index + 1}. ${result.title}`);
 		lines.push(`   URL: ${result.url}`);
-		if (result.source) lines.push(`   Source: ${result.source}`);
-		if (result.pageDate) lines.push(`   ${provider === "exa" ? "Published" : "Page date"}: ${result.pageDate}`);
-		if (result.age) lines.push(`   Age: ${result.age}`);
-		if (result.description) lines.push(`   Summary: ${result.description}`);
+		if (result.source) {
+			lines.push(`   Source: ${result.source}`);
+		}
+		if (result.pageDate) {
+			lines.push(`   ${provider === "exa" ? "Published" : "Page date"}: ${result.pageDate}`);
+		}
+		if (result.age) {
+			lines.push(`   Age: ${result.age}`);
+		}
+		if (result.description) {
+			lines.push(`   Summary: ${result.description}`);
+		}
 		if (result.highlights && result.highlights.length > 1) {
 			lines.push("   Highlights:");
-			for (const highlight of result.highlights) lines.push(`   - ${highlight}`);
+			for (const highlight of result.highlights) {
+				lines.push(`   - ${highlight}`);
+			}
 		}
 		lines.push("");
 	});
@@ -438,10 +515,18 @@ export function buildBraveSearchUrl(params: {
 	url.searchParams.set("q", params.query);
 	url.searchParams.set("count", String(params.count));
 	url.searchParams.set("offset", String(params.offset));
-	if (params.country) url.searchParams.set("country", params.country.toUpperCase());
-	if (params.searchLang) url.searchParams.set("search_lang", params.searchLang);
-	if (params.safesearch) url.searchParams.set("safesearch", params.safesearch);
-	if (params.freshness) url.searchParams.set("freshness", params.freshness);
+	if (params.country) {
+		url.searchParams.set("country", params.country.toUpperCase());
+	}
+	if (params.searchLang) {
+		url.searchParams.set("search_lang", params.searchLang);
+	}
+	if (params.safesearch) {
+		url.searchParams.set("safesearch", params.safesearch);
+	}
+	if (params.freshness) {
+		url.searchParams.set("freshness", params.freshness);
+	}
 	return url;
 }
 
@@ -452,32 +537,47 @@ const FRESHNESS_DAYS: Record<SearchFreshness, number> = {
 	py: 365,
 };
 
-function getStartPublishedDate(freshness: SearchFreshness | undefined, now: () => Date): string | undefined {
-	if (!freshness) return undefined;
+function getStartPublishedDate(
+	freshness: SearchFreshness | undefined,
+	now: () => Date,
+): string | undefined {
+	if (!freshness) {
+		return undefined;
+	}
 	const days = FRESHNESS_DAYS[freshness];
 	return new Date(now().getTime() - days * 24 * 60 * 60 * 1000).toISOString();
 }
 
-export function buildExaSearchRequestBody(params: {
-	additionalQueries?: string[];
-	category?: ExaSearchCategory;
-	query: string;
-	count: number;
-	offset: number;
-	country?: string;
-	excludeDomains?: string[];
-	freshness?: SearchFreshness;
-	highlightsDynamic?: boolean;
-	includeDomains?: string[];
-	safesearch?: "off" | "moderate" | "strict";
-	searchType?: ExaSearchType;
-}, now: () => Date = () => new Date()): Record<string, unknown> {
+export function buildExaSearchRequestBody(
+	params: {
+		additionalQueries?: string[];
+		category?: ExaSearchCategory;
+		query: string;
+		count: number;
+		offset: number;
+		country?: string;
+		excludeDomains?: string[];
+		freshness?: SearchFreshness;
+		highlightsDynamic?: boolean;
+		includeDomains?: string[];
+		safesearch?: "off" | "moderate" | "strict";
+		searchType?: ExaSearchType;
+	},
+	now: () => Date = () => new Date(),
+): Record<string, unknown> {
 	const searchType = params.searchType ?? "auto";
 	if (params.additionalQueries?.length && !searchType.startsWith("deep")) {
-		throw new WebSearchLocalError(`additionalQueries requires deep-lite, deep, or deep-reasoning; received ${searchType}.`);
+		throw new WebSearchLocalError(
+			`additionalQueries requires deep-lite, deep, or deep-reasoning; received ${searchType}.`,
+		);
 	}
-	if ((params.category === "company" || params.category === "people") && (params.freshness || params.excludeDomains?.length)) {
-		throw new WebSearchLocalError(`category ${params.category} cannot be combined with freshness or excludeDomains.`);
+	if (
+		(params.category === "company" || params.category === "people") &&
+		(params.freshness || params.excludeDomains?.length)
+	) {
+		throw new WebSearchLocalError(
+			`category ${params.category} cannot be combined with freshness or excludeDomains.`,
+		);
 	}
 	const body: Record<string, unknown> = {
 		query: params.query,
@@ -486,14 +586,28 @@ export function buildExaSearchRequestBody(params: {
 		contents: { highlights: params.highlightsDynamic ? { dynamic: true } : true },
 		systemPrompt: EXA_SEARCH_SYSTEM_PROMPT,
 	};
-	if (params.category) body.category = params.category;
-	if (params.country) body.userLocation = params.country.toUpperCase();
-	if (params.includeDomains?.length) body.includeDomains = params.includeDomains;
-	if (params.excludeDomains?.length) body.excludeDomains = params.excludeDomains;
-	if (params.additionalQueries?.length) body.additionalQueries = params.additionalQueries;
-	if (params.safesearch && params.safesearch !== "off") body.moderation = true;
+	if (params.category) {
+		body.category = params.category;
+	}
+	if (params.country) {
+		body.userLocation = params.country.toUpperCase();
+	}
+	if (params.includeDomains?.length) {
+		body.includeDomains = params.includeDomains;
+	}
+	if (params.excludeDomains?.length) {
+		body.excludeDomains = params.excludeDomains;
+	}
+	if (params.additionalQueries?.length) {
+		body.additionalQueries = params.additionalQueries;
+	}
+	if (params.safesearch && params.safesearch !== "off") {
+		body.moderation = true;
+	}
 	const startPublishedDate = getStartPublishedDate(params.freshness, now);
-	if (startPublishedDate) body.startPublishedDate = startPublishedDate;
+	if (startPublishedDate) {
+		body.startPublishedDate = startPublishedDate;
+	}
 	return body;
 }
 
@@ -502,8 +616,12 @@ function redactSearchSecret(text: string, apiKey: string): string {
 }
 
 function sleepWithAbort(ms: number, signal?: AbortSignal): Promise<void> {
-	if (ms <= 0) return Promise.resolve();
-	if (signal?.aborted) return Promise.reject(signal.reason ?? new Error("Web search cancelled"));
+	if (ms <= 0) {
+		return Promise.resolve();
+	}
+	if (signal?.aborted) {
+		return Promise.reject(signal.reason ?? new Error("Web search cancelled"));
+	}
 	return new Promise((resolve, reject) => {
 		const cleanup = () => signal?.removeEventListener("abort", abort);
 		const timeout = setTimeout(() => {
@@ -530,10 +648,17 @@ export class WebSearchRequestGate {
 
 	run<T>(signal: AbortSignal | undefined, task: () => Promise<T>): Promise<T> {
 		const runTask = async () => {
-			const elapsedMs = this.lastRequestStartedAt === 0 ? WEB_SEARCH_MIN_REQUEST_INTERVAL_MS : this.now() - this.lastRequestStartedAt;
+			const elapsedMs =
+				this.lastRequestStartedAt === 0
+					? WEB_SEARCH_MIN_REQUEST_INTERVAL_MS
+					: this.now() - this.lastRequestStartedAt;
 			const waitMs = Math.max(0, WEB_SEARCH_MIN_REQUEST_INTERVAL_MS - elapsedMs);
-			if (waitMs > 0) await this.sleep(waitMs, signal);
-			if (signal?.aborted) throw signal.reason ?? new Error("Web search cancelled");
+			if (waitMs > 0) {
+				await this.sleep(waitMs, signal);
+			}
+			if (signal?.aborted) {
+				throw signal.reason ?? new Error("Web search cancelled");
+			}
 			this.lastRequestStartedAt = this.now();
 			return task();
 		};
@@ -543,11 +668,19 @@ export class WebSearchRequestGate {
 	}
 }
 
-function formatSearchHttpError(provider: WebSearchProvider, status: number, statusText: string, body: string, apiKey: string): string {
+function formatSearchHttpError(
+	provider: WebSearchProvider,
+	status: number,
+	statusText: string,
+	body: string,
+	apiKey: string,
+): string {
 	const providerLabel = getProviderLabel(provider);
 	const errorPreview = cleanSearchText(redactSearchSecret(body, apiKey), 300);
 	if (status === 429) {
-		const preview = errorPreview ? ` Upstream details: ${redactSearchSecret(errorPreview, apiKey)}` : "";
+		const preview = errorPreview
+			? ` Upstream details: ${redactSearchSecret(errorPreview, apiKey)}`
+			: "";
 		return `${providerLabel} search rate limit exceeded (HTTP 429). Do not issue parallel or repeated agent_browser_web_search calls; use one high-signal query, inspect those results, then wait before retrying or ask the user to adjust their ${providerLabel} API plan/limits.${preview}`;
 	}
 	return `${providerLabel} search failed with HTTP ${status}: ${errorPreview ? redactSearchSecret(errorPreview, apiKey) : statusText}`;
@@ -568,7 +701,10 @@ async function fetchSearchJson<T>(options: {
 		throw options.signal.reason ?? new Error(options.cancelMessage);
 	}
 	const controller = new AbortController();
-	const timeout = setTimeout(() => controller.abort(new Error(options.timeoutMessage)), options.timeoutMs);
+	const timeout = setTimeout(
+		() => controller.abort(new Error(options.timeoutMessage)),
+		options.timeoutMs,
+	);
 	const abort = () => controller.abort(options.signal?.reason ?? new Error(options.cancelMessage));
 	options.signal?.addEventListener("abort", abort, { once: true });
 	try {
@@ -578,12 +714,22 @@ async function fetchSearchJson<T>(options: {
 		});
 		const text = await response.text();
 		if (!response.ok) {
-			throw new Error(formatSearchHttpError(options.provider, response.status, response.statusText, text, options.apiKey));
+			throw new Error(
+				formatSearchHttpError(
+					options.provider,
+					response.status,
+					response.statusText,
+					text,
+					options.apiKey,
+				),
+			);
 		}
 		try {
 			return JSON.parse(text) as T;
 		} catch (error) {
-			throw new Error(`${options.invalidJsonMessage}: ${error instanceof Error ? error.message : String(error)}`);
+			throw new Error(
+				`${options.invalidJsonMessage}: ${error instanceof Error ? error.message : String(error)}`,
+			);
 		}
 	} finally {
 		clearTimeout(timeout);
@@ -591,7 +737,11 @@ async function fetchSearchJson<T>(options: {
 	}
 }
 
-export async function fetchBraveSearchJson(url: URL, apiKey: string, signal?: AbortSignal): Promise<BraveWebSearchResponse> {
+export async function fetchBraveSearchJson(
+	url: URL,
+	apiKey: string,
+	signal?: AbortSignal,
+): Promise<BraveWebSearchResponse> {
 	return fetchSearchJson<BraveWebSearchResponse>({
 		apiKey,
 		cancelMessage: "Brave search cancelled",
@@ -611,20 +761,38 @@ export async function fetchBraveSearchJson(url: URL, apiKey: string, signal?: Ab
 }
 
 function getExaRequestTimeoutMs(searchType: ExaSearchType | undefined): number {
-	if (searchType === "deep-lite") return EXA_DEEP_LITE_SEARCH_REQUEST_TIMEOUT_MS;
-	if (searchType === "deep") return EXA_DEEP_SEARCH_REQUEST_TIMEOUT_MS;
-	if (searchType === "deep-reasoning") return EXA_DEEP_REASONING_SEARCH_REQUEST_TIMEOUT_MS;
+	if (searchType === "deep-lite") {
+		return EXA_DEEP_LITE_SEARCH_REQUEST_TIMEOUT_MS;
+	}
+	if (searchType === "deep") {
+		return EXA_DEEP_SEARCH_REQUEST_TIMEOUT_MS;
+	}
+	if (searchType === "deep-reasoning") {
+		return EXA_DEEP_REASONING_SEARCH_REQUEST_TIMEOUT_MS;
+	}
 	return SEARCH_REQUEST_TIMEOUT_MS;
 }
 
 function usesDynamicHighlights(body: Record<string, unknown>): boolean {
 	const contents = body.contents;
-	if (!contents || typeof contents !== "object" || Array.isArray(contents)) return false;
+	if (!contents || typeof contents !== "object" || Array.isArray(contents)) {
+		return false;
+	}
 	const highlights = (contents as Record<string, unknown>).highlights;
-	return Boolean(highlights && typeof highlights === "object" && !Array.isArray(highlights) && (highlights as Record<string, unknown>).dynamic === true);
+	return Boolean(
+		highlights &&
+		typeof highlights === "object" &&
+		!Array.isArray(highlights) &&
+		(highlights as Record<string, unknown>).dynamic === true,
+	);
 }
 
-export async function fetchExaSearchJson(body: Record<string, unknown>, apiKey: string, signal?: AbortSignal, timeoutMs = SEARCH_REQUEST_TIMEOUT_MS): Promise<ExaWebSearchResponse> {
+export async function fetchExaSearchJson(
+	body: Record<string, unknown>,
+	apiKey: string,
+	signal?: AbortSignal,
+	timeoutMs = SEARCH_REQUEST_TIMEOUT_MS,
+): Promise<ExaWebSearchResponse> {
 	return fetchSearchJson<ExaWebSearchResponse>({
 		apiKey,
 		cancelMessage: "Exa search cancelled",
@@ -670,7 +838,10 @@ const BRAVE_WEB_SEARCH_ADAPTER: WebSearchProviderAdapter<URL, BraveWebSearchResp
 				.map(normalizeBraveSearchResult)
 				.filter((result): result is NormalizedSearchResult => Boolean(result))
 				.slice(params.offset, params.offset + params.count),
-			returnedQuery: cleanSearchText(response.query?.altered, 300) ?? cleanSearchText(response.query?.original, 300) ?? params.query,
+			returnedQuery:
+				cleanSearchText(response.query?.altered, 300) ??
+				cleanSearchText(response.query?.original, 300) ??
+				params.query,
 		};
 	},
 };
@@ -708,10 +879,11 @@ const EXA_WEB_SEARCH_ADAPTER: WebSearchProviderAdapter<ExaSearchRequest, ExaWebS
 	},
 };
 
-const WEB_SEARCH_PROVIDER_ADAPTERS: Readonly<Record<WebSearchProvider, WebSearchProviderAdapter>> = {
-	exa: EXA_WEB_SEARCH_ADAPTER,
-	brave: BRAVE_WEB_SEARCH_ADAPTER,
-};
+const WEB_SEARCH_PROVIDER_ADAPTERS: Readonly<Record<WebSearchProvider, WebSearchProviderAdapter>> =
+	{
+		exa: EXA_WEB_SEARCH_ADAPTER,
+		brave: BRAVE_WEB_SEARCH_ADAPTER,
+	};
 
 export function getWebSearchProviderAdapter(provider: WebSearchProvider): WebSearchProviderAdapter {
 	return WEB_SEARCH_PROVIDER_ADAPTERS[provider];
@@ -720,15 +892,21 @@ export function getWebSearchProviderAdapter(provider: WebSearchProvider): WebSea
 function dedupeSearchResults(results: NormalizedSearchResult[]): NormalizedSearchResult[] {
 	const seen = new Set<string>();
 	return results.filter((result) => {
-		if (seen.has(result.url)) return false;
+		if (seen.has(result.url)) {
+			return false;
+		}
 		seen.add(result.url);
 		return true;
 	});
 }
 
 function buildMissingCredentialError(provider: WebSearchProviderParam): string {
-	if (provider === "brave") return "agent_browser_web_search provider brave was requested but no BRAVE_API_KEY/config credential resolved.";
-	if (provider === "exa") return "agent_browser_web_search provider exa was requested but no EXA_API_KEY/config credential resolved.";
+	if (provider === "brave") {
+		return "agent_browser_web_search provider brave was requested but no BRAVE_API_KEY/config credential resolved.";
+	}
+	if (provider === "exa") {
+		return "agent_browser_web_search provider exa was requested but no EXA_API_KEY/config credential resolved.";
+	}
 	return "No Exa or Brave web search credential resolved. Configure webSearch.exaApiKey or webSearch.braveApiKey, or load EXA_API_KEY/BRAVE_API_KEY in the runtime environment.";
 }
 
@@ -754,7 +932,12 @@ class WebSearchLocalError extends Error {}
 
 export function createAgentBrowserWebSearchTool(
 	configState: AgentBrowserConfigState,
-	options: { loadConfigState?: (ctx: { cwd: string; isProjectTrusted: () => boolean }) => AgentBrowserConfigState } = {},
+	options: {
+		loadConfigState?: (ctx: {
+			cwd: string;
+			isProjectTrusted: () => boolean;
+		}) => AgentBrowserConfigState;
+	} = {},
 ) {
 	const requestGate = new WebSearchRequestGate();
 	return {
@@ -765,18 +948,35 @@ export function createAgentBrowserWebSearchTool(
 		description: `Search the live web with Exa or Brave for current or external information. For Exa research tasks, use searchType deep-lite or deeper. Returns up to ${MAX_SEARCH_RESULT_COUNT} concise web results.`,
 		promptSnippet: "Search the live web with Exa or Brave for current or external information.",
 		parameters: AgentBrowserWebSearchParams,
-		async execute(_toolCallId: string, params: AgentBrowserWebSearchParamsInput, signal?: AbortSignal, _onUpdate?: unknown, ctx?: { cwd: string; isProjectTrusted: () => boolean }): Promise<AgentToolResult<Record<string, unknown>>> {
+		async execute(
+			_toolCallId: string,
+			params: AgentBrowserWebSearchParamsInput,
+			signal?: AbortSignal,
+			_onUpdate?: unknown,
+			ctx?: { cwd: string; isProjectTrusted: () => boolean },
+		): Promise<AgentToolResult<Record<string, unknown>>> {
 			try {
-				const runtimeConfigState = ctx ? options.loadConfigState?.(ctx) ?? configState : configState;
+				const runtimeConfigState = ctx
+					? (options.loadConfigState?.(ctx) ?? configState)
+					: configState;
 				if (runtimeConfigState.errors.length > 0) {
-					throw new WebSearchLocalError(`agent_browser_web_search config is invalid: ${runtimeConfigState.errors.join("; ")}`);
+					throw new WebSearchLocalError(
+						`agent_browser_web_search config is invalid: ${runtimeConfigState.errors.join("; ")}`,
+					);
 				}
 				if (!runtimeConfigState.webSearchEnabled) {
-					throw new WebSearchLocalError("agent_browser_web_search is disabled by pi-agent-browser-native config.");
+					throw new WebSearchLocalError(
+						"agent_browser_web_search is disabled by pi-agent-browser-native config.",
+					);
 				}
 				const requestedProvider = params.provider ?? "auto";
-				const resolved = await resolvePreferredWebSearchCredential(runtimeConfigState, { provider: requestedProvider, signal });
-				if (!resolved) throw new WebSearchLocalError(buildMissingCredentialError(requestedProvider));
+				const resolved = await resolvePreferredWebSearchCredential(runtimeConfigState, {
+					provider: requestedProvider,
+					signal,
+				});
+				if (!resolved) {
+					throw new WebSearchLocalError(buildMissingCredentialError(requestedProvider));
+				}
 				if (resolved.provider === "brave") {
 					const exaOnlyFields = [
 						params.includeDomains ? "includeDomains" : undefined,
@@ -786,12 +986,19 @@ export function createAgentBrowserWebSearchTool(
 						params.highlightsDynamic ? "highlightsDynamic" : undefined,
 					].filter((field): field is string => Boolean(field));
 					if (exaOnlyFields.length > 0) {
-						throw new WebSearchLocalError(`${exaOnlyFields.join(", ")} ${exaOnlyFields.length === 1 ? "requires" : "require"} provider exa; resolved provider was brave.`);
+						throw new WebSearchLocalError(
+							`${exaOnlyFields.join(", ")} ${exaOnlyFields.length === 1 ? "requires" : "require"} provider exa; resolved provider was brave.`,
+						);
 					}
 				}
 				const query = params.query.trim();
-				if (!query) throw new WebSearchLocalError("query must not be blank");
-				const count = Math.min(Math.max(params.count ?? DEFAULT_SEARCH_RESULT_COUNT, 1), MAX_SEARCH_RESULT_COUNT);
+				if (!query) {
+					throw new WebSearchLocalError("query must not be blank");
+				}
+				const count = Math.min(
+					Math.max(params.count ?? DEFAULT_SEARCH_RESULT_COUNT, 1),
+					MAX_SEARCH_RESULT_COUNT,
+				);
 				const offset = Math.max(params.offset ?? 0, 0);
 				const adapter = getWebSearchProviderAdapter(resolved.provider);
 				const executionParams: WebSearchExecutionParams = {
@@ -807,10 +1014,13 @@ export function createAgentBrowserWebSearchTool(
 					query,
 					safesearch: params.safesearch,
 					searchLang: params.searchLang,
-					searchType: params.searchType ?? runtimeConfigState.config.webSearch?.defaultSearchType ?? "auto",
+					searchType:
+						params.searchType ?? runtimeConfigState.config.webSearch?.defaultSearchType ?? "auto",
 				};
 				const request = adapter.buildRequest(executionParams);
-				const data = await requestGate.run(signal, () => adapter.fetchJson(request, resolved.credential.value, signal));
+				const data = await requestGate.run(signal, () =>
+					adapter.fetchJson(request, resolved.credential.value, signal),
+				);
 				const normalized = adapter.normalizeResponse(data, executionParams);
 				const results = dedupeSearchResults(normalized.results);
 				const duplicatesRemoved = normalized.results.length - results.length;
@@ -825,20 +1035,45 @@ export function createAgentBrowserWebSearchTool(
 					results,
 					duplicatesRemoved: duplicatesRemoved || undefined,
 				};
-				const result = await finalizeAgentBrowserNativeResult({
-					content: [{ type: "text" as const, text: `${formatSearchResults(adapter.provider, normalized.returnedQuery, results)}${duplicatesRemoved ? `\n\nDuplicate URLs removed: ${duplicatesRemoved}.` : ""}` }],
-					details: { data: details },
-				} as AgentToolResult<Record<string, unknown>>, params);
+				const result = await finalizeAgentBrowserNativeResult(
+					{
+						content: [
+							{
+								type: "text" as const,
+								text: `${formatSearchResults(adapter.provider, normalized.returnedQuery, results)}${duplicatesRemoved ? `\n\nDuplicate URLs removed: ${duplicatesRemoved}.` : ""}`,
+							},
+						],
+						details: { data: details },
+					} as AgentToolResult<Record<string, unknown>>,
+					params,
+				);
 				// Keep the finalized spill's invocation artifact receipt while flattening the documented search details shape.
-				const finalizedManifest = isRecord(result.details) ? result.details.artifactManifest : undefined;
-				return finalizedManifest === undefined ? { ...result, details } : { ...result, details: { ...details, artifactManifest: finalizedManifest } };
+				const finalizedManifest = isRecord(result.details)
+					? result.details.artifactManifest
+					: undefined;
+				return finalizedManifest === undefined
+					? { ...result, details }
+					: { ...result, details: { ...details, artifactManifest: finalizedManifest } };
 			} catch (error) {
-				const message = redactSensitiveText(error instanceof Error ? error.message : String(error)).slice(0, 1_000);
-				return finalizeAgentBrowserNativeResult({
-					content: [{ type: "text" as const, text: message }],
-					details: { error: message, resultCategory: "failure", failureCategory: signal?.aborted ? "aborted" : error instanceof WebSearchLocalError ? "validation-error" : "upstream-error" },
-					isError: true,
-				}, params);
+				const message = redactSensitiveText(
+					error instanceof Error ? error.message : String(error),
+				).slice(0, 1_000);
+				return finalizeAgentBrowserNativeResult(
+					{
+						content: [{ type: "text" as const, text: message }],
+						details: {
+							error: message,
+							resultCategory: "failure",
+							failureCategory: signal?.aborted
+								? "aborted"
+								: error instanceof WebSearchLocalError
+									? "validation-error"
+									: "upstream-error",
+						},
+						isError: true,
+					},
+					params,
+				);
 			}
 		},
 	};
