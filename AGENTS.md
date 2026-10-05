@@ -173,3 +173,9 @@ Before calling the first implementation usable, verify at minimum:
 - configured-source `/reload` preserves runtime continuity
 - full restart + exact `--session-id` relaunch or `/resume` picks up changed compiled extension code
 - when `electron.*`, attached-session diagnostics, or `qa.attached` change: exercise `electron.list` → `electron.launch` → browser commands → `electron.cleanup` on a local Electron app (see [`docs/RELEASE.md`](docs/RELEASE.md) and [`docs/ELECTRON.md`](docs/ELECTRON.md))
+
+## Cursor Cloud
+
+- Node 24.21.0 and npm 12.2.0 are installed in `/usr/local/bin`. Login shells prepend that directory so it is preferred over the agent runtime Node and nvm.
+- Upstream `agent-browser` is global, at the version in `scripts/agent-browser-target.mjs` (currently 0.38.1). Chrome for Testing is installed with `agent-browser install`. It is not an npm dependency of this package.
+- There is no dev server. `npm run verify` is the local gate. `npm run doctor` checks the Pi floor and the agent-browser baseline.
