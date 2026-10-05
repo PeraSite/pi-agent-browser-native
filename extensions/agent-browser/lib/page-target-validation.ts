@@ -5,6 +5,8 @@ import {
 } from "./argv-grammar.js";
 import { isBrowserIndependentRead, needsManagedSession } from "./command-policy.js";
 import { isUnverifiedPageTransitionCommand } from "./command-taxonomy.js";
+import { isRecord } from "./parsing.js";
+import { detectConfirmationRequired } from "./results/confirmation.js";
 import { type BatchCommandStep, parseBatchCommandArgument, parseUserBatchStdin } from "./orchestration/batch-stdin.js";
 
 const UNVERIFIED_PAGE_MESSAGE = "The active page became unverified after a tab, attachment, history, script, or state-load transition. Run get url or navigate explicitly before page-content inspection.";
@@ -34,7 +36,7 @@ function getPositionalOperands(commandTokens: string[]): string[] {
 	return values;
 }
 
-function getExplicitNavigationTarget(args: string[]): string | undefined {
+export function getExplicitNavigationTarget(args: string[]): string | undefined {
 	const descriptor = parseArgvDescriptor(args);
 	const positionals = getPositionalOperands(descriptor.upstreamCommandTokens);
 	if (EXPLICIT_NAVIGATION_COMMANDS.has(descriptor.commandInfo.command ?? "")) return positionals[0];
@@ -77,6 +79,7 @@ function getBatchCommandSteps(args: string[], stdin?: string): { error?: string;
 	const parsedStdin = parseUserBatchStdin(stdin);
 	if (parsedStdin.error) return { error: parsedStdin.error, steps: [] };
 	for (const step of parsedStdin.steps ?? []) {
+		if (step.length === 0) continue;
 		if (parseArgvDescriptor(step).commandInfo.command === "batch") return { error: NESTED_BATCH_ARGUMENT_MESSAGE, steps: [] };
 		steps.push(step);
 	}
@@ -150,6 +153,7 @@ function getResultingPageState(options: {
 export function getResultingPageTargetState(options: {
 	args: string[];
 	executedBatchSteps: string[][];
+	batchResults?: unknown;
 	currentPageUrl?: string;
 	pageUrlUnknown?: boolean;
 }): { currentPageUrl?: string; pageTargetMayHaveChanged: boolean; pageUrlUnknown: boolean } {
@@ -161,7 +165,9 @@ export function getResultingPageTargetState(options: {
 			|| isUnverifiedPageTransitionCommand(descriptor.commandInfo.command, descriptor.commandInfo.subcommand);
 		return { ...getResultingPageState({ ...state, args: options.args, trustedBatchTabSelection: false }), pageTargetMayHaveChanged };
 	}
-	for (const step of options.executedBatchSteps) {
+	for (const [index, step] of options.executedBatchSteps.entries()) {
+		const row = Array.isArray(options.batchResults) ? options.batchResults[index] : undefined;
+		if (isRecord(row) && detectConfirmationRequired(row.result)) continue;
 		const stepDescriptor = parseArgvDescriptor(step);
 		pageTargetMayHaveChanged ||= getExplicitNavigationTarget(step) !== undefined
 			|| isUnverifiedPageTransitionCommand(stepDescriptor.commandInfo.command, stepDescriptor.commandInfo.subcommand);
@@ -199,6 +205,7 @@ function getUnverifiedPageError(options: {
 }
 
 export function getPageTargetValidationError(options: {
+	allowFirstBatchConfirmation?: boolean;
 	allowUnverifiedPageTransitions?: boolean;
 	args: string[];
 	currentPageUrl?: string;
@@ -230,7 +237,7 @@ export function getPageTargetValidationError(options: {
 			let directError: string | undefined;
 			let failedNavigationHazard = false;
 			for (const state of possibleStates) {
-				const error = getUnverifiedPageError({
+				const error = options.allowFirstBatchConfirmation === true && index === 0 ? undefined : getUnverifiedPageError({
 					allowUnverifiedPageTransitions: options.allowUnverifiedPageTransitions,
 					args: step,
 					pageUrlUnknown: state.pageUrlUnknown,

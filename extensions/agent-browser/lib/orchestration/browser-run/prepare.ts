@@ -17,6 +17,7 @@ import { tryContainerScroll, tryPageScrollTo } from "./prepare/scroll-shims.js";
 import { trySnapshotFilter } from "./prepare/snapshot-filter.js";
 import { commandTimeoutNeedsActivePageUrl, getCommandAwareProcessTimeoutMs } from "./prepare/wait-timeouts.js";
 import { getPersistentSessionArtifactStore } from "./session-state.js";
+import { isBrowserIndependentConfirmation, suppressConfirmationPageHelpers } from "../../read-confirmation.js";
 import { buildAgentBrowserResultCategoryDetails } from "../../results/categories.js";
 import { applyNamespaceToNextActions } from "../../results/next-actions.js";
 import { buildSessionAwareStaleRefNextActions, buildSessionTabRecoveryNextActions } from "../../results/recovery-next-actions.js";
@@ -197,7 +198,7 @@ async function prepareBatchScreenshotPaths(args: string[], stdin: string | undef
 	return changed
 		? {
 				args,
-				batchScreenshotPathRequests,
+				batchScreenshotPathRequests: parsed.steps.flatMap((step, index) => Array.isArray(step) && step.length === 0 ? [] : [batchScreenshotPathRequests[index]]),
 				stdin: JSON.stringify(preparedSteps),
 		  }
 		: undefined;
@@ -396,23 +397,18 @@ function requiresResolvedSemanticVisibleRef(compiled: CompiledAgentBrowserSemant
 	return compiled?.action === "select" && compiled.locator !== undefined;
 }
 
-function resolveSemanticActionVisibleRefArgsFromSnapshot(compiled: CompiledAgentBrowserSemanticAction | undefined, snapshotData: unknown): SemanticActionVisibleRefResolution | undefined {
-	if (!canResolveSemanticVisibleRef(compiled)) return undefined;
-	const resolution = resolveVisibleRefActionFromSnapshot({ allowFill: true, compiledAction: compiled, snapshotData });
-	if (!resolution) return undefined;
-	return { args: [...getCompiledSemanticActionSessionPrefix(compiled), ...resolution.args], snapshot: resolution.snapshot };
-}
-
 async function resolveSemanticActionVisibleRefArgs(options: {
 	compiled: CompiledAgentBrowserSemanticAction | undefined;
 	cwd: string;
 	namespace?: string;
+	refSnapshot?: SessionRefSnapshot;
 	sessionName?: string;
 	signal?: AbortSignal;
 }): Promise<SemanticActionVisibleRefResolution | undefined> {
-	if (!options.compiled || !options.sessionName) return undefined;
-	const snapshotData = await runSessionCommandData({ args: ["snapshot", "-i"], cwd: options.cwd, namespace: options.namespace, sessionName: options.sessionName, signal: options.signal });
-	return resolveSemanticActionVisibleRefArgsFromSnapshot(options.compiled, snapshotData);
+	if (!canResolveSemanticVisibleRef(options.compiled) || !options.sessionName) return undefined;
+	const snapshotData = options.refSnapshot ? undefined : await runSessionCommandData({ args: ["snapshot", "-i"], cwd: options.cwd, namespace: options.namespace, sessionName: options.sessionName, signal: options.signal });
+	const resolution = resolveVisibleRefActionFromSnapshot({ allowFill: true, compiledAction: options.compiled, refSnapshot: options.refSnapshot, snapshotData });
+	return resolution ? { args: [...getCompiledSemanticActionSessionPrefix(options.compiled), ...resolution.args], snapshot: resolution.snapshot } : undefined;
 }
 
 export async function prepareBrowserRun(options: BrowserRunOptions): Promise<PrepareBrowserRunResult> {
@@ -513,9 +509,10 @@ export async function prepareBrowserRun(options: BrowserRunOptions): Promise<Pre
 			isError: true,
 		} };
 	}
-	const userRequestedJson = runtimeToolArgs.includes("--json");
-	const routedReadConfirmation = state.sessionPageState.findReadConfirmation(preparedArgs.args, resolveAgentBrowserNamespace(preparedArgs.args, agentBrowserProcessEnv.AGENT_BROWSER_NAMESPACE));
-	const readConfirmation = routedReadConfirmation?.capabilities?.readRequiresConfirmation === true ? routedReadConfirmation : undefined;
+	const userRequestedJson = getBooleanFlagValue(runtimeToolArgs, "--json") === true;
+	const routedReadConfirmation = state.sessionPageState.findReadConfirmation(preparedArgs.args, resolveAgentBrowserNamespace(preparedArgs.args, agentBrowserProcessEnv.AGENT_BROWSER_NAMESPACE), runtimeToolStdin);
+	const readConfirmation = suppressConfirmationPageHelpers(routedReadConfirmation) ? routedReadConfirmation : undefined;
+	const browserIndependentConfirmation = isBrowserIndependentConfirmation(readConfirmation);
 	let executionPlan = buildExecutionPlan(preparedArgs.args, {
 		freshSessionName,
 		managedSessionActive: state.managedSessionActive,
@@ -524,13 +521,14 @@ export async function prepareBrowserRun(options: BrowserRunOptions): Promise<Pre
 		managedSessionNamespace: state.managedSessionNamespace,
 		sessionMode,
 		stdin: runtimeToolStdin,
-		browserIndependentReadConfirmation: readConfirmation !== undefined,
+		browserIndependentReadConfirmation: browserIndependentConfirmation,
 	});
-	const browserIndependent = readConfirmation !== undefined || isBrowserIndependentRead(extractUpstreamCommandTokens(preparedArgs.args), runtimeToolStdin)
+	const browserIndependent = browserIndependentConfirmation || isBrowserIndependentRead(extractUpstreamCommandTokens(preparedArgs.args), runtimeToolStdin)
 		|| (executionPlan.commandInfo.command === "session" && executionPlan.commandInfo.subcommand === "info");
 	const ownedSessionKey = getSessionContextKey(executionPlan.sessionName, executionPlan.namespace);
 	const plannedSessionPageState = sessionPageState.get(ownedSessionKey);
-	const pageTargetError = readConfirmation ? undefined : getPageTargetValidationError({
+	const pageTargetError = readConfirmation && executionPlan.commandInfo.command !== "batch" ? undefined : getPageTargetValidationError({
+		allowFirstBatchConfirmation: readConfirmation !== undefined,
 		args: executionPlan.effectiveArgs,
 		currentPageUrl: plannedSessionPageState.tabTarget?.url,
 		pageUrlUnknown: plannedSessionPageState.tabTargetUnknown === true,
@@ -655,6 +653,15 @@ export async function prepareBrowserRun(options: BrowserRunOptions): Promise<Pre
 		const sessionTabPinningReason = priorSessionPageState.pinningReason;
 		let priorRefSnapshotState = priorSessionPageState.refSnapshot;
 		let priorRefSnapshotInvalidation = priorSessionPageState.refSnapshotInvalidation;
+		const confirmedCapture = sessionStateKey ? sessionPageState.getReadConfirmation(sessionStateKey) : undefined;
+		// ponytail: reuse the approved capture for one call; DOM-only renames after that sample are not resampled on this use.
+		const reuseConfirmedCapture = confirmedCapture?.refSnapshotFresh === true;
+		if (reuseConfirmedCapture && confirmedCapture) {
+			const consumed = { ...confirmedCapture };
+			delete consumed.refSnapshotFresh;
+			sessionPageState.applyReadConfirmation(consumed, options.sessionPageStateUpdate);
+			state.observedBrowserEffects = { ...state.observedBrowserEffects, readConfirmation: consumed };
+		}
 		let nativeGenerationChanged = false;
 		if (!browserIndependent && !isCloseCommand(executionPlan.commandInfo.command) && priorRefSnapshotState?.refIds.length && sessionStateKey && executionPlan.sessionName) {
 			const daemon = await inspectManagedSessionDaemon({ cwd, namespace: executionPlan.namespace, sessionName: executionPlan.sessionName, signal, includeGeneration: true, headedManagedAutosaveInterval: ownedManagedSession?.headedManagedAutosaveInterval ?? (ownedManagedSession?.headedManagedAutosaveDisabled ? "0" : undefined), timeoutMs: params.timeoutMs });
@@ -732,7 +739,7 @@ export async function prepareBrowserRun(options: BrowserRunOptions): Promise<Pre
 		const isCallerOwnedExplicitSession = () => executionPlan.sessionName !== undefined
 			&& executionPlan.usedImplicitSession === false
 			&& ownedManagedSession === undefined;
-		const requiresLivePageVerification = () => !readConfirmation && (isCallerOwnedExplicitSession() || options.preserveAttachedBrowserSession === true);
+		const requiresLivePageVerification = () => !readConfirmation && (reuseConfirmedCapture || isCallerOwnedExplicitSession() || options.preserveAttachedBrowserSession === true);
 		const verifyLivePage = async (request: { args: string[]; requirement?: string; stdin?: string }) => {
 			if (!request.requirement || !executionPlan.sessionName) return;
 			if (options.establishAttachedBrowserSession) {
@@ -768,7 +775,9 @@ export async function prepareBrowserRun(options: BrowserRunOptions): Promise<Pre
 				return;
 			}
 			livePageVerified = true;
-			priorSessionTabTarget ??= { url: liveUrl };
+			priorSessionTabTarget = priorSessionTabTarget?.url === liveUrl
+				? { ...priorSessionTabTarget, url: liveUrl }
+				: { url: liveUrl };
 			priorSessionTabTargetUnknown = undefined;
 		};
 		const hasPotentialLiveSemanticSession = state.managedSessionActive || priorSessionTabTarget !== undefined || isCallerOwnedExplicitSession() || options.preserveAttachedBrowserSession === true;
@@ -784,6 +793,7 @@ export async function prepareBrowserRun(options: BrowserRunOptions): Promise<Pre
 				compiled: compiledSemanticAction,
 				cwd,
 				namespace: executionPlan.namespace,
+				refSnapshot: reuseConfirmedCapture && !priorSessionTabTargetUnknown && !priorRefSnapshotInvalidation ? priorRefSnapshotState : undefined,
 				sessionName: executionPlan.sessionName,
 				signal,
 			});
@@ -953,6 +963,7 @@ export async function prepareBrowserRun(options: BrowserRunOptions): Promise<Pre
 		const staleRefPreflight = buildStaleRefPreflight({
 			commandTokens,
 			currentTarget: priorSessionTabTarget,
+			requireExactTargetUrl: reuseConfirmedCapture,
 			refSnapshot: resolvedSemanticActionRefSnapshot ?? priorRefSnapshotState,
 			refSnapshotInvalidation: resolvedSemanticActionRefSnapshot ? undefined : priorRefSnapshotInvalidation,
 			stdin: runtimeToolStdin,
@@ -980,7 +991,7 @@ export async function prepareBrowserRun(options: BrowserRunOptions): Promise<Pre
 			commandTokens,
 			cwd,
 			currentTarget: priorSessionTabTarget,
-			previousSnapshot: resolvedSemanticActionRefSnapshot ? undefined : priorRefSnapshotState,
+			previousSnapshot: resolvedSemanticActionRefSnapshot || reuseConfirmedCapture ? undefined : priorRefSnapshotState,
 			stdin: runtimeToolStdin,
 			namespace: executionPlan.namespace,
 			sessionName: executionPlan.sessionName,
@@ -1113,9 +1124,6 @@ export async function prepareBrowserRun(options: BrowserRunOptions): Promise<Pre
 
 		const processArgs = executionPlan.effectiveArgs;
 		const processStdin = preparedArgs.stdin ?? runtimeToolStdin;
-		const clickDispatchProbe = compiledElectron === undefined
-			? await prepareClickDispatchProbe({ commandTokens, cwd, namespace: executionPlan.namespace, refSnapshot: promptRefSnapshot, sessionName: executionPlan.sessionName, signal })
-			: undefined;
 		let readTimeoutPageUrl = priorSessionTabTarget?.url;
 		if (options.params.timeoutMs === undefined && readTimeoutPageUrl === undefined && executionPlan.sessionName && commandTimeoutNeedsActivePageUrl(commandTokens, processStdin)) {
 			try {
@@ -1124,6 +1132,9 @@ export async function prepareBrowserRun(options: BrowserRunOptions): Promise<Pre
 			} catch {}
 		}
 		const processTimeoutMs = options.params.timeoutMs ?? getDialogAwareProcessTimeoutMs(commandTokens, promptRefSnapshot, processStdin) ?? getCommandAwareProcessTimeoutMs(commandTokens, processStdin, readTimeoutPageUrl);
+		const clickDispatchProbe = compiledElectron === undefined
+			? await prepareClickDispatchProbe({ commandTokens, cwd, namespace: executionPlan.namespace, refSnapshot: promptRefSnapshot, sessionName: executionPlan.sessionName, signal, timeoutMs: processTimeoutMs })
+			: undefined;
 		const redactedProcessArgs = redactInvocationArgs(prepareAgentBrowserSpawnArgs(processArgs, ownedManagedSession?.compatibilityUserAgent, options.preserveAttachedBrowserSession, chromeStartupArgs));
 		const scrollAmount = Number(commandTokens.find((token) => /^\d+(?:\.\d+)?$/.test(token)));
 		const shouldProbeScrollNoop = executionPlan.commandInfo.command === "scroll" && executionPlan.startupScopedFlags.length === 0 && (state.managedSessionActive || sessionMode === "fresh") && (!Number.isFinite(scrollAmount) || scrollAmount >= 500);

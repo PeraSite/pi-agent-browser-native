@@ -23,7 +23,7 @@ import {
 	getPageTargetValidationError,
 } from "./page-target-validation.js";
 import { getImplicitSessionIdleTimeoutMs } from "./runtime.js";
-import { getAgentBrowserProcessEnvironment } from "./process-environment.js";
+import { getAgentBrowserProcessArgs, getAgentBrowserProcessEnvironment } from "./process-environment.js";
 import { openSecureTempFile, writeSecureTempChunk } from "./temp.js";
 import { resolveWindowsStockLauncher } from "./windows-stock-launcher.js";
 
@@ -386,12 +386,12 @@ function getManagedPreSpawnPolicyError(
 	options: ManagedSessionRestoreEnvOptions,
 	currentPageUrl?: string,
 	pageUrlUnknown = false,
-	browserIndependentReadConfirmation = false,
+	nativeConfirmationDecision = false,
 ): string | undefined {
 	if (!validateManagedSessionRestoreContextForSpawn(options)) {
 		return "Managed session restore policy, storage, or checkout identity changed after planning; refusing to start agent-browser.";
 	}
-	if (browserIndependentReadConfirmation) return undefined;
+	if (nativeConfirmationDecision) return undefined;
 	return getPageTargetValidationError({
 		args: options.args,
 		currentPageUrl,
@@ -402,7 +402,7 @@ function getManagedPreSpawnPolicyError(
 
 export async function runAgentBrowserProcess(options: {
 	args: string[];
-	browserIndependentReadConfirmation?: boolean;
+	nativeConfirmationDecision?: boolean;
 	cwd: string;
 	env?: NodeJS.ProcessEnv;
 	managedSessionRestoreState?: ManagedSessionRestoreState;
@@ -432,7 +432,7 @@ export async function runAgentBrowserProcess(options: {
 		restoreState: managedSessionRestoreState,
 		stdin,
 	};
-	const planningPolicyError = getManagedPreSpawnPolicyError(managedSessionRestoreOptions, managedStateCurrentPageUrl, managedStatePageUrlUnknown, options.browserIndependentReadConfirmation);
+	const planningPolicyError = getManagedPreSpawnPolicyError(managedSessionRestoreOptions, managedStateCurrentPageUrl, managedStatePageUrlUnknown, options.nativeConfirmationDecision);
 	if (planningPolicyError) {
 		return {
 			aborted: false,
@@ -579,13 +579,13 @@ export async function runAgentBrowserProcess(options: {
 			});
 		};
 
-		const spawnPolicyError = getManagedPreSpawnPolicyError(managedSessionRestoreOptions, managedStateCurrentPageUrl, managedStatePageUrlUnknown, options.browserIndependentReadConfirmation);
+		const spawnPolicyError = getManagedPreSpawnPolicyError(managedSessionRestoreOptions, managedStateCurrentPageUrl, managedStatePageUrlUnknown, options.nativeConfirmationDecision);
 		if (spawnPolicyError) {
 			resolve({ aborted: false, agentBrowserStarted: false, exitCode: 1, spawnError: new Error(spawnPolicyError), stderr: "", stdout: "", timedOut: false });
 			return;
 		}
 		const spawnBrowser = processPlatform === "win32" && !stockLauncher ? crossSpawn : spawn;
-		const child = spawnBrowser(stockLauncher ?? "agent-browser", prepareAgentBrowserSpawnArgs(args, ownedManagedSessionCompatibilityEnv.AGENT_BROWSER_USER_AGENT, preserveAttachedBrowserSession, chromeStartupArgsContext.getStore()), {
+		const child = spawnBrowser(stockLauncher ?? "agent-browser", prepareAgentBrowserSpawnArgs(getAgentBrowserProcessArgs(args), ownedManagedSessionCompatibilityEnv.AGENT_BROWSER_USER_AGENT, preserveAttachedBrowserSession, chromeStartupArgsContext.getStore()), {
 			cwd,
 			env: childEnv,
 			stdio: ["pipe", "pipe", "pipe"],

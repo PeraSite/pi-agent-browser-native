@@ -86,6 +86,8 @@ function redactBatchSpillData(data: AgentBrowserBatchResult[]): AgentBrowserBatc
 
 export async function buildToolPresentation(options: {
 	modelVisible?: boolean;
+	textOutput?: boolean;
+	stdin?: string;
 	artifactManifest?: SessionArtifactManifest;
 	artifactMaxUpdatedAtMs?: number;
 	artifactMinUpdatedAtMs?: number;
@@ -123,6 +125,19 @@ export async function buildToolPresentation(options: {
 	} = options;
 	const commandInfoWithTokens = commandInfo.commandTokens || !args ? commandInfo : { ...commandInfo, commandTokens: extractUpstreamCommandTokens(args) };
 	const presentationCommandInfo = resolvePresentationCommandInfo(commandInfoWithTokens, compiledSemanticAction);
+	if (options.textOutput) {
+		const text = String(redactPresentationData(commandInfoWithTokens, typeof envelope?.data === "string" ? envelope.data : "", options.stdin));
+		const failure = errorText ? buildErrorPresentation({ args, commandInfo, errorText, sessionName }) : undefined;
+		const presentation: ToolPresentation = {
+			...failure,
+			content: options.modelVisible === false ? [] : [{ type: "text", text: [errorText, text].filter(Boolean).join("\n\n") }],
+			data: text,
+			summary: failure?.summary ?? (text.split("\n", 1)[0] || "Native text command completed."),
+		};
+		return sanitizeModelFacingPresentation(options.modelVisible === false ? presentation : await compactLargePresentationOutput({
+			artifactManifest, commandInfo, data: presentation.data, persistentArtifactStore, presentation,
+		}));
+	}
 
 	const recordingCommand = commandInfo.command === "record";
 	const recordingBatch = commandInfo.command === "batch" && isAgentBrowserBatchResultArray(envelope?.data)
@@ -138,6 +153,7 @@ export async function buildToolPresentation(options: {
 		data = { ...data, piCleanupOwnership: options.piCleanupOwnership ?? "unknown" };
 	}
 	const readConfirmation = nextReadConfirmation({ commandTokens: commandInfoWithTokens.commandTokens ?? [], data, namespace, sessionName: sessionName ?? "default", succeeded: envelope?.success !== false });
+	const confirmationRequired = detectConfirmationRequired(data);
 	const presentationData = commandInfo.command === "batch" && isAgentBrowserBatchResultArray(data)
 		? redactBatchSpillData(data)
 		: redactPresentationData(commandInfoWithTokens, data);
@@ -165,7 +181,7 @@ export async function buildToolPresentation(options: {
 			sessionName,
 			summary,
 		});
-	} else if (options.modelVisible !== false && commandInfo.command === "snapshot" && isRecord(data)) {
+	} else if (options.modelVisible !== false && commandInfo.command === "snapshot" && isRecord(data) && !confirmationRequired) {
 		presentation = await buildSnapshotPresentation(data, persistentArtifactStore, artifactManifest);
 	} else {
 		presentation = {
@@ -243,7 +259,6 @@ export async function buildToolPresentation(options: {
 		currentSpillPaths,
 	) ?? presentationWithManifest.artifactVerification;
 
-	const confirmationRequired = detectConfirmationRequired(data);
 	const missingArtifactFailureText = formatMissingArtifactFailureText(presentationWithManifest.artifacts);
 	if (!errorText && missingArtifactFailureText && hasMissingFileArtifact(presentationWithManifest.artifacts)) {
 		presentationWithManifest.resultCategory = "failure";
