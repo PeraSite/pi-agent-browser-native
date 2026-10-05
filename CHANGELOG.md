@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- Avoid repeated JSON parsing exceptions for the exact redaction marker, preserving secret masking and complete output/spill content.
+- Avoid repeated JSON parsing exceptions for the exact redaction marker and ordinary text that cannot begin JSON, preserving native grammar validation, secret masking and complete output/spill content.
 - Run offline native discovery pipeline contracts automatically when the host exports its public instruction-groups factory; retain the explicit force-on diagnostic.
 
 - Verify the current complete URL before one-use approved-capture actions in wrapper-owned managed sessions, preserving path/hash drift refusal and unchanged-page success.
