@@ -53,6 +53,8 @@ test("failure finalization adds the Pi failure notice to prose despite --json ar
 
 const PIPELINE_PROVIDER = "piab-pipeline";
 const PIPELINE_MODEL_ID = "tool-pipeline";
+const NATIVE_DISCOVERY_ENABLED = process.env.PI_AGENT_BROWSER_NATIVE_DISCOVERY === "1"
+	|| ("instructionGroupsExtension" in Pi && typeof Pi.instructionGroupsExtension === "function");
 
 type PipelineToolResult = ToolResultMessage;
 
@@ -273,7 +275,7 @@ async function runPipelinePrompt(options: {
 }
 
 for (const webSearch of ["absent", "startup", "late"] as const) {
-	test(`Pi pipeline reveals complete browser instructions after discovery on a generic prompt before execution (web search: ${webSearch})`, { skip: process.env.PI_AGENT_BROWSER_NATIVE_DISCOVERY !== "1" }, async () => {
+	test(`Pi pipeline reveals complete browser instructions after discovery on a generic prompt before execution (web search: ${webSearch})`, { skip: !NATIVE_DISCOVERY_ENABLED }, async () => {
 		assert.ok("instructionGroupsExtension" in Pi && typeof Pi.instructionGroupsExtension === "function", "candidate must export its public instruction groups factory");
 		let hookCalls = 0;
 		let executionCalls = 0;
@@ -321,7 +323,7 @@ for (const webSearch of ["absent", "startup", "late"] as const) {
 	});
 }
 
-test("Pi pipeline refuses same-batch browser execution before discovery instructions are read", { skip: process.env.PI_AGENT_BROWSER_NATIVE_DISCOVERY !== "1" }, async () => {
+test("Pi pipeline refuses same-batch browser execution before discovery instructions are read", { skip: !NATIVE_DISCOVERY_ENABLED }, async () => {
 	assert.ok("instructionGroupsExtension" in Pi && typeof Pi.instructionGroupsExtension === "function", "candidate must export its public instruction groups factory");
 	let requests = 0;
 	let executionCalls = 0;

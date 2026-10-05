@@ -244,6 +244,7 @@ function createBalancedJsonEndFinder(text: string): (startIndex: number) => numb
 }
 
 function redactSerializedJson(text: string): string | undefined {
+	if (text === "[REDACTED]") return undefined;
 	// Validate grammar only; rebuilding parsed values loses duplicates and numeric spelling.
 	try {
 		JSON.parse(text);
