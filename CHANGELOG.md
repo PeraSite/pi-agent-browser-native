@@ -4,6 +4,9 @@
 
 ### Fixed
 
+- Avoid repeated JSON parsing exceptions for the exact redaction marker and ordinary text that cannot begin JSON, and skip redacting a discarded ref copy in browser-code results. Preserve native grammar validation, secret masking, complete output/spill content, retained snapshot/replay state and direct failure receipts.
+- Run offline native discovery pipeline contracts automatically when the host exports its public instruction-groups factory; retain the explicit force-on diagnostic.
+
 - Verify the current complete URL before one-use approved-capture actions in wrapper-owned managed sessions, preserving path/hash drift refusal and unchanged-page success.
 - Preserve exact tab-creation confirmation decisions and visible conditional navigation guidance from narrowly validated transport metadata, without automatically executing continuation arguments.
 
