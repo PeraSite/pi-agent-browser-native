@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readArray, readRecord } from "./helpers/assertions.js";
 import { link, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -74,6 +75,8 @@ test("session info separates daemon, browser and Pi ownership and keeps absent n
 			expected: { chromePid: "unknown", cleanup: "caller-owned", ownership: "attached" },
 		},
 	] as const) {
+		// Each ownership fixture is rendered and checked before the next variant.
+		// oxlint-disable-next-line no-await-in-loop
 		const presentation = await buildToolPresentation({
 			commandInfo: { command: "session", subcommand: "info" },
 			cwd: process.cwd(),
@@ -93,16 +96,36 @@ test("session info separates daemon, browser and Pi ownership and keeps absent n
 			},
 		});
 		const text = presentation.content[0]?.type === "text" ? presentation.content[0].text : "";
+		// Every fixed browser-ownership fixture must retain the active native daemon evidence.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.match(text, /Daemon: active; PID: 1234/);
+		// Every fixed ownership fixture must distinguish known from unknown Chrome PID.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.match(text, new RegExp(`Chrome PID: ${expected.chromePid}`));
+		// Every declared ownership variant must report its exact Pi cleanup responsibility.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.match(text, new RegExp(`Pi cleanup ownership: ${expected.cleanup}`));
+		// Every declared ownership variant must report its exact native browser ownership.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.match(text, new RegExp(`Native browser ownership: ${expected.ownership}`));
+		// Every ownership fixture includes the same independent recording receipt.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.match(text, /take-1/);
 		if (!browser) {
+			// The missing-browser fixture must retain unknowns rather than fabricate browser evidence.
+			// oxlint-disable-next-line node-test/no-conditional-assertion
 			assert.match(text, /Browser: unknown; alive: unknown/);
 		}
-		if (browser?.userDataDir) {
+		if (
+			browser?.userDataDir !== undefined &&
+			browser.userDataDir !== null &&
+			browser.userDataDir.length > 0
+		) {
+			// The declared profile-bearing fixture must retain its exact native profile path.
+			// oxlint-disable-next-line node-test/no-conditional-assertion
 			assert.match(text, /Exact profile: \/exact\/Chrome profile/);
+			// The same profile-bearing fixture must retain its independent live-tab evidence.
+			// oxlint-disable-next-line node-test/no-conditional-assertion
 			assert.match(text, /Live tab/);
 		}
 	}
@@ -180,6 +203,8 @@ test("restart preserves a failed previous receipt and the new pending take, dire
 			previousRecording: { ...measuredReceipt, success: false, error: "No frames captured" },
 		};
 		for (const batch of [false, true]) {
+			// Direct and batch variants share one artifact directory and assert each receipt in order.
+			// oxlint-disable-next-line no-await-in-loop
 			const result = await buildToolPresentation({
 				commandInfo: batch ? { command: "batch" } : { command: "record", subcommand: "restart" },
 				cwd,
@@ -190,12 +215,33 @@ test("restart preserves a failed previous receipt and the new pending take, dire
 						: data,
 				},
 			});
+			// Both fixed direct/batch receipt variants must preserve encoder failure.
+			// oxlint-disable-next-line node-test/no-conditional-assertion
 			assert.equal(result.resultCategory, "failure");
+			// Both restart-envelope variants must retain the prior failed take's identity.
+			// oxlint-disable-next-line node-test/no-conditional-assertion
 			assert.equal(result.artifacts?.[0].recording?.recordingId, "take-1");
-			assert.equal(result.artifacts?.[0].recording?.success, false);
-			assert.equal(result.artifacts?.[1].recording?.recordingId, "take-2");
-			assert.equal(result.artifacts?.[1].recording?.capture.durationMs, null);
+			// Both direct/batch variants must retain native failed-encoder evidence.
+			// oxlint-disable-next-line node-test/no-conditional-assertion
+			assert.equal(readRecord(readRecord(readArray(result.artifacts)[0]).recording).success, false);
+			// Both restart-envelope variants must retain the newly pending take's identity.
+			// oxlint-disable-next-line node-test/no-conditional-assertion
+			assert.equal(
+				readRecord(readRecord(readArray(result.artifacts)[1]).recording).recordingId,
+				"take-2",
+			);
+			// Both restart-envelope variants must keep unmeasured new-take duration unknown.
+			// oxlint-disable-next-line node-test/no-conditional-assertion
+			assert.equal(
+				readRecord(readRecord(readRecord(readArray(result.artifacts)[1]).recording).capture)
+					.durationMs,
+				null,
+			);
+			// Both restart-envelope variants must keep the new take pending.
+			// oxlint-disable-next-line node-test/no-conditional-assertion
 			assert.equal(result.artifactVerification?.pendingCount, 1);
+			// Both restart-envelope variants must avoid claiming the pending take is saved.
+			// oxlint-disable-next-line node-test/no-conditional-assertion
 			assert.doesNotMatch(
 				result.content
 					.filter((item) => item.type === "text")
@@ -229,10 +275,10 @@ test("record-stop preflight failures export attempt evidence without inventing a
 			},
 		});
 		assert.equal(result.isError, true);
-		const receipt = JSON.parse(await readFile(outputPath, "utf8"));
+		const receipt = readRecord(JSON.parse(await readFile(outputPath, "utf8")));
 		assert.equal(receipt.success, false);
 		assert.equal(receipt.command, "record");
-		assert.equal(receipt.attempt.agentBrowserStarted, false);
+		assert.equal(readRecord(receipt.attempt).agentBrowserStarted, false);
 		assert.equal(receipt.data, null);
 		assert.equal(receipt.artifacts, undefined);
 	} finally {
@@ -267,14 +313,12 @@ test("failed recording receipt exports preserve artifact aliases and JSON mode",
 		});
 		assert.equal(result.isError, true);
 		assert.equal(
-			JSON.parse(result.content[0]?.type === "text" ? result.content[0].text : "").success,
+			readRecord(JSON.parse(result.content[0]?.type === "text" ? result.content[0].text : ""))
+				.success,
 			false,
 		);
 		assert.equal(await readFile(artifactPath, "utf8"), "video");
-		assert.equal(
-			(result.details as { outputFile: { status: string } }).outputFile.status,
-			"failed",
-		);
+		assert.equal(readRecord(readRecord(result.details).outputFile).status, "failed");
 	} finally {
 		await rm(cwd, { recursive: true, force: true });
 	}
@@ -291,6 +335,8 @@ test("failed recording data survives direct and batch presentation without saved
 			output: { ...measuredReceipt.output, encoderSucceeded: false },
 		};
 		for (const batch of [false, true]) {
+			// Direct and batch variants share one artifact directory and assert each receipt in order.
+			// oxlint-disable-next-line no-await-in-loop
 			const result = await buildToolPresentation({
 				commandInfo: batch ? { command: "batch" } : { command: "record", subcommand: "stop" },
 				cwd,
@@ -309,15 +355,27 @@ test("failed recording data survives direct and batch presentation without saved
 						}
 					: { success: false, data: receipt, error: "Encoder failed" },
 			});
+			// Both fixed direct/batch receipt variants must preserve encoder failure.
+			// oxlint-disable-next-line node-test/no-conditional-assertion
 			assert.equal(result.resultCategory, "failure");
+			// Both fixed failed-encoder variants retain on-disk presence without claiming validity.
+			// oxlint-disable-next-line node-test/no-conditional-assertion
 			assert.equal(result.artifacts?.[0]?.exists, true);
-			assert.equal(result.artifacts?.[0]?.recording?.success, false);
+			// Both direct/batch variants must retain native failed-encoder evidence.
+			// oxlint-disable-next-line node-test/no-conditional-assertion
+			assert.equal(readRecord(readRecord(readArray(result.artifacts)[0]).recording).success, false);
+			// Both direct/batch failed-encoder variants must remain unverified.
+			// oxlint-disable-next-line node-test/no-conditional-assertion
 			assert.equal(result.artifactVerification?.unverifiedCount, 1);
+			// Both direct/batch failed-encoder variants must avoid a saved-recording claim.
+			// oxlint-disable-next-line node-test/no-conditional-assertion
 			assert.doesNotMatch(
 				result.content[0]?.type === "text" ? result.content[0].text : "",
 				/Saved recording/,
 			);
 			const outputPath = join(cwd, `failed-${batch}.json`);
+			// Write this variant's receipt only after its presentation assertions succeed.
+			// oxlint-disable-next-line no-await-in-loop
 			const exported = await applyAgentBrowserOutputPath({
 				cwd,
 				outputPath,
@@ -332,11 +390,24 @@ test("failed recording data survives direct and batch presentation without saved
 					},
 				},
 			});
+			// Both fixed direct/batch failed receipts must preserve failure during export.
+			// oxlint-disable-next-line node-test/no-conditional-assertion
 			assert.equal(exported.isError, true);
-			const payload = JSON.parse(await readFile(outputPath, "utf8"));
+			// Read the exported receipt before advancing to the next recording variant.
+			// oxlint-disable-next-line no-await-in-loop
+			const payload = readRecord(JSON.parse(await readFile(outputPath, "utf8")));
+			// Both exported receipt variants must retain their failed outcome.
+			// oxlint-disable-next-line node-test/no-conditional-assertion
 			assert.equal(payload.success, false);
+			// Both exported receipt variants must retain the original native error.
+			// oxlint-disable-next-line node-test/no-conditional-assertion
 			assert.equal(payload.error, "Encoder failed");
-			assert.equal(payload.artifacts[0].recording.success, false);
+			// Both exported receipt variants must retain their artifact's failed encoder outcome.
+			// oxlint-disable-next-line node-test/no-conditional-assertion
+			assert.equal(
+				readRecord(readRecord(readArray(payload.artifacts)[0]).recording).success,
+				false,
+			);
 		}
 	} finally {
 		await rm(cwd, { recursive: true, force: true });

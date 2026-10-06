@@ -86,7 +86,7 @@ function parseArgs(argv) {
 			positional.push(arg);
 			continue;
 		}
-		if (arg === "--global" || arg === "--project" || arg === "--stdin" || arg === "--help") {
+		if (["--global", "--project", "--stdin", "--help"].includes(arg)) {
 			flags.set(arg, true);
 			continue;
 		}
@@ -152,7 +152,7 @@ function inferWebSearchProviderFromEnvName(envName) {
 			return provider;
 		}
 	}
-	return undefined;
+	return;
 }
 
 function getWebSearchProvider(flags, options = {}) {
@@ -172,16 +172,19 @@ function getWebSearchProvider(flags, options = {}) {
 }
 
 function setWebSearchCredential(config, provider, value) {
-	config.webSearch = {
-		...(config.webSearch ?? {}),
-		[getWebSearchProviderConfigKey(provider)]: value,
+	return {
+		...config,
+		webSearch: { ...config.webSearch, [getWebSearchProviderConfigKey(provider)]: value },
 	};
 }
 
 function clearWebSearchCredential(config, provider) {
-	if (config.webSearch) {
-		delete config.webSearch[getWebSearchProviderConfigKey(provider)];
+	if (!config.webSearch) {
+		return config;
 	}
+	const webSearch = { ...config.webSearch };
+	delete webSearch[getWebSearchProviderConfigKey(provider)];
+	return { ...config, webSearch };
 }
 
 function printPaths() {
@@ -219,18 +222,16 @@ function printStatus() {
 	if (state.layers.length === 0) {
 		console.log("  layers: none");
 	}
-	if (state.warnings.length > 0) {
+	printDiagnostics("Warnings", state.warnings);
+	printDiagnostics("Validation errors", state.errors);
+}
+
+function printDiagnostics(label, diagnostics) {
+	if (diagnostics.length > 0) {
 		console.log("");
-		console.log("Warnings:");
-		for (const warning of state.warnings) {
-			console.log(`  - ${warning}`);
-		}
-	}
-	if (state.errors.length > 0) {
-		console.log("");
-		console.log("Validation errors:");
-		for (const error of state.errors) {
-			console.log(`  - ${error}`);
+		console.log(`${label}:`);
+		for (const diagnostic of diagnostics) {
+			console.log(`  - ${diagnostic}`);
 		}
 	}
 }
@@ -254,23 +255,32 @@ async function readSecretFromStdin(useStdin) {
 
 function mutateConfig(path, mutate) {
 	const config = readConfig(path);
-	mutate(config);
-	writeConfig(path, config);
+	writeConfig(path, mutate(config));
 }
 
 async function handleWebSearch(args, flags) {
 	const action = args[0];
+	if (action === "prefer" || action === "enable" || action === "disable") {
+		handleWebSearchPreference(action, args, flags);
+		return;
+	}
 	if (action === "status") {
 		printStatus();
 		return;
 	}
+	if (action === "clear") {
+		clearWebSearch(flags);
+		return;
+	}
+	await handleWebSearchCredential(action, args, flags);
+}
+
+async function handleWebSearchCredential(action, args, flags) {
 	if (action === "set-key") {
 		const provider = getWebSearchProvider(flags);
 		const key = await readSecretFromStdin(Boolean(flags.get("--stdin")));
 		const { path, scope } = selectWritePath(flags);
-		mutateConfig(path, (config) => {
-			setWebSearchCredential(config, provider, key);
-		});
+		mutateConfig(path, (config) => setWebSearchCredential(config, provider, key));
 		console.log(`Saved ${getWebSearchProviderLabel(provider)} key to ${scope} config: ${path}`);
 		return;
 	}
@@ -282,9 +292,7 @@ async function handleWebSearch(args, flags) {
 		const provider = getWebSearchProvider(flags, { envName });
 		const envReference = `$${envName}`;
 		const { path, scope } = selectWritePath(flags);
-		mutateConfig(path, (config) => {
-			setWebSearchCredential(config, provider, envReference);
-		});
+		mutateConfig(path, (config) => setWebSearchCredential(config, provider, envReference));
 		console.log(`Saved ${getWebSearchProviderLabel(provider)} ${scope} env reference to: ${path}`);
 		return;
 	}
@@ -295,29 +303,26 @@ async function handleWebSearch(args, flags) {
 			throw new UsageError("set-command requires a command string.");
 		}
 		const { path, scope } = selectWritePath(flags);
-		mutateConfig(path, (config) => {
-			setWebSearchCredential(config, provider, `!${command}`);
-		});
+		mutateConfig(path, (config) => setWebSearchCredential(config, provider, `!${command}`));
 		console.log(`Saved ${getWebSearchProviderLabel(provider)} ${scope} command source to: ${path}`);
 		return;
 	}
-	if (action === "clear") {
-		const provider = getWebSearchProvider(flags, { allowAll: true });
-		const { path, scope } = selectWritePath(flags);
-		mutateConfig(path, (config) => {
-			if (provider === "all") {
-				for (const entry of WEB_SEARCH_PROVIDERS) {
-					clearWebSearchCredential(config, entry);
-				}
-			} else {
-				clearWebSearchCredential(config, provider);
-			}
-		});
-		console.log(
-			`Cleared ${provider === "all" ? "all web-search" : getWebSearchProviderLabel(provider)} credential source in ${scope} config: ${path}`,
-		);
-		return;
-	}
+	throw new UsageError(`Unsupported web-search action: ${action ?? ""}`);
+}
+
+function clearWebSearch(flags) {
+	const provider = getWebSearchProvider(flags, { allowAll: true });
+	const { path, scope } = selectWritePath(flags);
+	mutateConfig(path, (config) => {
+		const providers = provider === "all" ? WEB_SEARCH_PROVIDERS : [provider];
+		return providers.reduce(clearWebSearchCredential, config);
+	});
+	console.log(
+		`Cleared ${provider === "all" ? "all web-search" : getWebSearchProviderLabel(provider)} credential source in ${scope} config: ${path}`,
+	);
+}
+
+function handleWebSearchPreference(action, args, flags) {
 	if (action === "prefer") {
 		const provider = args[1];
 		if (!provider || (!isWebSearchProvider(provider) && provider !== "auto")) {
@@ -325,12 +330,13 @@ async function handleWebSearch(args, flags) {
 		}
 		const { path, scope } = selectWritePath(flags);
 		mutateConfig(path, (config) => {
-			config.webSearch = { ...(config.webSearch ?? {}) };
+			const webSearch = { ...config.webSearch };
 			if (provider === "auto") {
-				delete config.webSearch.preferredProvider;
+				delete webSearch.preferredProvider;
 			} else {
-				config.webSearch.preferredProvider = provider;
+				webSearch.preferredProvider = provider;
 			}
+			return { ...config, webSearch };
 		});
 		console.log(
 			`${provider === "auto" ? "Cleared" : "Saved"} web-search preferred provider in ${scope} config: ${path}`,
@@ -339,9 +345,10 @@ async function handleWebSearch(args, flags) {
 	}
 	if (action === "enable" || action === "disable") {
 		const { path, scope } = selectWritePath(flags);
-		mutateConfig(path, (config) => {
-			config.webSearch = { ...(config.webSearch ?? {}), enabled: action === "enable" };
-		});
+		mutateConfig(path, (config) => ({
+			...config,
+			webSearch: { ...config.webSearch, enabled: action === "enable" },
+		}));
 		console.log(
 			`${action === "enable" ? "Enabled" : "Disabled"} agent_browser_web_search in ${scope} config: ${path}`,
 		);
@@ -350,72 +357,81 @@ async function handleWebSearch(args, flags) {
 	throw new UsageError(`Unsupported web-search action: ${action ?? ""}`);
 }
 
+function clearBrowserSetting(config, key) {
+	if (!config.browser) {
+		return config;
+	}
+	const browser = { ...config.browser };
+	delete browser[key];
+	return { ...config, browser };
+}
+
+function handleBrowserProfile(args, flags) {
+	const action = args[1];
+	if (action === "status") {
+		printStatus();
+		return;
+	}
+	if (action === "set") {
+		const name = args.slice(2).join(" ").trim();
+		if (!name) {
+			throw new UsageError(
+				"browser profile set requires a profile name or profile directory path.",
+			);
+		}
+		const policy = flags.get("--policy") || "authenticated-only";
+		if (!["explicit-only", "authenticated-only", "always"].includes(policy)) {
+			throw new UsageError("Invalid --policy value.");
+		}
+		const { path, scope } = selectWritePath(flags);
+		mutateConfig(path, (config) => ({
+			...config,
+			browser: { ...config.browser, defaultProfile: { name, policy } },
+		}));
+		console.log(`Saved browser default profile in ${scope} config: ${path}`);
+		return;
+	}
+	if (action === "clear") {
+		const { path, scope } = selectWritePath(flags);
+		mutateConfig(path, (config) => clearBrowserSetting(config, "defaultProfile"));
+		console.log(`Cleared browser default profile in ${scope} config: ${path}`);
+		return;
+	}
+	throw new UsageError(`Unsupported browser profile action: ${action ?? ""}`);
+}
+
+function handleBrowserExecutable(args, flags) {
+	const action = args[1];
+	if (action === "status") {
+		printStatus();
+		return;
+	}
+	if (action === "set") {
+		const executablePath = args.slice(2).join(" ").trim();
+		if (!executablePath) {
+			throw new UsageError("browser executable set requires a browser executable path.");
+		}
+		const { path, scope } = selectWritePath(flags);
+		mutateConfig(path, (config) => ({ ...config, browser: { ...config.browser, executablePath } }));
+		console.log(`Saved browser executable path in ${scope} config: ${path}`);
+		return;
+	}
+	if (action === "clear") {
+		const { path, scope } = selectWritePath(flags);
+		mutateConfig(path, (config) => clearBrowserSetting(config, "executablePath"));
+		console.log(`Cleared browser executable path in ${scope} config: ${path}`);
+		return;
+	}
+	throw new UsageError(`Unsupported browser executable action: ${action ?? ""}`);
+}
+
 function handleBrowser(args, flags) {
 	const target = args[0];
-	const action = args[1];
 	if (target === "profile") {
-		if (action === "status") {
-			printStatus();
-			return;
-		}
-		if (action === "set") {
-			const name = args.slice(2).join(" ").trim();
-			if (!name) {
-				throw new UsageError(
-					"browser profile set requires a profile name or profile directory path.",
-				);
-			}
-			const policy = flags.get("--policy") || "authenticated-only";
-			if (!["explicit-only", "authenticated-only", "always"].includes(policy)) {
-				throw new UsageError("Invalid --policy value.");
-			}
-			const { path, scope } = selectWritePath(flags);
-			mutateConfig(path, (config) => {
-				config.browser = { ...(config.browser ?? {}), defaultProfile: { name, policy } };
-			});
-			console.log(`Saved browser default profile in ${scope} config: ${path}`);
-			return;
-		}
-		if (action === "clear") {
-			const { path, scope } = selectWritePath(flags);
-			mutateConfig(path, (config) => {
-				if (config.browser) {
-					delete config.browser.defaultProfile;
-				}
-			});
-			console.log(`Cleared browser default profile in ${scope} config: ${path}`);
-			return;
-		}
-		throw new UsageError(`Unsupported browser profile action: ${action ?? ""}`);
+		return handleBrowserProfile(args, flags);
 	}
 	if (target === "executable") {
-		if (action === "status") {
-			printStatus();
-			return;
-		}
-		if (action === "set") {
-			const executablePath = args.slice(2).join(" ").trim();
-			if (!executablePath) {
-				throw new UsageError("browser executable set requires a browser executable path.");
-			}
-			const { path, scope } = selectWritePath(flags);
-			mutateConfig(path, (config) => {
-				config.browser = { ...(config.browser ?? {}), executablePath };
-			});
-			console.log(`Saved browser executable path in ${scope} config: ${path}`);
-			return;
-		}
-		if (action === "clear") {
-			const { path, scope } = selectWritePath(flags);
-			mutateConfig(path, (config) => {
-				if (config.browser) {
-					delete config.browser.executablePath;
-				}
-			});
-			console.log(`Cleared browser executable path in ${scope} config: ${path}`);
-			return;
-		}
-		throw new UsageError(`Unsupported browser executable action: ${action ?? ""}`);
+		return handleBrowserExecutable(args, flags);
 	}
 	throw new UsageError(`Unsupported browser action: ${target ?? ""}`);
 }

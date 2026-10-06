@@ -1,8 +1,8 @@
 import { isRecord } from "../parsing.js";
 
 export interface ConfirmationRequiredPresentation {
-	id: string;
-	actionText?: string;
+	readonly id: string;
+	readonly actionText?: string;
 }
 
 const CONFIRMATION_REQUIRED_FIELD_NAMES = [
@@ -26,7 +26,7 @@ const CONFIRMATION_ACTION_TEXT_FIELD_NAMES = [
 const CONFIRMATION_REQUIRED_MARKER = "confirmation_required";
 
 function getTrimmedStringField(
-	data: Record<string, unknown>,
+	data: Readonly<Record<string, unknown>>,
 	fieldNames: readonly string[],
 ): string | undefined {
 	for (const fieldName of fieldNames) {
@@ -38,7 +38,7 @@ function getTrimmedStringField(
 	return undefined;
 }
 
-function hasConfirmationRequiredMarker(data: Record<string, unknown>): boolean {
+function hasConfirmationRequiredMarker(data: Readonly<Record<string, unknown>>): boolean {
 	return (
 		CONFIRMATION_REQUIRED_FIELD_NAMES.some((fieldName) => data[fieldName] === true) ||
 		data.type === CONFIRMATION_REQUIRED_MARKER ||
@@ -48,7 +48,7 @@ function hasConfirmationRequiredMarker(data: Record<string, unknown>): boolean {
 }
 
 function getNestedConfirmationRecord(
-	data: Record<string, unknown>,
+	data: Readonly<Record<string, unknown>>,
 ): Record<string, unknown> | undefined {
 	for (const fieldName of CONFIRMATION_REQUIRED_RECORD_FIELD_NAMES) {
 		const value = data[fieldName];
@@ -59,31 +59,32 @@ function getNestedConfirmationRecord(
 	return undefined;
 }
 
-export function detectConfirmationRequired(
-	data: unknown,
-): ConfirmationRequiredPresentation | undefined {
+function getConfirmationPayload(data: unknown): unknown {
 	// Native confirm can acknowledge one action while its original compound command remains pending.
-	if (
-		isRecord(data) &&
+	return isRecord(data) &&
 		data.confirmed === true &&
 		isRecord(data.result) &&
 		data.result.success === true
-	) {
-		data = data.result.data;
-	}
-	if (!isRecord(data)) {
+		? data.result.data
+		: data;
+}
+
+export function detectConfirmationRequired(
+	data: unknown,
+): ConfirmationRequiredPresentation | undefined {
+	const payload = getConfirmationPayload(data);
+	if (!isRecord(payload)) {
 		return undefined;
 	}
-
-	const nestedRecord = getNestedConfirmationRecord(data);
-	const candidateRecords = nestedRecord ? [data, nestedRecord] : [data];
+	const nestedRecord = getNestedConfirmationRecord(payload);
+	const candidateRecords = nestedRecord ? [payload, nestedRecord] : [payload];
 	if (!candidateRecords.some(hasConfirmationRequiredMarker)) {
 		return undefined;
 	}
 
 	for (const record of candidateRecords) {
 		const id = getTrimmedStringField(record, CONFIRMATION_ID_FIELD_NAMES);
-		if (!id) {
+		if (id === undefined || id.length === 0) {
 			continue;
 		}
 		return {

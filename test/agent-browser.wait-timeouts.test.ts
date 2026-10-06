@@ -8,7 +8,7 @@ import {
 } from "../extensions/agent-browser/lib/orchestration/browser-run/prepare/wait-timeouts.js";
 import { withPatchedEnv } from "./helpers/agent-browser-harness.js";
 
-function batch(steps: string[][]): string {
+function batch(steps: readonly (readonly string[])[]): string {
 	return JSON.stringify(steps);
 }
 
@@ -152,6 +152,8 @@ test("getCommandAwareProcessTimeoutMs extends process timeout for wait, read, an
 		);
 		for (const navigationCommand of ["open", "goto", "navigate"]) {
 			for (const navigationFlags of [["--session", "custom"], ["--restore"]]) {
+				// Both fixed navigation-flag variants must retain their own timeout assertion.
+				// oxlint-disable-next-line node-test/no-conditional-assertion
 				assert.equal(
 					getCommandAwareProcessTimeoutMs(
 						["batch"],

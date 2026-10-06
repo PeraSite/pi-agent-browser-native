@@ -16,16 +16,18 @@ import {
 	withPatchedEnv,
 	writeFakeAgentBrowserBinary,
 } from "./helpers/agent-browser-harness.js";
+import { readRecord, readArray, readString } from "./helpers/assertions.js";
 
-async function withConfirmations(
-	run: (options: {
-		root: string;
-		log: string;
-		state: string;
-		branch: unknown[];
-		harness: ReturnType<typeof createExtensionHarness>;
-	}) => Promise<void>,
-) {
+// The callback shares the harness's live transcript array so appends and replay keep the same identity.
+interface ConfirmationFixture {
+	readonly root: string;
+	readonly log: string;
+	readonly state: string;
+	readonly branch: unknown[];
+	readonly harness: ReturnType<typeof createExtensionHarness>;
+}
+
+async function withConfirmations(run: (options: ConfirmationFixture) => Promise<void>) {
 	const root = await mkdtemp(join(tmpdir(), "piab-read-confirm-"));
 	const log = join(root, "calls.jsonl"),
 		state = join(root, "native.json");
@@ -122,20 +124,22 @@ for (const shared of [false, true]) {
 			`URL-read ${command} stays browserless and targets the real native session (shared=${shared})`,
 			{ concurrency: false },
 			async () => {
-				await withConfirmations(async ({ root, log, state, branch, harness }) => {
+				await withConfirmations(async ({ root, log, state, branch, harness: initialHarness }) => {
+					let harness = initialHarness;
 					const prefix = shared ? ["--namespace", "team", "--session", "shared"] : [];
 					const read = await executeRegisteredTool(harness.tool, harness.ctx, {
 						args: [...prefix, "--confirm-actions", "read", "read", "public.test/docs"],
 					});
 					assert.equal(read.details?.failureCategory, "confirmation-required");
-					assert.equal(read.details?.managedSessionOutcome, undefined);
-					const action = (
-						read.details?.nextActions as Array<{ id: string; params: { args: string[] } }>
-					).find(
-						(action) =>
-							action.id === (command === "confirm" ? "approve-confirmation" : "deny-confirmation"),
-					);
-					assert.deepEqual(action?.params.args, [
+					assert.equal(read.details.managedSessionOutcome, undefined);
+					const action = readArray(read.details.nextActions)
+						.map(readRecord)
+						.find(
+							(candidate) =>
+								candidate.id ===
+								(command === "confirm" ? "approve-confirmation" : "deny-confirmation"),
+						);
+					assert.deepEqual(readRecord(action?.params).args, [
 						"--namespace",
 						shared ? "team" : "",
 						"--session",
@@ -143,7 +147,7 @@ for (const shared of [false, true]) {
 						command,
 						"read-id",
 					]);
-					branch.push(createToolBranchEntry({ details: read.details!, isError: read.isError }));
+					branch.push(createToolBranchEntry({ details: read.details, isError: read.isError }));
 					const pendingState = SessionPageState.fromBranch(convertBrowserEntries(branch));
 					assert.ok(
 						pendingState.findReadConfirmation(["confirm", "read-id"]),
@@ -182,16 +186,16 @@ for (const shared of [false, true]) {
 					const confirmed = await executeRegisteredTool(harness.tool, harness.ctx, {
 						args: [command, "read-id"],
 					});
-					assert.equal(confirmed.isError, false, confirmed.content[0]?.text);
+					assert.equal(confirmed.isError, false, confirmed.content[0].text);
 					assert.equal(confirmed.details?.sessionName, shared ? "shared" : "default");
-					assert.equal(confirmed.details?.managedSessionOutcome, undefined);
+					assert.equal(confirmed.details.managedSessionOutcome, undefined);
 					assert.deepEqual(
 						(await readInvocationLog(log)).map((call) => extractUpstreamCommandTokens(call.args)),
 						[[command, "read-id"]],
 					);
-					assert.equal(JSON.parse(await readFile(state, "utf8")).browserTouches, 0);
+					assert.equal(readRecord(JSON.parse(await readFile(state, "utf8"))).browserTouches, 0);
 					branch.push(
-						createToolBranchEntry({ details: confirmed.details!, isError: confirmed.isError }),
+						createToolBranchEntry({ details: confirmed.details, isError: confirmed.isError }),
 					);
 					assert.equal(
 						SessionPageState.fromBranch(convertBrowserEntries(branch)).findReadConfirmation([
@@ -232,12 +236,23 @@ for (const command of ["confirm", "deny"]) {
 				});
 				assert.equal(pending.details?.sessionTabTargetUnknown, true);
 				for (const id of ["unproven-id"]) {
+					// This step consumes or replaces the shared native pending slot; later commands depend on its completion.
+					// oxlint-disable-next-line no-await-in-loop
 					await writeFile(log, "");
+					// This step consumes or replaces the shared native pending slot; later commands depend on its completion.
+					// oxlint-disable-next-line no-await-in-loop
 					const blocked = await executeRegisteredTool(harness.tool, harness.ctx, {
 						args: [...prefix, command, id],
 					});
+					// The nonempty id fixture matrix exhaustively verifies each case; any failed assertion fails the test.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
 					assert.equal(blocked.isError, true);
-					assert.deepEqual(await readInvocationLog(log), []);
+					// Observe the current fixture receipt before deciding whether the next poll or state transition may proceed.
+					// oxlint-disable-next-line no-await-in-loop
+					const blockedCalls = await readInvocationLog(log);
+					// The nonempty id fixture matrix exhaustively verifies each case; any failed assertion fails the test.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
+					assert.deepEqual(blockedCalls, []);
 				}
 				await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: [...prefix, "read", "public.test/legacy"],
@@ -256,20 +271,20 @@ for (const command of ["confirm", "deny"]) {
 				const result = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: [...prefix, command, "read-id"],
 				});
-				assert.equal(result.isError, false, result.content[0]?.text);
+				assert.equal(result.isError, false, result.content[0].text);
 				assert.deepEqual(
 					(await readInvocationLog(log)).map((call) => call.args),
 					[["--json", ...prefix, command, "read-id"]],
 				);
 				assert.equal(result.details?.sessionTabTargetUnknown, true);
-				assert.equal(result.details?.sessionTabTarget, undefined);
-				assert.equal(result.details?.managedSessionOutcome, undefined);
+				assert.equal(result.details.sessionTabTarget, undefined);
+				assert.equal(result.details.managedSessionOutcome, undefined);
 				await writeFile(log, "");
 				const stillUnknown = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: [...prefix, "click", "#guarded"],
 				});
 				assert.equal(stillUnknown.isError, true);
-				assert.match(stillUnknown.content[0]?.text ?? "", /active page became unverified/);
+				assert.match(stillUnknown.content[0].text ?? "", /active page became unverified/);
 				assert.deepEqual(await readInvocationLog(log), []);
 			});
 		},
@@ -284,17 +299,14 @@ test(
 			const read = await executeRegisteredTool(harness.tool, harness.ctx, {
 				args: ["read", "public.test/legacy"],
 			});
-			assert.equal(
-				(read.details?.readConfirmation as { sessionName: string }).sessionName,
-				"default",
-			);
+			assert.equal(readRecord(read.details?.readConfirmation).sessionName, "default");
 			await writeFile(log, "");
 			const result = await executeRegisteredTool(harness.tool, harness.ctx, {
 				args: ["confirm", "read-id"],
 			});
-			assert.equal(result.isError, false, result.content[0]?.text);
+			assert.equal(result.isError, false, result.content[0].text);
 			assert.equal(result.details?.sessionName, "default");
-			assert.equal(result.details?.managedSessionOutcome, undefined);
+			assert.equal(result.details.managedSessionOutcome, undefined);
 			assert.deepEqual(
 				(await readInvocationLog(log)).map((call) => extractUpstreamCommandTokens(call.args)),
 				[
@@ -331,14 +343,14 @@ for (const legacy of [true, false]) {
 					});
 					assert.equal(result.isError, true);
 					assert.equal(result.details?.resultCategory, "failure");
-					assert.equal(JSON.parse(result.content[0]?.text ?? "").success, false);
-					assert.match(result.content[0]?.text ?? "", /HTTP read failed: test response 500/);
-					assert.equal((result.details?.readConfirmation as { state: string }).state, "cleared");
-					if (batch)
-						assert.equal(
-							(result.details?.batchSteps as Array<{ success: boolean }>)[0].success,
-							false,
-						);
+					assert.equal(readRecord(JSON.parse(result.content[0].text ?? "")).success, false);
+					assert.match(result.content[0].text ?? "", /HTTP read failed: test response 500/);
+					assert.equal(readRecord(result.details.readConfirmation).state, "cleared");
+					if (batch) {
+						// This enumerated fixture branch (batch) has variant-specific assertions; common assertions cover every case.
+						// oxlint-disable-next-line node-test/no-conditional-assertion
+						assert.equal(readArray(result.details.batchSteps).map(readRecord)[0].success, false);
+					}
 					assert.deepEqual(
 						(await readInvocationLog(log)).map((call) => extractUpstreamCommandTokens(call.args)),
 						[
@@ -346,7 +358,7 @@ for (const legacy of [true, false]) {
 							batch ? ["batch"] : ["confirm", "read-id"],
 						],
 					);
-					assert.equal(result.details?.outputFile, undefined);
+					assert.equal(result.details.outputFile, undefined);
 					await assert.rejects(readFile(outputPath), { code: "ENOENT" });
 				});
 			},
@@ -363,7 +375,7 @@ test(
 				args: ["--session", "shared", "read", "public.test/docs"],
 			});
 			assert.equal(read.details?.failureCategory, "confirmation-required");
-			const native = JSON.parse(await readFile(state, "utf8"));
+			const native = readRecord(JSON.parse(await readFile(state, "utf8")));
 			await writeFile(
 				state,
 				JSON.stringify({
@@ -376,19 +388,19 @@ test(
 				args: ["confirm", "read-id"],
 			});
 			assert.equal(result.isError, true);
-			assert.match(result.content[0]?.text ?? "", /mismatch/);
+			assert.match(result.content[0].text ?? "", /mismatch/);
 			assert.equal(
 				result.details?.sessionName,
 				"shared",
 				"the stale ID must reach its original native session, not a newly generated one",
 			);
-			assert.equal(result.details?.managedSessionOutcome, undefined);
+			assert.equal(result.details.managedSessionOutcome, undefined);
 			assert.deepEqual(
 				(await readInvocationLog(log)).map((call) => extractUpstreamCommandTokens(call.args)),
 				[["confirm", "read-id"]],
 			);
-			const after = JSON.parse(await readFile(state, "utf8"));
-			assert.equal(after.pending.id, "new-dom-id");
+			const after = readRecord(JSON.parse(await readFile(state, "utf8")));
+			assert.equal(readRecord(after.pending).id, "new-dom-id");
 			assert.equal(after.domConfirmed, false);
 			assert.equal(after.browserTouches, 0);
 		});
@@ -412,7 +424,7 @@ test(
 					"({ confirmed: true, action: 'read', result: { success: false, error: 'HTTP read failed: test response 500' } })",
 				],
 			});
-			assert.equal(pageJson.isError, false, pageJson.content[0]?.text);
+			assert.equal(pageJson.isError, false, pageJson.content[0].text);
 			assert.equal(pageJson.details?.readConfirmation, undefined);
 			await writeFile(log, "");
 			await executeRegisteredTool(harness.tool, harness.ctx, {
@@ -429,19 +441,16 @@ test(
 				args: ["--session", "shared", "read"],
 			});
 			assert.equal(
-				(bare.details?.readConfirmation as { source: string })?.source,
+				readRecord(bare.details?.readConfirmation).source,
 				"native-guarded-action",
 				"a native current-page read is browser-backed, not explicit-URL provenance",
 			);
-			assert.equal(
-				(bare.details?.readConfirmation as { capabilities?: unknown })?.capabilities,
-				undefined,
-			);
+			assert.equal(readRecord(bare.details?.readConfirmation).capabilities, undefined);
 			const legacy = await executeRegisteredTool(harness.tool, harness.ctx, {
 				args: ["--session", "shared", "read", "public.test/legacy"],
 			});
 			assert.equal(
-				(legacy.details?.readConfirmation as { capabilities?: unknown })?.capabilities,
+				readRecord(legacy.details?.readConfirmation).capabilities,
 				undefined,
 				"legacy routing metadata does not prove native ID checking",
 			);
@@ -460,23 +469,26 @@ test(
 				args: ["--session", "shared", "read", "public.test/docs"],
 			});
 			branch.push(
-				createToolBranchEntry({ details: pendingRead.details!, isError: pendingRead.isError }),
+				createToolBranchEntry({
+					details: readRecord(pendingRead.details),
+					isError: pendingRead.isError,
+				}),
 			);
 			const blocked = await executeRegisteredTool(harness.tool, harness.ctx, {
 				args: ["--session", "shared", "click", "#guarded"],
 			});
 			assert.equal(blocked.isError, true);
 			assert.equal(blocked.details?.failureCategory, "confirmation-required");
-			assert.equal((blocked.details?.readConfirmation as { state: string }).state, "pending");
-			const actions = blocked.details?.nextActions as Array<{ params: { args: string[] } }>;
+			assert.equal(readRecord(blocked.details.readConfirmation).state, "pending");
+			const actions = readArray(blocked.details.nextActions).map(readRecord);
 			assert.deepEqual(
-				actions.map((action) => action.params.args),
+				actions.map((action) => readRecord(action.params).args),
 				[
 					["--namespace", "", "--session", "shared", "confirm", "dom-id"],
 					["--namespace", "", "--session", "shared", "deny", "dom-id"],
 				],
 			);
-			branch.push(createToolBranchEntry({ details: blocked.details!, isError: blocked.isError }));
+			branch.push(createToolBranchEntry({ details: blocked.details, isError: blocked.isError }));
 			const replayed = SessionPageState.fromBranch(convertBrowserEntries(branch));
 			assert.equal(
 				replayed.findReadConfirmation(["--session", "shared", "confirm", "read-id"]),
@@ -490,21 +502,31 @@ test(
 				["--session", "shared", "confirm", "foreign-id"],
 				["--session", "other", "confirm", "dom-id"],
 			]) {
+				// This step consumes or replaces the shared native pending slot; later commands depend on its completion.
+				// oxlint-disable-next-line no-await-in-loop
 				await writeFile(log, "");
+				// This step consumes or replaces the shared native pending slot; later commands depend on its completion.
+				// oxlint-disable-next-line no-await-in-loop
 				const unrelated = await executeRegisteredTool(harness.tool, harness.ctx, { args });
+				// The nonempty args fixture matrix exhaustively verifies each case; any failed assertion fails the test.
+				// oxlint-disable-next-line node-test/no-conditional-assertion
 				assert.equal(unrelated.isError, true);
+				// The nonempty args fixture matrix exhaustively verifies each case; any failed assertion fails the test.
+				// oxlint-disable-next-line node-test/no-conditional-assertion
 				assert.deepEqual(
+					// Observe the current fixture receipt before deciding whether the next poll or state transition may proceed.
+					// oxlint-disable-next-line no-await-in-loop
 					(await readInvocationLog(log)).map((call) => extractUpstreamCommandTokens(call.args)),
 					[
 						["get", "url"],
-						["confirm", args.at(-1)!],
+						["confirm", readString(args.at(-1))],
 					],
 				);
 			}
 			await writeFile(log, "");
 			const dom = await executeRegisteredTool(harness.tool, harness.ctx, actions[0].params);
-			assert.equal(dom.isError, false, dom.content[0]?.text);
-			assert.equal((dom.details?.readConfirmation as { state: string }).state, "cleared");
+			assert.equal(dom.isError, false, dom.content[0].text);
+			assert.equal(readRecord(dom.details?.readConfirmation).state, "cleared");
 			assert.deepEqual(
 				(await readInvocationLog(log)).map((call) => extractUpstreamCommandTokens(call.args)),
 				[
@@ -515,7 +537,7 @@ test(
 				],
 			);
 			assert.equal(
-				(dom.details?.sessionTabTarget as { url: string }).url,
+				readRecord(dom.details?.sessionTabTarget).url,
 				"https://clicked.test/",
 				"completed native click reconciles its resulting target before follow-ups",
 			);
@@ -530,13 +552,13 @@ for (const batch of [false, true]) {
 		async () => {
 			await withConfirmations(async ({ harness }) => {
 				const prefix = ["--session", "shared"];
-				const decide = async (args: string[]) => {
+				const decide = async (args: readonly string[]) => {
 					const pending = await executeRegisteredTool(harness.tool, harness.ctx, {
 						args: [...prefix, ...args],
 					});
 					assert.equal(pending.details?.failureCategory, "confirmation-required");
 					assert.doesNotMatch(
-						pending.content[0]?.text ?? "",
+						pending.content[0].text ?? "",
 						/Native helper|if dispatched/,
 						"the requested action itself awaits confirmation",
 					);
@@ -552,14 +574,14 @@ for (const batch of [false, true]) {
 					);
 				};
 				const failed = await decide(["eval", "throw fixture"]);
-				assert.equal(failed.isError, true, failed.content[0]?.text);
-				assert.match(failed.content[0]?.text ?? "", /HTTP read failed: test response 500/);
-				assert.equal((failed.details?.readConfirmation as { state: string }).state, "cleared");
+				assert.equal(failed.isError, true, failed.content[0].text);
+				assert.match(failed.content[0].text ?? "", /HTTP read failed: test response 500/);
+				assert.equal(readRecord(failed.details?.readConfirmation).state, "cleared");
 				const newTab = await decide(["tab", "new"]);
-				assert.equal(newTab.isError, false, newTab.content[0]?.text);
-				assert.equal((newTab.details?.sessionTabTarget as { url: string }).url, "about:blank");
+				assert.equal(newTab.isError, false, newTab.content[0].text);
+				assert.equal(readRecord(newTab.details?.sessionTabTarget).url, "about:blank");
 				const closed = await decide(["close"]);
-				assert.equal(closed.isError, false, closed.content[0]?.text);
+				assert.equal(closed.isError, false, closed.content[0].text);
 				assert.equal(closed.details?.sessionTabTarget, undefined);
 				assert.equal(
 					SessionPageState.fromBranch(
@@ -596,61 +618,73 @@ for (const after of [
 					args: [...prefix, "confirm", "snapshot-id"],
 				});
 				assert.equal(first.isError, false);
-				branch.push(createToolBranchEntry({ details: first.details!, isError: first.isError }));
+				branch.push(
+					createToolBranchEntry({ details: readRecord(first.details), isError: first.isError }),
+				);
 				await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: [...prefix, "snapshot", "-i"],
 				});
 				if (after === "failed-snapshot") {
-					const native = JSON.parse(await readFile(state, "utf8"));
-					native.pending.failure = "no-active-page";
+					const native = readRecord(JSON.parse(await readFile(state, "utf8")));
+					readRecord(native.pending).failure = "no-active-page";
 					await writeFile(state, JSON.stringify(native));
 				}
-				const later =
-					after === "failed-row"
-						? [["confirm", "missing"]]
-						: after === "pending"
-							? [["snapshot", "-i"]]
-							: after === "invalidation"
-								? [["webmcp", "invoke", "pending"]]
-								: after === "capture"
-									? [
-											["snapshot", "-i"],
-											["confirm", "snapshot-id"],
-										]
-									: [];
+				const laterRows: Readonly<Record<string, string[][]>> = {
+					"failed-row": [["confirm", "missing"]],
+					pending: [["snapshot", "-i"]],
+					invalidation: [["webmcp", "invoke", "pending"]],
+					capture: [
+						["snapshot", "-i"],
+						["confirm", "snapshot-id"],
+					],
+				};
+				const later = laterRows[after] ?? [];
 				const batch = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: [...prefix, "batch"],
 					stdin: JSON.stringify([["confirm", "snapshot-id"], ...later]),
 				});
-				branch.push(createToolBranchEntry({ details: batch.details!, isError: batch.isError }));
+				branch.push(
+					createToolBranchEntry({ details: readRecord(batch.details), isError: batch.isError }),
+				);
 				const replay = SessionPageState.fromBranch(convertBrowserEntries(branch)).get("shared");
 				const invalidated = after === "invalidation" || after === "failed-snapshot";
 				const current = after === "capture" ? "e3" : "e2";
 				if (invalidated) {
+					// This enumerated fixture branch (invalidated) has variant-specific assertions; common assertions cover every case.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
 					assert.equal(replay.refSnapshot, undefined);
+					// This enumerated fixture branch (invalidated) has variant-specific assertions; common assertions cover every case.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
 					assert.equal(
 						replay.refSnapshotInvalidation?.reason,
 						after === "failed-snapshot" ? "no-active-page" : "page-transition",
 					);
-				} else assert.deepEqual(replay.refSnapshot?.refIds, [current]);
+				} else {
+					// This enumerated fixture branch (invalidated) has variant-specific assertions; common assertions cover every case.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
+					assert.deepEqual(replay.refSnapshot?.refIds, [current]);
+				}
 				await writeFile(log, "");
 				const getter = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: [...prefix, "get", "text", `@${current}`],
 				});
 				const fresh = after === "none" || after === "capture";
-				assert.equal(getter.isError, !fresh, getter.content[0]?.text);
+				assert.equal(getter.isError, !fresh, getter.content[0].text);
 				assert.equal(
 					(await readInvocationLog(log)).some(
 						(call) => extractUpstreamCommandTokens(call.args).join(" ") === `get text @${current}`,
 					),
 					fresh,
 				);
-				if (!invalidated && !fresh)
+				if (!invalidated && !fresh) {
+					// This enumerated fixture branch (!invalidated && !fresh) has variant-specific assertions; common assertions cover every case.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
 					assert.equal(
 						getter.details?.failureCategory,
 						"confirmation-required",
 						"later rows retire one-use freshness, not the completed snapshot's membership",
 					);
+				}
 			});
 		},
 	);
@@ -687,7 +721,8 @@ for (const action of [
 		`semantic ${action.action}/${action.locator} uses a confirmed capture once across resume`,
 		{ concurrency: false },
 		async () => {
-			await withConfirmations(async ({ root, state, log, harness }) => {
+			await withConfirmations(async ({ root, state, log, harness: initialHarness }) => {
+				let harness = initialHarness;
 				await writeFile(
 					state,
 					JSON.stringify({
@@ -715,16 +750,15 @@ for (const action of [
 				);
 				const { expected, ...params } = action;
 				const request = { ...params, session: "shared" };
-				const pending = await executeRegisteredTool(
-					harness.getTool("agent_browser_action")!,
-					harness.ctx,
-					request,
-				);
+				const initialActionTool = harness.getTool("agent_browser_action");
+				assert.ok(initialActionTool);
+				const pending = await executeRegisteredTool(initialActionTool, harness.ctx, request);
 				assert.equal(pending.details?.failureCategory, "confirmation-required");
-				assert.match(pending.content[0]?.text ?? "", /requested command was not dispatched/);
-				const approval = (
-					pending.details?.nextActions as Array<{ id: string; params: { args: string[] } }>
-				).find((row) => row.id === "approve-confirmation")!;
+				assert.match(pending.content[0].text ?? "", /requested command was not dispatched/);
+				const approval = readArray(pending.details.nextActions)
+					.map(readRecord)
+					.find((row) => row.id === "approve-confirmation");
+				assert.ok(approval);
 				assert.equal(
 					(await executeRegisteredTool(harness.tool, harness.ctx, approval.params)).isError,
 					false,
@@ -740,13 +774,11 @@ for (const action of [
 					harness.ctx,
 				);
 				await writeFile(log, "");
-				const result = await executeRegisteredTool(
-					harness.getTool("agent_browser_action")!,
-					harness.ctx,
-					request,
-				);
-				assert.equal(result.isError, false, result.content[0]?.text);
-				assert.deepEqual(JSON.parse(await readFile(state, "utf8")).actions, [expected]);
+				const resumedActionTool = harness.getTool("agent_browser_action");
+				assert.ok(resumedActionTool);
+				const result = await executeRegisteredTool(resumedActionTool, harness.ctx, request);
+				assert.equal(result.isError, false, result.content[0].text);
+				assert.deepEqual(readRecord(JSON.parse(await readFile(state, "utf8"))).actions, [expected]);
 				assert.equal(
 					(await readInvocationLog(log)).some(
 						(call) => extractUpstreamCommandTokens(call.args)[0] === "snapshot",
@@ -754,37 +786,35 @@ for (const action of [
 					false,
 					"reuse must not acquire another gated snapshot",
 				);
-				const second = await executeRegisteredTool(
-					harness.getTool("agent_browser_action")!,
-					harness.ctx,
-					request,
-				);
+				const nextActionTool = harness.getTool("agent_browser_action");
+				assert.ok(nextActionTool);
+				const second = await executeRegisteredTool(nextActionTool, harness.ctx, request);
 				assert.equal(
 					second.details?.failureCategory,
 					"confirmation-required",
 					"the next operation must acquire its own sample",
 				);
-				assert.deepEqual(JSON.parse(await readFile(state, "utf8")).actions, [expected]);
+				assert.deepEqual(readRecord(JSON.parse(await readFile(state, "utf8"))).actions, [expected]);
 			});
 		},
 	);
 }
 
 for (const owned of [false, true]) {
-	for (const route of ["path", "hash"])
-		for (const semantic of [false, true])
-			for (const drift of [false, true])
+	for (const route of ["path", "hash"]) {
+		for (const semantic of [false, true]) {
+			for (const drift of [false, true]) {
 				test(
 					`warm confirmed capture checks the live page without resume (owned=${owned}, route=${route}, semantic=${semantic}, drift=${drift})`,
 					{ concurrency: false },
 					async () => {
+						const url =
+							route === "hash"
+								? "https://current.test/#/contract"
+								: "https://current.test/contract";
+						const movedUrl =
+							route === "hash" ? "https://current.test/#/other" : "https://current.test/other";
 						await withConfirmations(async ({ state, log, harness }) => {
-							const url =
-								route === "hash"
-									? "https://current.test/#/contract"
-									: "https://current.test/contract";
-							const movedUrl =
-								route === "hash" ? "https://current.test/#/other" : "https://current.test/other";
 							await writeFile(
 								state,
 								JSON.stringify({
@@ -805,15 +835,21 @@ for (const owned of [false, true]) {
 								],
 								...(owned ? { sessionMode: "fresh" as const } : {}),
 							});
-							assert.equal(opened.isError, false, opened.content[0]?.text);
-							if (owned)
+							assert.equal(opened.isError, false, opened.content[0].text);
+							if (owned) {
+								// This enumerated fixture branch (owned) has variant-specific assertions; common assertions cover every case.
+								// oxlint-disable-next-line node-test/no-conditional-assertion
 								assert.equal(
-									(opened.details?.managedSessionOutcome as { status: string })?.status,
+									readRecord(opened.details?.managedSessionOutcome).status,
 									"created",
 									"fresh launch establishes real wrapper ownership through the ordinary daemon/policy path",
 								);
-							else assert.equal(opened.details?.usedImplicitSession, false);
-							const session = opened.details?.sessionName as string;
+							} else {
+								// This enumerated fixture branch (owned) has variant-specific assertions; common assertions cover every case.
+								// oxlint-disable-next-line node-test/no-conditional-assertion
+								assert.equal(opened.details?.usedImplicitSession, false);
+							}
+							const session = readString(opened.details?.sessionName);
 							const prefix = ["--session", session];
 							await executeRegisteredTool(harness.tool, harness.ctx, {
 								args: [...prefix, "snapshot", "-i"],
@@ -827,14 +863,17 @@ for (const owned of [false, true]) {
 								false,
 							);
 							if (drift) {
-								const native = JSON.parse(await readFile(state, "utf8"));
+								const native = readRecord(JSON.parse(await readFile(state, "utf8")));
 								native.url = movedUrl;
-								native.semanticSnapshot.refs.e8.name = "Renamed";
+								readRecord(readRecord(readRecord(native.semanticSnapshot).refs).e8).name =
+									"Renamed";
 								await writeFile(state, JSON.stringify(native));
 							}
 							await writeFile(log, "");
+							const actionTool = harness.getTool("agent_browser_action");
+							assert.ok(actionTool);
 							const result = await executeRegisteredTool(
-								semantic ? harness.getTool("agent_browser_action")! : harness.tool,
+								semantic ? actionTool : harness.tool,
 								harness.ctx,
 								semantic
 									? {
@@ -847,11 +886,17 @@ for (const owned of [false, true]) {
 										}
 									: { args: [...prefix, "select", "@e8", "chocolate"] },
 							);
-							assert.equal(result.isError, drift, result.content[0]?.text);
+							assert.equal(result.isError, drift, result.content[0].text);
 							if (drift) {
+								// This enumerated fixture branch (drift) has variant-specific assertions; common assertions cover every case.
+								// oxlint-disable-next-line node-test/no-conditional-assertion
 								assert.equal(result.details?.failureCategory, "stale-ref");
+								// This enumerated fixture branch (drift) has variant-specific assertions; common assertions cover every case.
+								// oxlint-disable-next-line node-test/no-conditional-assertion
 								assert.ok(
-									result.content[0]?.text?.includes(`current session target is ${movedUrl}`),
+									readString(result.content[0].text).includes(
+										`current session target is ${movedUrl}`,
+									),
 								);
 							}
 							const calls = (await readInvocationLog(log)).map((call) =>
@@ -868,16 +913,19 @@ for (const owned of [false, true]) {
 								"one-use freshness must not acquire another gated capture",
 							);
 							assert.deepEqual(
-								JSON.parse(await readFile(state, "utf8")).actions ?? [],
+								readRecord(JSON.parse(await readFile(state, "utf8"))).actions ?? [],
 								drift ? [] : [["select", "@e8", "chocolate"]],
 							);
 						});
 					},
 				);
+			}
+		}
+	}
 }
 
 for (const batch of [false, true]) {
-	for (const command of ["confirm", "deny"])
+	for (const command of ["confirm", "deny"]) {
 		test(
 			`transport tab continuation preserves the exact ${command} (batch=${batch})`,
 			{ concurrency: false },
@@ -900,40 +948,43 @@ for (const batch of [false, true]) {
 							: { args: [...prefix, ...row] },
 					);
 					assert.equal(pending.details?.failureCategory, "confirmation-required");
-					assert.equal(
-						(pending.details?.readConfirmation as { action?: string })?.action,
-						"tab_new",
-					);
+					assert.equal(readRecord(pending.details.readConfirmation).action, "tab_new");
 					assert.ok(
-						pending.content[0]?.text?.includes(metadata.guidance),
+						readString(pending.content[0].text).includes(metadata.guidance),
 						"conditional transport guidance stays model-visible",
 					);
-					const native = JSON.parse(await readFile(state, "utf8"));
+					const native = readRecord(JSON.parse(await readFile(state, "utf8")));
 					await writeFile(state, JSON.stringify({ ...native, gateNextUrl: true }));
 					await writeFile(log, "");
-					const action = (
-						pending.details?.nextActions as Array<{ id: string; params: { args: string[] } }>
-					).find(
-						(row) =>
-							row.id === (command === "confirm" ? "approve-confirmation" : "deny-confirmation"),
-					)!;
+					const action = readArray(pending.details.nextActions)
+						.map(readRecord)
+						.find(
+							(candidate) =>
+								candidate.id ===
+								(command === "confirm" ? "approve-confirmation" : "deny-confirmation"),
+						);
+					assert.ok(action);
 					const settled = await executeRegisteredTool(harness.tool, harness.ctx, action.params);
-					assert.equal(settled.isError, command === "confirm", settled.content[0]?.text);
-					const data = settled.details?.data as {
-						action: string;
-						confirmed?: boolean;
-						result?: { success: boolean };
-					};
+					assert.equal(settled.isError, command === "confirm", settled.content[0].text);
+					const data = readRecord(settled.details?.data);
 					assert.equal(data.action, "tab_new");
 					if (command === "confirm") {
+						// This enumerated fixture branch (command === "confirm") has variant-specific assertions; common assertions cover every case.
+						// oxlint-disable-next-line node-test/no-conditional-assertion
 						assert.equal(data.confirmed, true);
+						// This enumerated fixture branch (command === "confirm") has variant-specific assertions; common assertions cover every case.
+						// oxlint-disable-next-line node-test/no-conditional-assertion
 						assert.equal(
-							data.result?.success,
+							readRecord(data.result).success,
 							true,
 							"the original tab decision completed before the separately gated post-action URL helper",
 						);
+						// This enumerated fixture branch (command === "confirm") has variant-specific assertions; common assertions cover every case.
+						// oxlint-disable-next-line node-test/no-conditional-assertion
 						assert.equal(settled.details?.failureCategory, "confirmation-required");
-						assert.equal((settled.details?.readConfirmation as { action: string }).action, "url");
+						// This enumerated fixture branch (command === "confirm") has variant-specific assertions; common assertions cover every case.
+						// oxlint-disable-next-line node-test/no-conditional-assertion
+						assert.equal(readRecord(settled.details.readConfirmation).action, "url");
 					}
 					const calls = (await readInvocationLog(log)).map((call) =>
 						extractUpstreamCommandTokens(call.args),
@@ -949,12 +1000,13 @@ for (const batch of [false, true]) {
 						"transport continuation is never automatically executed",
 					);
 					assert.equal(
-						JSON.parse(await readFile(state, "utf8")).url,
+						readRecord(JSON.parse(await readFile(state, "utf8"))).url,
 						command === "confirm" ? "about:blank" : undefined,
 					);
 				});
 			},
 		);
+	}
 }
 
 for (const metadata of [
@@ -1019,9 +1071,13 @@ test(
 				["eval", "transport-page"],
 				["read", "public.test/body"],
 			]) {
+				// This step consumes or replaces the shared native pending slot; later commands depend on its completion.
+				// oxlint-disable-next-line no-await-in-loop
 				const page = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: ["--session", "shared", ...args],
 				});
+				// The nonempty args fixture matrix exhaustively verifies each case; any failed assertion fails the test.
+				// oxlint-disable-next-line node-test/no-conditional-assertion
 				assert.equal(page.details?.readConfirmation, undefined);
 			}
 			await writeFile(log, "");
@@ -1041,7 +1097,8 @@ for (const mode of ["absent", "ambiguous", "drift", "intervening"] as const) {
 		`confirmed semantic select retains its guards (${mode})`,
 		{ concurrency: false },
 		async () => {
-			await withConfirmations(async ({ root, state, log, harness }) => {
+			await withConfirmations(async ({ root, state, log, harness: initialHarness }) => {
+				let harness = initialHarness;
 				const refs =
 					mode === "absent"
 						? { e5: { role: "button", name: "Save" } }
@@ -1080,33 +1137,42 @@ for (const mode of ["absent", "ambiguous", "drift", "intervening"] as const) {
 					{ reason: "resume" },
 					harness.ctx,
 				);
-				if (mode === "intervening")
+				if (mode === "intervening") {
 					await executeRegisteredTool(harness.tool, harness.ctx, {
 						args: [...prefix, "get", "title"],
 					});
+				}
 				if (mode === "drift") {
-					const native = JSON.parse(await readFile(state, "utf8"));
+					const native = readRecord(JSON.parse(await readFile(state, "utf8")));
 					await writeFile(state, JSON.stringify({ ...native, url: "https://external.test/" }));
 				}
 				await writeFile(log, "");
-				const result = await executeRegisteredTool(
-					harness.getTool("agent_browser_action")!,
-					harness.ctx,
-					{
-						action: "select",
-						locator: "role",
-						role: "combobox",
-						name: "Flavor",
-						value: "chocolate",
-						session: "shared",
-					},
-				);
+				const actionTool = harness.getTool("agent_browser_action");
+				assert.ok(actionTool);
+				const result = await executeRegisteredTool(actionTool, harness.ctx, {
+					action: "select",
+					locator: "role",
+					role: "combobox",
+					name: "Flavor",
+					value: "chocolate",
+					session: "shared",
+				});
 				assert.equal(result.isError, true);
-				if (mode === "absent" || mode === "ambiguous")
-					assert.match(String(result.details?.validationError), /exactly one current visible/);
-				if (mode === "drift") assert.equal(result.details?.failureCategory, "tab-drift");
-				if (mode === "intervening")
+				if (mode === "absent" || mode === "ambiguous") {
+					// This enumerated fixture branch (mode === "absent" || mode === "ambiguous") has variant-specific assertions; common assertions cover every case.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
+					assert.match(readString(result.details?.validationError), /exactly one current visible/);
+				}
+				if (mode === "drift") {
+					// This enumerated fixture branch (mode === "drift") has variant-specific assertions; common assertions cover every case.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
+					assert.equal(result.details?.failureCategory, "tab-drift");
+				}
+				if (mode === "intervening") {
+					// This enumerated fixture branch (mode === "intervening") has variant-specific assertions; common assertions cover every case.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
 					assert.equal(result.details?.failureCategory, "confirmation-required");
+				}
 				assert.equal(
 					(await readInvocationLog(log)).some((call) =>
 						["select", "find"].includes(extractUpstreamCommandTokens(call.args)[0]),
@@ -1127,12 +1193,15 @@ test(
 				args: ["--namespace", "team", "--session", "shared", "--json", "snapshot", "-i"],
 			});
 			assert.equal(result.details?.failureCategory, "confirmation-required");
-			assert.equal(JSON.parse(result.content[0]?.text ?? "").data.confirmation_required, true);
-			assert.doesNotMatch(result.content[0]?.text ?? "", /no interactive elements|Refs: 0/);
+			assert.equal(
+				readRecord(readRecord(JSON.parse(result.content[0].text ?? "")).data).confirmation_required,
+				true,
+			);
+			assert.doesNotMatch(result.content[0].text ?? "", /no interactive elements|Refs: 0/);
 			assert.deepEqual(
-				(result.details?.nextActions as Array<{ params: { args: string[] } }>).map(
-					(row) => row.params.args,
-				),
+				readArray(result.details.nextActions)
+					.map(readRecord)
+					.map((row) => readRecord(row.params).args),
 				[
 					["--namespace", "team", "--session", "shared", "confirm", "snapshot-id"],
 					["--namespace", "team", "--session", "shared", "deny", "snapshot-id"],
@@ -1153,7 +1222,9 @@ for (const mode of [
 	"nested",
 ] as const) {
 	test(`confirmed capture is one-use across resume (${mode})`, { concurrency: false }, async () => {
-		await withConfirmations(async ({ root, state, log, harness }) => {
+		const unresolved = mode === "deny" || mode === "nested";
+		await withConfirmations(async ({ root, state, log, harness: initialHarness }) => {
+			let harness = initialHarness;
 			const prefix = ["--session", "shared"];
 			await executeRegisteredTool(harness.tool, harness.ctx, {
 				args: [...prefix, "--confirm-actions", "snapshot", "open", "https://current.test/"],
@@ -1162,44 +1233,54 @@ for (const mode of [
 				args: [...prefix, "snapshot", "-i"],
 			});
 			if (mode === "nested") {
-				const native = JSON.parse(await readFile(state, "utf8"));
-				native.pending.nested = true;
+				const native = readRecord(JSON.parse(await readFile(state, "utf8")));
+				readRecord(native.pending).nested = true;
 				await writeFile(state, JSON.stringify(native));
 			}
 			const confirmed = await executeRegisteredTool(harness.tool, harness.ctx, {
 				args: [...prefix, mode === "deny" ? "deny" : "confirm", "snapshot-id"],
 			});
-			assert.equal(confirmed.isError, mode === "nested", confirmed.content[0]?.text);
+			assert.equal(confirmed.isError, mode === "nested", confirmed.content[0].text);
 			const branch = structuredClone(harness.ctx.sessionManager.getBranch());
 			harness = createExtensionHarness({ cwd: root, branch });
 			await runExtensionEvent(harness.handlers, "session_start", { reason: "resume" }, harness.ctx);
-			if (mode === "intervening")
+			if (mode === "intervening") {
 				await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: [...prefix, "get", "title"],
 				});
+			}
 			if (mode === "drift") {
-				const native = JSON.parse(await readFile(state, "utf8"));
+				const native = readRecord(JSON.parse(await readFile(state, "utf8")));
 				native.url = "https://external.test/";
 				await writeFile(state, JSON.stringify(native));
 			}
 			await writeFile(log, "");
 			const getterArgs = ["get", "text", mode === "absent" ? "@e99" : "@e1"];
-			const code = harness.getTool("agent_browser_code")!;
+			const codeTool = harness.getTool("agent_browser_code");
+			assert.ok(codeTool);
+			const code = codeTool;
+			const getterRequests: Readonly<Record<string, unknown>> = {
+				code: {
+					session: "shared",
+					code: `emit((await browser({args:${JSON.stringify(getterArgs)}})).success);`,
+				},
+				batch: { args: [...prefix, "batch", "--bail"], stdin: JSON.stringify([getterArgs]) },
+			};
 			const getter = await executeRegisteredTool(
 				mode === "code" ? code : harness.tool,
 				harness.ctx,
-				mode === "code"
-					? {
-							session: "shared",
-							code: `emit((await browser({args:${JSON.stringify(getterArgs)}})).success);`,
-						}
-					: mode === "batch"
-						? { args: [...prefix, "batch", "--bail"], stdin: JSON.stringify([getterArgs]) }
-						: { args: [...prefix, ...getterArgs] },
+				getterRequests[mode] ?? { args: [...prefix, ...getterArgs] },
 			);
 			const fresh = ["direct", "batch", "code"].includes(mode);
-			if (mode === "code") assert.equal(getter.details?.data, true, getter.content[0]?.text);
-			else assert.equal(getter.isError, !fresh, getter.content[0]?.text);
+			if (mode === "code") {
+				// This enumerated fixture branch (mode === "code") has variant-specific assertions; common assertions cover every case.
+				// oxlint-disable-next-line node-test/no-conditional-assertion
+				assert.equal(getter.details?.data, true, getter.content[0].text);
+			} else {
+				// This enumerated fixture branch (mode === "code") has variant-specific assertions; common assertions cover every case.
+				// oxlint-disable-next-line node-test/no-conditional-assertion
+				assert.equal(getter.isError, !fresh, getter.content[0].text);
+			}
 			const commands = (await readInvocationLog(log)).map((call) =>
 				extractUpstreamCommandTokens(call.args),
 			);
@@ -1209,16 +1290,18 @@ for (const mode of [
 				"only an eligible next call can reuse the approved capture",
 			);
 			if (!fresh) {
+				// This enumerated fixture branch (!fresh) has variant-specific assertions; common assertions cover every case.
+				// oxlint-disable-next-line node-test/no-conditional-assertion
 				assert.equal(
 					commands.some((tokens) => tokens.join(" ") === getterArgs.join(" ")),
-					mode === "deny" || mode === "nested",
+					unresolved,
 					"without a completed capture, native still owns ref resolution; unconfirmed results must not grant freshness",
 				);
-				if (mode === "deny" || mode === "nested")
-					assert.equal(
-						(confirmed.details?.readConfirmation as { refSnapshotFresh?: true })?.refSnapshotFresh,
-						undefined,
-					);
+				if (unresolved) {
+					// This enumerated fixture branch (unresolved) has variant-specific assertions; common assertions cover every case.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
+					assert.equal(readRecord(confirmed.details?.readConfirmation).refSnapshotFresh, undefined);
+				}
 				return;
 			}
 			const consumedBranch = structuredClone(harness.ctx.sessionManager.getBranch());
@@ -1231,25 +1314,25 @@ for (const mode of [
 			assert.equal(
 				second.details?.failureCategory,
 				"confirmation-required",
-				second.content[0]?.text,
+				second.content[0].text,
 			);
-			assert.equal(second.details?.agentBrowserStarted, false);
+			assert.equal(second.details.agentBrowserStarted, false);
 			assert.equal(
 				(await readInvocationLog(log)).some(
 					(call) => extractUpstreamCommandTokens(call.args).join(" ") === getterArgs.join(" "),
 				),
 				false,
 			);
-			const approve = (
-				second.details?.nextActions as Array<{ id: string; params: { args: string[] } }>
-			).find((action) => action.id === "approve-confirmation");
+			const approve = readArray(second.details.nextActions)
+				.map(readRecord)
+				.find((action) => action.id === "approve-confirmation");
 			assert.ok(approve);
 			const helper = await executeRegisteredTool(harness.tool, harness.ctx, approve.params);
-			assert.equal(helper.isError, false, helper.content[0]?.text);
+			assert.equal(helper.isError, false, helper.content[0].text);
 			const third = await executeRegisteredTool(harness.tool, harness.ctx, {
 				args: [...prefix, "get", "text", "@e2"],
 			});
-			assert.equal(third.isError, false, third.content[0]?.text);
+			assert.equal(third.isError, false, third.content[0].text);
 		});
 	});
 }
@@ -1265,10 +1348,14 @@ test(
 				["get", "url"],
 				["click", "#guarded"],
 			]) {
+				// This step consumes or replaces the shared native pending slot; later commands depend on its completion.
+				// oxlint-disable-next-line no-await-in-loop
 				const result = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: [...prefix, ...args],
 				});
-				branch.push(createToolBranchEntry({ details: result.details!, isError: result.isError }));
+				branch.push(
+					createToolBranchEntry({ details: readRecord(result.details), isError: result.isError }),
+				);
 			}
 			const resumed = createExtensionHarness({ cwd: root, branch });
 			await runExtensionEvent(resumed.handlers, "session_start", { reason: "resume" }, resumed.ctx);
@@ -1280,16 +1367,13 @@ test(
 					["get", "title"],
 				]),
 			});
-			assert.equal(confirmed.isError, false, confirmed.content[0]?.text);
-			assert.equal(
-				(confirmed.details?.sessionTabTarget as { url: string }).url,
-				"https://clicked.test/",
-			);
-			assert.equal((confirmed.details?.batchSteps as unknown[]).length, 3);
+			assert.equal(confirmed.isError, false, confirmed.content[0].text);
+			assert.equal(readRecord(confirmed.details?.sessionTabTarget).url, "https://clicked.test/");
+			assert.equal(readArray(confirmed.details?.batchSteps).length, 3);
 			const title = await executeRegisteredTool(resumed.tool, resumed.ctx, {
 				args: [...prefix, "get", "title"],
 			});
-			assert.equal(title.isError, false, title.content[0]?.text);
+			assert.equal(title.isError, false, title.content[0].text);
 		});
 	},
 );
@@ -1304,9 +1388,9 @@ test(
 				args: ["--session", "shared", "get", "title"],
 			});
 			assert.equal(result.details?.failureCategory, "confirmation-required");
-			assert.equal(result.details?.agentBrowserStarted, false);
+			assert.equal(result.details.agentBrowserStarted, false);
 			assert.match(
-				result.content[0]?.text ?? "",
+				result.content[0].text ?? "",
 				/Native helper get requires confirmation \(url\).*requested command was not dispatched/,
 			);
 			assert.deepEqual(
@@ -1327,10 +1411,10 @@ test(
 				stdin: JSON.stringify([["click", "#dispatched"]]),
 			});
 			assert.equal(result.details?.failureCategory, "confirmation-required");
-			assert.equal(result.details?.agentBrowserStarted, true);
-			assert.equal((result.details?.readConfirmation as { command: string }).command, "get");
-			assert.match(result.content[0]?.text ?? "", /Native helper get requires confirmation/);
-			assert.deepEqual((result.details?.data as Array<{ command: string[] }>)[0].command, [
+			assert.equal(result.details.agentBrowserStarted, true);
+			assert.equal(readRecord(result.details.readConfirmation).command, "get");
+			assert.match(result.content[0].text ?? "", /Native helper get requires confirmation/);
+			assert.deepEqual(readArray(result.details.data).map(readRecord)[0].command, [
 				"click",
 				"#dispatched",
 			]);
@@ -1359,27 +1443,41 @@ test(
 				},
 				{ session: "shared", rows: [["confirm", "dom-id"]], raw: "get title", suppress: false },
 			]) {
+				// This step consumes or replaces the shared native pending slot; later commands depend on its completion.
+				// oxlint-disable-next-line no-await-in-loop
 				await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: [...prefix, "click", "#guarded"],
 				});
+				// This step consumes or replaces the shared native pending slot; later commands depend on its completion.
+				// oxlint-disable-next-line no-await-in-loop
 				await writeFile(log, "");
+				// This step consumes or replaces the shared native pending slot; later commands depend on its completion.
+				// oxlint-disable-next-line no-await-in-loop
 				await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: [
 						"--session",
 						control.session,
 						"batch",
 						"--bail",
-						...(control.raw ? [control.raw] : []),
+						...(control.raw !== undefined && control.raw.length > 0 ? [control.raw] : []),
 					],
 					stdin: JSON.stringify(control.rows),
 				});
+				// Observe the current fixture receipt before deciding whether the next poll or state transition may proceed.
+				// oxlint-disable-next-line no-await-in-loop
 				const commands = (await readInvocationLog(log)).map((call) =>
 					extractUpstreamCommandTokens(call.args),
 				);
+				// The nonempty control fixture matrix exhaustively verifies each case; any failed assertion fails the test.
+				// oxlint-disable-next-line node-test/no-conditional-assertion
 				assert.equal(commands[0][0] === "batch", control.suppress, JSON.stringify(control));
-				if (control.raw) {
+				if (control.raw !== undefined && control.raw.length > 0) {
+					// This enumerated fixture branch (control.raw !== undefined && control.raw.length > 0) has variant-specific assertions; common assertions cover every case.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
 					assert.equal(
-						JSON.parse(await readFile(state, "utf8")).pending.id,
+						// This step consumes or replaces the shared native pending slot; later commands depend on its completion.
+						// oxlint-disable-next-line no-await-in-loop
+						readRecord(readRecord(JSON.parse(await readFile(state, "utf8"))).pending).id,
 						"dom-id",
 						"ignored stdin cannot settle the pending action",
 					);
@@ -1398,7 +1496,7 @@ test(
 				]),
 			});
 			assert.equal(blocked.isError, true);
-			assert.match(String(blocked.details?.validationError), /unverified|unknown|verified/i);
+			assert.match(readString(blocked.details?.validationError), /unverified|unknown|verified/i);
 			assert.deepEqual(
 				await readInvocationLog(log),
 				[],
@@ -1409,35 +1507,43 @@ test(
 );
 
 for (const mode of ["direct", "batch", "code", "code-batch"] as const) {
-	for (const failedClose of [false, true])
+	for (const failedClose of [false, true]) {
 		test(
 			`confirmed close retires attachment on live and replay paths (${mode}, failed=${failedClose})`,
 			{ concurrency: false },
 			async () => {
+				const expectedAttachment = failedClose ? true : undefined;
 				await withConfirmations(async ({ root, state, branch, harness }) => {
 					const prefix = ["--session", "shared"];
 					await executeRegisteredTool(harness.tool, harness.ctx, {
 						args: [...prefix, "connect", "9222"],
 					});
 					for (const args of [["--confirm-actions", "close", "get", "url"], ["close"]]) {
+						// This step consumes or replaces the shared native pending slot; later commands depend on its completion.
+						// oxlint-disable-next-line no-await-in-loop
 						const result = await executeRegisteredTool(harness.tool, harness.ctx, {
 							args: [...prefix, ...args],
 						});
 						branch.push(
-							createToolBranchEntry({ details: result.details!, isError: result.isError }),
+							createToolBranchEntry({
+								details: readRecord(result.details),
+								isError: result.isError,
+							}),
 						);
 					}
 					if (failedClose) {
-						const native = JSON.parse(await readFile(state, "utf8"));
-						native.pending.failure = true;
+						const native = readRecord(JSON.parse(await readFile(state, "utf8")));
+						readRecord(native.pending).failure = true;
 						await writeFile(state, JSON.stringify(native));
 					}
 					const decision = mode.endsWith("batch")
 						? { args: ["batch", "--bail"], stdin: JSON.stringify([["confirm", "dom-id"]]) }
 						: { args: ["confirm", "dom-id"] };
 					const code = mode.startsWith("code");
+					const codeTool = harness.getTool("agent_browser_code");
+					assert.ok(codeTool);
 					const result = await executeRegisteredTool(
-						code ? harness.getTool("agent_browser_code")! : harness.tool,
+						code ? codeTool : harness.tool,
 						harness.ctx,
 						code
 							? {
@@ -1446,8 +1552,12 @@ for (const mode of ["direct", "batch", "code", "code-batch"] as const) {
 								}
 							: { ...decision, args: [...prefix, ...decision.args] },
 					);
-					assert.equal(result.isError, code ? false : failedClose, result.content[0]?.text);
-					if (code) assert.equal(result.details?.data, !failedClose);
+					assert.equal(result.isError, code ? false : failedClose, result.content[0].text);
+					if (code) {
+						// This enumerated fixture branch (code) has variant-specific assertions; common assertions cover every case.
+						// oxlint-disable-next-line node-test/no-conditional-assertion
+						assert.equal(result.details?.data, !failedClose);
+					}
 					const page = SessionPageState.fromBranch(
 						convertBrowserEntries(harness.ctx.sessionManager.getBranch()),
 					).get("shared");
@@ -1462,8 +1572,8 @@ for (const mode of ["direct", "batch", "code", "code-batch"] as const) {
 					const live = await executeRegisteredTool(harness.tool, harness.ctx, {
 						args: [...prefix, "get", "title"],
 					});
-					assert.equal(live.isError, false, live.content[0]?.text);
-					assert.equal(live.details?.attachedBrowserSession, failedClose ? true : undefined);
+					assert.equal(live.isError, false, live.content[0].text);
+					assert.equal(live.details?.attachedBrowserSession, expectedAttachment);
 					const resumed = createExtensionHarness({
 						cwd: root,
 						branch: structuredClone(harness.ctx.sessionManager.getBranch()),
@@ -1477,13 +1587,14 @@ for (const mode of ["direct", "batch", "code", "code-batch"] as const) {
 					const restored = await executeRegisteredTool(resumed.tool, resumed.ctx, {
 						args: [...prefix, "get", "title"],
 					});
-					assert.equal(restored.isError, false, restored.content[0]?.text);
+					assert.equal(restored.isError, false, restored.content[0].text);
 					assert.equal(
 						restored.details?.attachedBrowserSession,
-						failedClose ? true : undefined,
+						expectedAttachment,
 						"confirmed-close retirement must survive compact direct/code/batch replay; failed close must retain attachment",
 					);
 				});
 			},
 		);
+	}
 }

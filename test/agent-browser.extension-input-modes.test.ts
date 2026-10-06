@@ -7,6 +7,7 @@
  */
 
 import assert from "node:assert/strict";
+import { readRecord, readString, readArray } from "./helpers/assertions.js";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -33,7 +34,7 @@ import {
 test(
 	"agentBrowserExtension rejects invalid lookup shapes, mixed input modes, and caller stdin before dispatch",
 	{ concurrency: false },
-	async () => {
+	async (t) => {
 		const tempDir = await mkdtemp(join(tmpdir(), "pi-agent-browser-input-modes-invalid-"));
 		const logPath = join(tempDir, "invocations.log");
 		const basePath = process.env.PATH ?? "";
@@ -137,19 +138,29 @@ process.stdout.write(JSON.stringify({ success: true, data: "should not run" }));
 					},
 				];
 				for (const { label, params, message, excludedMessage } of cases) {
-					const result = await executeRegisteredTool(harness.tool, harness.ctx, params);
-					assert.equal(result.isError, true, label);
-					assert.match(result.content[0]?.text ?? "", message, label);
-					if (excludedMessage) {
-						assert.doesNotMatch(result.content[0]?.text ?? "", excludedMessage, label);
-					}
-					assert.equal(result.details?.resultCategory, "failure", label);
-					assert.equal(result.details?.failureCategory, "validation-error", label);
-					assert.deepEqual(
-						await readInvocationLog(logPath),
-						[],
-						`${label}: upstream must not dispatch`,
-					);
+					// Cases share the dispatch log; validate one no-dispatch outcome before advancing.
+					// oxlint-disable-next-line no-await-in-loop
+					await t.test(label, async () => {
+						const result = await executeRegisteredTool(harness.tool, harness.ctx, params);
+						assert.equal(result.isError, true, label);
+						assert.match(readString(readRecord(result.content.at(0)).text), message, label);
+						if (excludedMessage) {
+							// Each fixed failure checks its required message; this variant also forbids misleading copy.
+							// oxlint-disable-next-line node-test/no-conditional-assertion
+							assert.doesNotMatch(
+								readString(readRecord(result.content.at(0)).text),
+								excludedMessage,
+								label,
+							);
+						}
+						assert.equal(readRecord(result.details).resultCategory, "failure", label);
+						assert.equal(readRecord(result.details).failureCategory, "validation-error", label);
+						assert.deepEqual(
+							await readInvocationLog(logPath),
+							[],
+							`${label}: upstream must not dispatch`,
+						);
+					});
 				}
 			});
 		} finally {
@@ -178,12 +189,13 @@ test("analyzeQaPresetTimeout reports unverified expected-text timeouts as QA fai
 	}).compiled;
 	assert.ok(compiled);
 	const analysis = analyzeQaPresetTimeout(compiled);
-	assert.equal(analysis?.passed, false);
-	assert.deepEqual(analysis?.failedChecks, [
+	assert.ok(analysis);
+	assert.equal(analysis.passed, false);
+	assert.deepEqual(analysis.failedChecks, [
 		'expected text was not verified before timeout: "Definitely Not On This Page"',
 	]);
-	assert.deepEqual(analysis?.notRunChecks, []);
-	assert.match(analysis?.summary ?? "", /QA preset failed/);
+	assert.deepEqual(analysis.notRunChecks, []);
+	assert.match(analysis.summary, /QA preset failed/);
 });
 
 test("analyzeQaPresetResults reports missing expected text as QA failure", () => {
@@ -207,11 +219,12 @@ test("analyzeQaPresetResults reports missing expected text as QA failure", () =>
 		],
 		compiled,
 	);
-	assert.equal(analysis?.passed, false);
-	assert.deepEqual(analysis?.failedChecks, [
+	assert.ok(analysis);
+	assert.equal(analysis.passed, false);
+	assert.deepEqual(analysis.failedChecks, [
 		'expected text not found: "Definitely Not On This Page"',
 	]);
-	assert.deepEqual(analysis?.notRunChecks, []);
+	assert.deepEqual(analysis.notRunChecks, []);
 });
 
 test("analyzeQaPresetResults reports checks after a fail-fast open failure as not run", () => {
@@ -231,8 +244,9 @@ test("analyzeQaPresetResults reports checks after a fail-fast open failure as no
 		],
 		compiled,
 	);
-	assert.deepEqual(analysis?.failedChecks, ["open failed"]);
-	assert.deepEqual(analysis?.notRunChecks, [
+	assert.ok(analysis);
+	assert.deepEqual(analysis.failedChecks, ["open failed"]);
+	assert.deepEqual(analysis.notRunChecks, [
 		"load state: domcontentloaded",
 		'expected text: "First expected text"',
 		'expected text: "Second expected text"',
@@ -241,7 +255,7 @@ test("analyzeQaPresetResults reports checks after a fail-fast open failure as no
 		"console diagnostics",
 		"page error diagnostics",
 	]);
-	assert.equal(analysis?.summary, "QA preset failed: open failed.");
+	assert.equal(analysis.summary, "QA preset failed: open failed.");
 });
 
 test("analyzeQaPresetResults distinguishes an executed text assertion from later checks not run", () => {
@@ -271,11 +285,12 @@ test("analyzeQaPresetResults distinguishes an executed text assertion from later
 		],
 		compiled,
 	);
-	assert.deepEqual(analysis?.failedChecks, [
+	assert.ok(analysis);
+	assert.deepEqual(analysis.failedChecks, [
 		"wait failed",
 		'expected text not found: "Missing text"',
 	]);
-	assert.deepEqual(analysis?.notRunChecks, [
+	assert.deepEqual(analysis.notRunChecks, [
 		'expected selector: "main"',
 		"network diagnostics",
 		"console diagnostics",
@@ -294,9 +309,10 @@ test("analyzeQaPresetResults does not infer unreached checks from incomplete suc
 		[{ command: ["network", "requests", "--clear"], success: true, result: { requests: [] } }],
 		compiled,
 	);
-	assert.equal(analysis?.passed, false);
-	assert.deepEqual(analysis?.notRunChecks, []);
-	assert.deepEqual(analysis?.failedChecks, [
+	assert.ok(analysis);
+	assert.equal(analysis.passed, false);
+	assert.deepEqual(analysis.notRunChecks, []);
+	assert.deepEqual(analysis.failedChecks, [
 		"QA execution could not be verified (incomplete batch results)",
 	]);
 });
@@ -349,8 +365,9 @@ test("analyzeQaPresetResults ignores reset-phase diagnostic rows for URL QA", ()
 		],
 		compiled,
 	);
-	assert.equal(analysis?.passed, true);
-	assert.deepEqual(analysis?.failedChecks, []);
+	assert.ok(analysis);
+	assert.equal(analysis.passed, true);
+	assert.deepEqual(analysis.failedChecks, []);
 });
 
 test("analyzeQaPresetResults treats failed reset-phase diagnostic rows as step failures only", () => {
@@ -390,8 +407,9 @@ test("analyzeQaPresetResults treats failed reset-phase diagnostic rows as step f
 		],
 		compiled,
 	);
-	assert.equal(analysis?.passed, false);
-	assert.deepEqual(analysis?.failedChecks, ["network failed", "console failed", "errors failed"]);
+	assert.ok(analysis);
+	assert.equal(analysis.passed, false);
+	assert.deepEqual(analysis.failedChecks, ["network failed", "console failed", "errors failed"]);
 });
 
 test("analyzeQaPresetResults still reports post-open page errors", () => {
@@ -420,8 +438,9 @@ test("analyzeQaPresetResults still reports post-open page errors", () => {
 		],
 		compiled,
 	);
-	assert.equal(analysis?.passed, false);
-	assert.deepEqual(analysis?.failedChecks, ["1 page error(s)"]);
+	assert.ok(analysis);
+	assert.equal(analysis.passed, false);
+	assert.deepEqual(analysis.failedChecks, ["1 page error(s)"]);
 });
 
 test("analyzeQaPresetResults fails unverified matched page-error evidence when clear is a no-op", () => {
@@ -450,12 +469,13 @@ test("analyzeQaPresetResults fails unverified matched page-error evidence when c
 		],
 		compiled,
 	);
-	assert.equal(analysis?.passed, false);
-	assert.deepEqual(analysis?.failedChecks, [
+	assert.ok(analysis);
+	assert.equal(analysis.passed, false);
+	assert.deepEqual(analysis.failedChecks, [
 		"page-error check could not be verified (1 row(s) matched the post-clear baseline; old residue and identical new errors are indistinguishable)",
 	]);
-	assert.deepEqual(analysis?.warnings, []);
-	assert.doesNotMatch(analysis?.summary ?? "", /passed|unchanged|1 page error\(s\)/);
+	assert.deepEqual(analysis.warnings, []);
+	assert.doesNotMatch(analysis.summary, /passed|unchanged|1 page error\(s\)/);
 });
 
 test("analyzeQaPresetResults separates novel page errors from ambiguous matching rows", () => {
@@ -482,12 +502,13 @@ test("analyzeQaPresetResults separates novel page errors from ambiguous matching
 		})),
 		compiled,
 	);
-	assert.equal(analysis?.passed, false);
-	assert.deepEqual(analysis?.failedChecks, [
+	assert.ok(analysis);
+	assert.equal(analysis.passed, false);
+	assert.deepEqual(analysis.failedChecks, [
 		"1 page error(s)",
 		"page-error check could not be verified (1 row(s) matched the post-clear baseline; old residue and identical new errors are indistinguishable)",
 	]);
-	assert.deepEqual(analysis?.warnings, []);
+	assert.deepEqual(analysis.warnings, []);
 });
 
 test("analyzeQaPresetResults reports a new matching error after a successful clear", () => {
@@ -516,8 +537,9 @@ test("analyzeQaPresetResults reports a new matching error after a successful cle
 		],
 		compiled,
 	);
-	assert.equal(analysis?.passed, false);
-	assert.deepEqual(analysis?.failedChecks, ["1 page error(s)"]);
+	assert.ok(analysis);
+	assert.equal(analysis.passed, false);
+	assert.deepEqual(analysis.failedChecks, ["1 page error(s)"]);
 });
 
 test(
@@ -544,7 +566,7 @@ process.stdout.write(JSON.stringify({ success: true, data: { args, title: "Click
 					semanticAction: { action: "click", locator: "role", value: "button", name: "Export" },
 				});
 				assert.equal(clickResult.isError, false);
-				assert.deepEqual(clickResult.details?.compiledSemanticAction, {
+				assert.deepEqual(readRecord(clickResult.details).compiledSemanticAction, {
 					action: "click",
 					locator: "role",
 					args: ["find", "role", "button", "click", "--name", "Export"],
@@ -559,7 +581,7 @@ process.stdout.write(JSON.stringify({ success: true, data: { args, title: "Click
 					},
 				});
 				assert.equal(roleOnlyClickResult.isError, false);
-				assert.deepEqual(roleOnlyClickResult.details?.compiledSemanticAction, {
+				assert.deepEqual(readRecord(roleOnlyClickResult.details).compiledSemanticAction, {
 					action: "click",
 					locator: "role",
 					args: ["find", "role", "button", "click", "--name", "Continue without Signing In"],
@@ -574,7 +596,7 @@ process.stdout.write(JSON.stringify({ success: true, data: { args, title: "Click
 					},
 				});
 				assert.equal(fillResult.isError, false);
-				assert.deepEqual(fillResult.details?.compiledSemanticAction, {
+				assert.deepEqual(readRecord(fillResult.details).compiledSemanticAction, {
 					action: "fill",
 					locator: "label",
 					args: ["find", "label", "Email", "fill", "user@example.test"],
@@ -584,7 +606,7 @@ process.stdout.write(JSON.stringify({ success: true, data: { args, title: "Click
 					semanticAction: { action: "fill", selector: "@e1", text: "selector text" },
 				});
 				assert.equal(selectorFillResult.isError, false);
-				assert.deepEqual(selectorFillResult.details?.compiledSemanticAction, {
+				assert.deepEqual(readRecord(selectorFillResult.details).compiledSemanticAction, {
 					action: "fill",
 					selector: "@e1",
 					args: ["fill", "@e1", "selector text"],
@@ -594,7 +616,7 @@ process.stdout.write(JSON.stringify({ success: true, data: { args, title: "Click
 					semanticAction: { action: "click", selector: "#submit" },
 				});
 				assert.equal(selectorClickResult.isError, false);
-				assert.deepEqual(selectorClickResult.details?.compiledSemanticAction, {
+				assert.deepEqual(readRecord(selectorClickResult.details).compiledSemanticAction, {
 					action: "click",
 					selector: "#submit",
 					args: ["click", "#submit"],
@@ -604,7 +626,7 @@ process.stdout.write(JSON.stringify({ success: true, data: { args, title: "Click
 					semanticAction: { action: "check", selector: "@e4", session: "named" },
 				});
 				assert.equal(selectorSessionResult.isError, false);
-				assert.deepEqual(selectorSessionResult.details?.compiledSemanticAction, {
+				assert.deepEqual(readRecord(selectorSessionResult.details).compiledSemanticAction, {
 					action: "check",
 					selector: "@e4",
 					args: ["--session", "named", "check", "@e4"],
@@ -614,7 +636,7 @@ process.stdout.write(JSON.stringify({ success: true, data: { args, title: "Click
 					semanticAction: { action: "click", locator: "text", value: "Close" },
 				});
 				assert.equal(textClickResult.isError, false);
-				assert.deepEqual(textClickResult.details?.compiledSemanticAction, {
+				assert.deepEqual(readRecord(textClickResult.details).compiledSemanticAction, {
 					action: "click",
 					locator: "text",
 					args: ["find", "text", "Close", "click"],
@@ -624,12 +646,12 @@ process.stdout.write(JSON.stringify({ success: true, data: { args, title: "Click
 					semanticAction: { action: "click", locator: "text", value: "Close", session: "named" },
 				});
 				assert.equal(sessionClickResult.isError, false);
-				assert.deepEqual(sessionClickResult.details?.compiledSemanticAction, {
+				assert.deepEqual(readRecord(sessionClickResult.details).compiledSemanticAction, {
 					action: "click",
 					locator: "text",
 					args: ["--session", "named", "find", "text", "Close", "click"],
 				});
-				assert.equal(sessionClickResult.details?.sessionName, "named");
+				assert.equal(readRecord(sessionClickResult.details).sessionName, "named");
 
 				const selectResult = await executeRegisteredTool(harness.tool, harness.ctx, {
 					semanticAction: {
@@ -640,13 +662,13 @@ process.stdout.write(JSON.stringify({ success: true, data: { args, title: "Click
 					},
 				});
 				assert.equal(selectResult.isError, false);
-				assert.deepEqual(selectResult.details?.compiledSemanticAction, {
+				assert.deepEqual(readRecord(selectResult.details).compiledSemanticAction, {
 					action: "select",
 					selector: "#flavor-select",
 					values: ["chocolate"],
 					args: ["--session", "named", "select", "#flavor-select", "chocolate"],
 				});
-				assert.equal(selectResult.details?.sessionName, "named");
+				assert.equal(readRecord(selectResult.details).sessionName, "named");
 
 				const invocationLog = await readInvocationLog(logPath);
 				const invocations = invocationLog.filter((entry) => entry.args.includes("find"));
@@ -775,12 +797,12 @@ if (args.includes("open")) {
 						},
 					});
 					assert.equal(result.isError, false, JSON.stringify(result));
-					assert.deepEqual(result.details?.compiledSemanticAction, {
+					assert.deepEqual(readRecord(result.details).compiledSemanticAction, {
 						action: "fill",
 						locator: "role",
 						args: ["find", "role", "combobox", "fill", "pi issue 70 search", "--name", "Search"],
 					});
-					assert.deepEqual((result.details?.effectiveArgs as string[] | undefined)?.slice(-3), [
+					assert.deepEqual(readArray(readRecord(result.details).effectiveArgs).slice(-3), [
 						"fill",
 						"@e17",
 						"pi issue 70 search",
@@ -870,8 +892,11 @@ if (command === "open") {
 						args: ["fill", "@e1", "contenteditable replaced"],
 					});
 					assert.equal(result.isError, false, JSON.stringify(result));
-					assert.match(result.content[0]?.text ?? "", /Contenteditable fill may append or prepend/);
-					assert.deepEqual(result.details?.fillVerification, {
+					assert.match(
+						readString(readRecord(result.content.at(0)).text),
+						/Contenteditable fill may append or prepend/,
+					);
+					assert.deepEqual(readRecord(result.details).fillVerification, {
 						actual: "contenteditable replacededit me",
 						expected: "contenteditable replaced",
 						method: "text",
@@ -883,9 +908,9 @@ if (command === "open") {
 							'Fill verification warning: fill @e1 reported success, but get text returned "contenteditable replacededit me".',
 					});
 					assert.ok(
-						(result.details?.nextActions as Array<{ id?: string }> | undefined)?.some(
-							(action) => action.id === "verify-filled-value",
-						),
+						readArray(readRecord(result.details).nextActions)
+							.map(readRecord)
+							.some((action) => action.id === "verify-filled-value"),
 					);
 					const invocations = await readInvocationLog(logPath);
 					assert.ok(
@@ -960,10 +985,7 @@ if (args.includes("open")) {
 					args: ["snapshot", "-i"],
 				});
 				assert.equal(oldSnapshot.isError, false);
-				assert.deepEqual(
-					(oldSnapshot.details?.refSnapshot as { refIds?: string[] } | undefined)?.refIds,
-					["e2"],
-				);
+				assert.deepEqual(readRecord(readRecord(oldSnapshot.details).refSnapshot).refIds, ["e2"]);
 
 				const result = await executeRegisteredTool(harness.tool, harness.ctx, {
 					semanticAction: {
@@ -974,12 +996,12 @@ if (args.includes("open")) {
 					},
 				});
 				assert.equal(result.isError, false);
-				assert.deepEqual(result.details?.compiledSemanticAction, {
+				assert.deepEqual(readRecord(result.details).compiledSemanticAction, {
 					action: "click",
 					locator: "role",
 					args: ["find", "role", "button", "click", "--name", "Search Documentation"],
 				});
-				assert.deepEqual((result.details?.effectiveArgs as string[] | undefined)?.slice(-2), [
+				assert.deepEqual(readArray(readRecord(result.details).effectiveArgs).slice(-2), [
 					"click",
 					"@e17",
 				]);
@@ -1061,13 +1083,13 @@ if (args.includes("open")) {
 						},
 					});
 					assert.equal(result.isError, false);
-					assert.deepEqual(result.details?.compiledSemanticAction, {
+					assert.deepEqual(readRecord(result.details).compiledSemanticAction, {
 						action: "select",
 						locator: "role",
 						values: ["chocolate"],
 						args: ["select", "@e4", "chocolate"],
 					});
-					assert.deepEqual((result.details?.effectiveArgs as string[] | undefined)?.slice(-3), [
+					assert.deepEqual(readArray(readRecord(result.details).effectiveArgs).slice(-3), [
 						"select",
 						"@e4",
 						"chocolate",
@@ -1082,7 +1104,7 @@ if (args.includes("open")) {
 						},
 					});
 					assert.equal(dashOption.isError, false, JSON.stringify(dashOption));
-					assert.deepEqual((dashOption.details?.effectiveArgs as string[] | undefined)?.slice(-3), [
+					assert.deepEqual(readArray(readRecord(dashOption.details).effectiveArgs).slice(-3), [
 						"select",
 						"@e4",
 						"-1",
@@ -1188,7 +1210,7 @@ if (args.includes("open")) {
 						},
 					});
 					assert.equal(result.isError, false, JSON.stringify(result));
-					assert.deepEqual((result.details?.effectiveArgs as string[] | undefined)?.slice(-3), [
+					assert.deepEqual(readArray(readRecord(result.details).effectiveArgs).slice(-3), [
 						"fill",
 						"@e17",
 						"query",
@@ -1228,7 +1250,7 @@ process.stdin.setEncoding('utf8'); process.stdin.on('data',chunk=>stdin+=chunk);
 });`,
 		);
 		try {
-			await withPatchedEnv({ PATH: `${tempDir}:${process.env.PATH}` }, async () => {
+			await withPatchedEnv({ PATH: `${tempDir}:${process.env.PATH ?? ""}` }, async () => {
 				const harness = createExtensionHarness({ cwd: tempDir });
 				await runExtensionEvent(harness.handlers, "session_start", { reason: "new" }, harness.ctx);
 				const steps = [
@@ -1254,15 +1276,15 @@ process.stdin.setEncoding('utf8'); process.stdin.on('data',chunk=>stdin+=chunk);
 					stdin: JSON.stringify(steps),
 				});
 				assert.equal(result.isError, false, JSON.stringify(result));
-				assert.equal(result.details?.compiledJob, undefined);
+				assert.equal(readRecord(result.details).compiledJob, undefined);
 				const invocation = (await readInvocationLog(logPath)).find((call) =>
 					call.args.includes("batch"),
 				);
 				assert.ok(invocation);
 				assert.deepEqual(invocation.args.slice(-2), ["batch", "--bail"]);
-				const dispatched = JSON.parse(invocation.stdin ?? "[]");
+				const dispatched = readArray(JSON.parse(invocation.stdin ?? "[]"));
 				assert.deepEqual(dispatched.slice(0, 15), steps.slice(0, 15));
-				assert.equal(dispatched[15][1], join(tempDir, "batch.png"));
+				assert.equal(readArray(dispatched[15])[1], join(tempDir, "batch.png"));
 				const redacted = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: ["batch", "--bail"],
 					stdin: JSON.stringify([
@@ -1335,21 +1357,22 @@ process.stdin.on("end", () => {
 				});
 
 				assert.equal(result.isError, true);
-				assert.match(result.content[0]?.text ?? "", /Batch failed: 3\/4 succeeded/);
 				assert.match(
-					result.content[0]?.text ?? "",
+					readString(readRecord(result.content.at(0)).text),
+					/Batch failed: 3\/4 succeeded/,
+				);
+				assert.match(
+					readString(readRecord(result.content.at(0)).text),
 					/Managed session outcome: Fresh launch became current, but this tool call failed after launch\./,
 				);
-				const outcome = result.details?.managedSessionOutcome as
-					| { activeAfter?: boolean; status?: string; succeeded?: boolean }
-					| undefined;
-				assert.equal(outcome?.activeAfter, true);
-				assert.equal(outcome?.status, "replaced");
-				assert.equal(outcome?.succeeded, false);
+				const outcome = readRecord(readRecord(result.details).managedSessionOutcome);
+				assert.equal(outcome.activeAfter, true);
+				assert.equal(outcome.status, "replaced");
+				assert.equal(outcome.succeeded, false);
 				assert.equal(
-					(result.details?.nextActions as Array<{ id?: string }> | undefined)?.some(
-						(action) => action.id === "run-agent-browser-doctor",
-					),
+					readArray(readRecord(result.details).nextActions)
+						.map(readRecord)
+						.some((action) => action.id === "run-agent-browser-doctor"),
 					false,
 				);
 				assert.equal(await readFile(screenshotPath, "utf8"), "wiki-shot");
@@ -1505,33 +1528,35 @@ process.stdin.on("end", () => {
 						{ reason: "new" },
 						harness.ctx,
 					);
+					const qaTool = harness.getTool("agent_browser_qa");
+					assert.ok(qaTool);
 					assert.equal(
-						Check(harness.getTool("agent_browser_qa")!.parameters, {
+						Check(qaTool.parameters, {
 							attached: true,
 							expectedText: "Welcome",
 						}),
 						true,
 					);
 					assert.equal(
-						Check(harness.getTool("agent_browser_qa")!.parameters, {
+						Check(qaTool.parameters, {
 							attached: true,
 							url: "https://example.test/",
 						}),
 						false,
 					);
-					assert.equal(
-						Check(harness.getTool("agent_browser_qa")!.parameters, { expectedText: "Welcome" }),
-						false,
-					);
+					assert.equal(Check(qaTool.parameters, { expectedText: "Welcome" }), false);
 					const attachedWithoutSession = await executeRegisteredTool(harness.tool, harness.ctx, {
 						qa: { attached: true, expectedText: "Welcome" },
 					});
 					assert.equal(attachedWithoutSession.isError, true);
 					assert.match(
-						attachedWithoutSession.content[0]?.text ?? "",
+						readString(readRecord(attachedWithoutSession.content.at(0)).text),
 						/qa\.attached requires an active attached session/,
 					);
-					assert.equal(attachedWithoutSession.details?.failureCategory, "validation-error");
+					assert.equal(
+						readRecord(attachedWithoutSession.details).failureCategory,
+						"validation-error",
+					);
 
 					const cleanResult = await executeRegisteredTool(harness.tool, harness.ctx, {
 						qa: {
@@ -1540,81 +1565,61 @@ process.stdin.on("end", () => {
 						},
 					});
 					assert.equal(cleanResult.isError, false);
-					assert.equal(
-						(cleanResult.details?.qaPreset as { passed?: boolean } | undefined)?.passed,
-						true,
-					);
-					assert.deepEqual(
-						(cleanResult.details?.qaPreset as { failedChecks?: string[] } | undefined)
-							?.failedChecks,
-						[],
-					);
-					assert.deepEqual(
-						(cleanResult.details?.qaPreset as { warnings?: string[] } | undefined)?.warnings,
-						[],
-					);
-					assert.match((cleanResult.content[0] as { text: string }).text, /QA preset passed\./);
+					assert.equal(readRecord(readRecord(cleanResult.details).qaPreset).passed, true);
+					assert.deepEqual(readRecord(readRecord(cleanResult.details).qaPreset).failedChecks, []);
+					assert.deepEqual(readRecord(readRecord(cleanResult.details).qaPreset).warnings, []);
+					assert.match(readString(readRecord(cleanResult.content[0]).text), /QA preset passed\./);
 					assert.match(
-						(cleanResult.content[0] as { text: string }).text,
+						readString(readRecord(cleanResult.content[0]).text),
 						/Page: QA Page — https:\/\/example\.test\//,
 					);
-					assert.match((cleanResult.content[0] as { text: string }).text, /Checks run:/);
+					assert.match(readString(readRecord(cleanResult.content[0]).text), /Checks run:/);
 					assert.match(
-						(cleanResult.content[0] as { text: string }).text,
+						readString(readRecord(cleanResult.content[0]).text),
 						/Full diagnostic matrix: see details\.qaPreset and details\.batchSteps\./,
 					);
-					assert.doesNotMatch((cleanResult.content[0] as { text: string }).text, /Step 1 —/);
+					assert.doesNotMatch(readString(readRecord(cleanResult.content[0]).text), /Step 1 —/);
 					assert.ok(
-						Array.isArray(cleanResult.details?.batchSteps) &&
-							(cleanResult.details?.batchSteps as unknown[]).length > 0,
+						Array.isArray(readRecord(cleanResult.details).batchSteps) &&
+							readArray(readRecord(cleanResult.details).batchSteps).length > 0,
 					);
 
 					await withPatchedEnv({ AGENT_BROWSER_FAKE_QA_MODE: "residue" }, async () => {
 						const ambiguous = await executeRegisteredTool(harness.tool, harness.ctx, {
 							qa: { url: "https://example.test/" },
 						});
-						assert.equal(
-							(ambiguous.details?.qaPreset as { passed?: boolean } | undefined)?.passed,
-							false,
-						);
+						assert.equal(readRecord(readRecord(ambiguous.details).qaPreset).passed, false);
 						assert.equal(ambiguous.isError, true);
-						assert.equal(ambiguous.details?.resultCategory, "failure");
-						assert.equal(ambiguous.details?.failureCategory, "qa-failure");
-						assert.deepEqual(
-							(ambiguous.details?.qaPreset as { failedChecks?: string[] } | undefined)
-								?.failedChecks,
-							[
-								"page-error check could not be verified (1 row(s) matched the post-clear baseline; old residue and identical new errors are indistinguishable)",
-							],
-						);
+						assert.equal(readRecord(ambiguous.details).resultCategory, "failure");
+						assert.equal(readRecord(ambiguous.details).failureCategory, "qa-failure");
+						assert.deepEqual(readRecord(readRecord(ambiguous.details).qaPreset).failedChecks, [
+							"page-error check could not be verified (1 row(s) matched the post-clear baseline; old residue and identical new errors are indistinguishable)",
+						]);
 						assert.match(
-							ambiguous.content[0]?.text ?? "",
+							readString(readRecord(ambiguous.content.at(0)).text),
 							/page-error check could not be verified/,
 						);
 						assert.doesNotMatch(
-							ambiguous.content[0]?.text ?? "",
+							readString(readRecord(ambiguous.content.at(0)).text),
 							/QA preset passed|unchanged|1 page error\(s\)/,
 						);
 						// Canonical failure projection: the returned result itself carries isError and the notice.
 						assert.match(
-							ambiguous.content[0]?.text ?? "",
+							readString(readRecord(ambiguous.content.at(0)).text),
 							/Result category: failure; failureCategory: qa-failure; Pi tool isError: true\./,
 						);
 
 						const disabled = await executeRegisteredTool(harness.tool, harness.ctx, {
 							qa: { url: "https://example.test/", checkErrors: false },
 						});
-						assert.equal(
-							(disabled.details?.qaPreset as { passed?: boolean } | undefined)?.passed,
-							true,
-						);
+						assert.equal(readRecord(readRecord(disabled.details).qaPreset).passed, true);
 						assert.equal(disabled.isError, false);
-						assert.equal(disabled.details?.resultCategory, "success");
-						const disabledSteps = (
-							disabled.details?.compiledQaPreset as { steps: Array<{ args: string[] }> }
-						).steps;
+						assert.equal(readRecord(disabled.details).resultCategory, "success");
+						const disabledSteps = readArray(
+							readRecord(readRecord(disabled.details).compiledQaPreset).steps,
+						).map(readRecord);
 						assert.equal(
-							disabledSteps.some((step) => step.args[0] === "errors"),
+							disabledSteps.some((step) => readArray(step.args)[0] === "errors"),
 							false,
 						);
 						const invocation = [...(await readInvocationLog(logPath))]
@@ -1622,8 +1627,8 @@ process.stdin.on("end", () => {
 							.find((entry) => entry.args.includes("batch"));
 						assert.ok(invocation);
 						assert.equal(
-							(JSON.parse(invocation.stdin ?? "[]") as string[][]).some(
-								(step) => step[0] === "errors",
+							readArray(JSON.parse(invocation.stdin ?? "[]")).some(
+								(step) => readArray(step)[0] === "errors",
 							),
 							false,
 						);
@@ -1637,32 +1642,26 @@ process.stdin.on("end", () => {
 					});
 					assert.equal(benignNetworkResult.isError, false);
 					assert.deepEqual(
-						(
-							benignNetworkResult.details?.qaPreset as
-								| { failedChecks?: string[]; warnings?: string[] }
-								| undefined
-						)?.failedChecks,
+						readRecord(readRecord(benignNetworkResult.details).qaPreset).failedChecks,
 						[],
 					);
-					assert.deepEqual(
-						(benignNetworkResult.details?.qaPreset as { warnings?: string[] } | undefined)
-							?.warnings,
-						["1 benign network request failure(s) ignored"],
-					);
+					assert.deepEqual(readRecord(readRecord(benignNetworkResult.details).qaPreset).warnings, [
+						"1 benign network request failure(s) ignored",
+					]);
 					assert.match(
-						(benignNetworkResult.content[0] as { text: string }).text,
+						readString(readRecord(benignNetworkResult.content[0]).text),
 						/QA preset passed with warnings: 1 benign network request failure\(s\) ignored\./,
 					);
 					assert.match(
-						(benignNetworkResult.content[0] as { text: string }).text,
+						readString(readRecord(benignNetworkResult.content[0]).text),
 						/Full diagnostic matrix: see details\.qaPreset and details\.batchSteps\./,
 					);
 					assert.doesNotMatch(
-						(benignNetworkResult.content[0] as { text: string }).text,
+						readString(readRecord(benignNetworkResult.content[0]).text),
 						/Network failure summary:/,
 					);
 					assert.doesNotMatch(
-						(benignNetworkResult.content[0] as { text: string }).text,
+						readString(readRecord(benignNetworkResult.content[0]).text),
 						/Step 1 —/,
 					);
 
@@ -1691,7 +1690,7 @@ process.stdin.on("end", () => {
 							},
 						},
 					);
-					const openBailText = openBailResult.content[0]?.text ?? "";
+					const openBailText = readString(readRecord(openBailResult.content.at(0)).text);
 					assert.equal(openBailResult.isError, true);
 					assert.match(openBailText, /^Error: Navigation failed: net::ERR_CERT_AUTHORITY_INVALID/);
 					assert.match(openBailText, /Not run:\n- load state: domcontentloaded/);
@@ -1699,17 +1698,11 @@ process.stdin.on("end", () => {
 					assert.match(openBailText, /Execution: 5\/13 batch steps/);
 					assert.doesNotMatch(openBailText, /expected text not found/);
 					assert.doesNotMatch(openBailText, /token=secret/);
-					assert.deepEqual(
-						(
-							openBailResult.details?.qaPreset as
-								| { failedChecks?: string[]; notRunChecks?: string[] }
-								| undefined
-						)?.failedChecks,
-						["open failed"],
-					);
+					assert.deepEqual(readRecord(readRecord(openBailResult.details).qaPreset).failedChecks, [
+						"open failed",
+					]);
 					assert.equal(
-						(openBailResult.details?.qaPreset as { notRunChecks?: string[] } | undefined)
-							?.notRunChecks?.length,
+						readArray(readRecord(readRecord(openBailResult.details).qaPreset).notRunChecks).length,
 						7,
 					);
 
@@ -1722,20 +1715,26 @@ process.stdin.on("end", () => {
 					});
 					assert.equal(failedWaitQaResult.isError, true);
 					assert.equal(
-						failedWaitQaResult.details?.failureCategory,
+						readRecord(failedWaitQaResult.details).failureCategory,
 						"qa-failure",
-						failedWaitQaResult.content[0]?.text,
+						failedWaitQaResult.content.at(0)?.text,
 					);
 					assert.match(
-						(failedWaitQaResult.content[0] as { text: string }).text,
+						readString(readRecord(failedWaitQaResult.content[0]).text),
 						/^Error: Timed out waiting for QA assertion/,
 					);
-					assert.match((failedWaitQaResult.content[0] as { text: string }).text, /Failed checks:/);
 					assert.match(
-						(failedWaitQaResult.content[0] as { text: string }).text,
+						readString(readRecord(failedWaitQaResult.content[0]).text),
+						/Failed checks:/,
+					);
+					assert.match(
+						readString(readRecord(failedWaitQaResult.content[0]).text),
 						/Full diagnostic matrix: see details\.qaPreset and details\.batchSteps/,
 					);
-					assert.doesNotMatch((failedWaitQaResult.content[0] as { text: string }).text, /Step 1 —/);
+					assert.doesNotMatch(
+						readString(readRecord(failedWaitQaResult.content[0]).text),
+						/Step 1 —/,
+					);
 					process.env.AGENT_BROWSER_FAKE_QA_MODE = "pass";
 
 					const missingQaScreenshotPath = join(tempDir, "missing-qa-screenshot.png");
@@ -1747,18 +1746,20 @@ process.stdin.on("end", () => {
 						},
 					});
 					assert.equal(missingQaScreenshotResult.isError, true);
-					assert.equal(missingQaScreenshotResult.details?.failureCategory, "artifact-missing");
 					assert.equal(
-						(missingQaScreenshotResult.details?.qaPreset as { passed?: boolean } | undefined)
-							?.passed,
+						readRecord(missingQaScreenshotResult.details).failureCategory,
+						"artifact-missing",
+					);
+					assert.equal(
+						readRecord(readRecord(missingQaScreenshotResult.details).qaPreset).passed,
 						false,
 					);
 					assert.match(
-						(missingQaScreenshotResult.content[0] as { text: string }).text,
+						readString(readRecord(missingQaScreenshotResult.content[0]).text),
 						/Artifact verification failed/,
 					);
 					assert.doesNotMatch(
-						(missingQaScreenshotResult.content[0] as { text: string }).text,
+						readString(readRecord(missingQaScreenshotResult.content[0]).text),
 						/QA preset passed/,
 					);
 					delete process.env.AGENT_BROWSER_FAKE_QA_MODE;
@@ -1774,53 +1775,53 @@ process.stdin.on("end", () => {
 					});
 
 					assert.equal(result.isError, true);
-					assert.equal(result.details?.failureCategory, "qa-failure");
+					assert.equal(readRecord(result.details).failureCategory, "qa-failure");
 					assert.match(
-						result.content[0]?.text ?? "",
+						readString(readRecord(result.content.at(0)).text),
 						/Result category: failure; failureCategory: qa-failure; Pi tool isError: true\./,
 					);
 
-					const managedSessionOutcome = result.details?.managedSessionOutcome as
-						| { sessionMode?: string; status?: string; succeeded?: boolean }
-						| undefined;
-					assert.equal(managedSessionOutcome?.sessionMode, "fresh");
-					assert.equal(managedSessionOutcome?.status, "created");
-					assert.equal(managedSessionOutcome?.succeeded, false);
+					const managedSessionOutcome = readRecord(
+						readRecord(result.details).managedSessionOutcome,
+					);
+					assert.equal(managedSessionOutcome.sessionMode, "fresh");
+					assert.equal(managedSessionOutcome.status, "created");
+					assert.equal(managedSessionOutcome.succeeded, false);
 					assert.match(
-						(result.content[0] as { text: string }).text,
+						readString(readRecord(result.content[0]).text),
 						/Managed session outcome: Fresh launch became current, but this tool call failed after launch\./,
 					);
-					assert.match((result.content[0] as { text: string }).text, /failureCategory \/ qaPreset/);
-					const qaFailureNextActions = result.details?.nextActions as
-						| Array<{ id?: string; reason?: string }>
-						| undefined;
+					assert.match(
+						readString(readRecord(result.content[0]).text),
+						/failureCategory \/ qaPreset/,
+					);
+					const qaFailureNextActions = readArray(readRecord(result.details).nextActions).map(
+						readRecord,
+					);
 					assert.equal(
-						qaFailureNextActions?.some((action) => action.id === "run-agent-browser-doctor"),
+						qaFailureNextActions.some((action) => action.id === "run-agent-browser-doctor"),
 						false,
 					);
 					assert.ok(
-						qaFailureNextActions?.some(
+						qaFailureNextActions.some(
 							(action) =>
 								action.id === "verify-current-managed-session" &&
-								/current managed session/.test(action.reason ?? ""),
+								/current managed session/.test(readString(action.reason ?? "")),
 						),
 					);
-					assert.match((result.content[0] as { text: string }).text, /Failed checks:/);
-					assert.doesNotMatch((result.content[0] as { text: string }).text, /Step 1 —/);
-					assert.deepEqual(
-						(result.details?.qaPreset as { failedChecks?: string[] } | undefined)?.failedChecks,
-						[
-							"1 actionable failed network request(s)",
-							"1 console error message(s)",
-							"1 page error(s)",
-						],
+					assert.match(readString(readRecord(result.content[0]).text), /Failed checks:/);
+					assert.doesNotMatch(readString(readRecord(result.content[0]).text), /Step 1 —/);
+					assert.deepEqual(readRecord(readRecord(result.details).qaPreset).failedChecks, [
+						"1 actionable failed network request(s)",
+						"1 console error message(s)",
+						"1 page error(s)",
+					]);
+					const compiledQaPreset = readRecord(readRecord(result.details).compiledQaPreset);
+					assert.deepEqual(compiledQaPreset.args, ["batch", "--bail"]);
+					assert.equal(compiledQaPreset.failFast, true);
+					const compiledQaSteps = readArray(compiledQaPreset.steps).map((step) =>
+						readArray(readRecord(step).args),
 					);
-					const compiledQaPreset = result.details?.compiledQaPreset as
-						| { args?: string[]; failFast?: boolean; steps?: Array<{ args: string[] }> }
-						| undefined;
-					assert.deepEqual(compiledQaPreset?.args, ["batch", "--bail"]);
-					assert.equal(compiledQaPreset?.failFast, true);
-					const compiledQaSteps = compiledQaPreset?.steps?.map((step) => step.args) ?? [];
 					assert.deepEqual(compiledQaSteps.slice(0, 7), [
 						["network", "requests", "--clear"],
 						["console", "--clear"],
@@ -1830,10 +1831,10 @@ process.stdin.on("end", () => {
 						["wait", "--load", "domcontentloaded"],
 						["wait", "150"],
 					]);
-					assert.equal(compiledQaSteps[7]?.[0], "wait");
-					assert.equal(compiledQaSteps[7]?.[1], "--fn");
-					assert.match(compiledQaSteps[7]?.[2] ?? "", /Welcome/);
-					assert.deepEqual(compiledQaSteps[7]?.slice(3), ["--timeout", "5000"]);
+					assert.equal(compiledQaSteps[7][0], "wait");
+					assert.equal(compiledQaSteps[7][1], "--fn");
+					assert.match(readString(compiledQaSteps[7][2]), /Welcome/);
+					assert.deepEqual(compiledQaSteps[7].slice(3), ["--timeout", "5000"]);
 					assert.deepEqual(compiledQaSteps.slice(8), [
 						["wait", "main"],
 						["network", "requests"],
@@ -1867,27 +1868,27 @@ process.stdin.on("end", () => {
 						},
 					);
 					assert.equal(firstRunFailure.isError, true);
-					const firstRunOutcome = firstRunFailure.details?.managedSessionOutcome as
-						| { status?: string; succeeded?: boolean }
-						| undefined;
-					assert.equal(firstRunOutcome?.status, "created");
-					assert.equal(firstRunOutcome?.succeeded, false);
+					const firstRunOutcome = readRecord(
+						readRecord(firstRunFailure.details).managedSessionOutcome,
+					);
+					assert.equal(firstRunOutcome.status, "created");
+					assert.equal(firstRunOutcome.succeeded, false);
 					assert.match(
-						(firstRunFailure.content[0] as { text: string }).text,
+						readString(readRecord(firstRunFailure.content[0]).text),
 						/Managed session outcome: Fresh launch became current, but this tool call failed after launch\./,
 					);
-					const firstRunNextActions = firstRunFailure.details?.nextActions as
-						| Array<{ id?: string; reason?: string }>
-						| undefined;
+					const firstRunNextActions = readArray(
+						readRecord(firstRunFailure.details).nextActions,
+					).map(readRecord);
 					assert.equal(
-						firstRunNextActions?.some((action) => action.id === "run-agent-browser-doctor"),
+						firstRunNextActions.some((action) => action.id === "run-agent-browser-doctor"),
 						false,
 					);
 					assert.ok(
-						firstRunNextActions?.some(
+						firstRunNextActions.some(
 							(action) =>
 								action.id === "verify-current-managed-session" &&
-								/current managed session/.test(action.reason ?? ""),
+								/current managed session/.test(readString(action.reason ?? "")),
 						),
 					);
 
@@ -1899,60 +1900,43 @@ process.stdin.on("end", () => {
 						},
 					});
 					assert.equal(attachedResult.isError, false, JSON.stringify(attachedResult));
-					assert.match((attachedResult.content[0] as { text: string }).text, /QA preset passed/);
+					assert.match(readString(readRecord(attachedResult.content[0]).text), /QA preset passed/);
 					assert.doesNotMatch(
-						(attachedResult.content[0] as { text: string }).text,
+						readString(readRecord(attachedResult.content[0]).text),
 						/Attached diagnostics: existing upstream session console\/network\/error buffers were preserved/,
 					);
 					assert.equal(
-						(
-							attachedResult.details?.qaAttachedTarget as
-								| { title?: string; url?: string }
-								| undefined
-						)?.title,
+						readRecord(readRecord(attachedResult.details).qaAttachedTarget).title,
 						"QA Page",
 					);
 					assert.equal(
-						(
-							attachedResult.details?.qaAttachedTarget as
-								| { title?: string; url?: string }
-								| undefined
-						)?.url,
+						readRecord(readRecord(attachedResult.details).qaAttachedTarget).url,
 						"https://fail.example.test/",
 					);
 					assert.deepEqual(
-						(attachedResult.details?.qaPreset as { failedChecks?: string[] } | undefined)
-							?.failedChecks,
+						readRecord(readRecord(attachedResult.details).qaPreset).failedChecks,
 						[],
 					);
-					const attachedCompiledQaPreset = attachedResult.details?.compiledQaPreset as
-						| {
-								checks?: {
-									attached?: boolean;
-									checkConsole?: boolean;
-									checkErrors?: boolean;
-									checkNetwork?: boolean;
-									diagnosticsResetAtStart?: boolean;
-									url?: string;
-								};
-								steps?: Array<{ args: string[] }>;
-						  }
-						| undefined;
-					assert.equal(attachedCompiledQaPreset?.checks?.attached, true);
-					assert.equal(attachedCompiledQaPreset?.checks?.checkNetwork, false);
-					assert.equal(attachedCompiledQaPreset?.checks?.checkConsole, false);
-					assert.equal(attachedCompiledQaPreset?.checks?.checkErrors, false);
-					assert.equal(attachedCompiledQaPreset?.checks?.diagnosticsResetAtStart, false);
-					assert.equal(attachedCompiledQaPreset?.checks?.url, undefined);
-					const attachedCompiledQaSteps =
-						attachedCompiledQaPreset?.steps?.map((step) => step.args) ?? [];
+					const attachedCompiledQaPreset = readRecord(
+						readRecord(attachedResult.details).compiledQaPreset,
+					);
+					const attachedChecks = readRecord(attachedCompiledQaPreset.checks);
+					assert.equal(attachedChecks.attached, true);
+					assert.equal(attachedChecks.checkNetwork, false);
+					assert.equal(attachedChecks.checkConsole, false);
+					assert.equal(attachedChecks.checkErrors, false);
+					assert.equal(attachedChecks.diagnosticsResetAtStart, false);
+					assert.equal(attachedChecks.url, undefined);
+					const attachedCompiledQaSteps = readArray(attachedCompiledQaPreset.steps).map((step) =>
+						readArray(readRecord(step).args),
+					);
 					assert.deepEqual(attachedCompiledQaSteps.slice(0, 1), [
 						["wait", "--load", "domcontentloaded"],
 					]);
-					assert.equal(attachedCompiledQaSteps[1]?.[0], "wait");
-					assert.equal(attachedCompiledQaSteps[1]?.[1], "--fn");
-					assert.match(attachedCompiledQaSteps[1]?.[2] ?? "", /Welcome/);
-					assert.deepEqual(attachedCompiledQaSteps[1]?.slice(3), ["--timeout", "5000"]);
+					assert.equal(attachedCompiledQaSteps[1][0], "wait");
+					assert.equal(attachedCompiledQaSteps[1][1], "--fn");
+					assert.match(readString(attachedCompiledQaSteps[1][2]), /Welcome/);
+					assert.deepEqual(attachedCompiledQaSteps[1].slice(3), ["--timeout", "5000"]);
 					assert.deepEqual(attachedCompiledQaSteps.slice(2), [["wait", "main"]]);
 					const attachedInvocation = [...(await readInvocationLog(logPath))]
 						.reverse()
@@ -1960,10 +1944,12 @@ process.stdin.on("end", () => {
 							(entry) =>
 								entry.args.at(-2) === "batch" &&
 								entry.args.at(-1) === "--bail" &&
-								entry.stdin?.trim().startsWith("["),
+								(entry.stdin ?? "").trim().startsWith("["),
 						);
 					assert.ok(attachedInvocation);
-					const attachedSteps = JSON.parse(attachedInvocation.stdin ?? "[]") as string[][];
+					const attachedSteps = readArray(JSON.parse(attachedInvocation.stdin ?? "[]")).map(
+						readArray,
+					);
 					assert.equal(
 						attachedSteps.some((step) => step[0] === "open"),
 						false,
@@ -1980,18 +1966,17 @@ process.stdin.on("end", () => {
 						},
 					});
 					assert.equal(attachedCheckedResult.isError, true);
-					assert.equal(attachedCheckedResult.details?.failureCategory, "qa-failure");
+					assert.equal(readRecord(attachedCheckedResult.details).failureCategory, "qa-failure");
 					assert.match(
-						(attachedCheckedResult.content[0] as { text: string }).text,
+						readString(readRecord(attachedCheckedResult.content[0]).text),
 						/^QA preset failed/,
 					);
 					assert.match(
-						(attachedCheckedResult.content[0] as { text: string }).text,
+						readString(readRecord(attachedCheckedResult.content[0]).text),
 						/Attached diagnostics: existing upstream session console\/network\/error buffers were preserved/,
 					);
 					assert.deepEqual(
-						(attachedCheckedResult.details?.qaPreset as { failedChecks?: string[] } | undefined)
-							?.failedChecks,
+						readRecord(readRecord(attachedCheckedResult.details).qaPreset).failedChecks,
 						[
 							"1 actionable failed network request(s)",
 							"1 console error message(s)",
@@ -2005,14 +1990,17 @@ process.stdin.on("end", () => {
 					});
 					assert.equal(attachedAssertionFailure.isError, true);
 					assert.match(
-						attachedAssertionFailure.content[0]?.text ?? "",
+						readString(readRecord(attachedAssertionFailure.content.at(0)).text),
 						/^Error: Timed out waiting for QA assertion/,
 					);
 					assert.match(
-						attachedAssertionFailure.content[0]?.text ?? "",
+						readString(readRecord(attachedAssertionFailure.content.at(0)).text),
 						/Not run:\n- expected selector: "main"/,
 					);
-					assert.match(attachedAssertionFailure.content[0]?.text ?? "", /QA attached target:/);
+					assert.match(
+						readString(readRecord(attachedAssertionFailure.content.at(0)).text),
+						/QA attached target:/,
+					);
 
 					const attachedFreshResult = await executeRegisteredTool(harness.tool, harness.ctx, {
 						qa: { attached: true, expectedText: "Welcome" },
@@ -2020,20 +2008,20 @@ process.stdin.on("end", () => {
 					});
 					assert.equal(attachedFreshResult.isError, true);
 					assert.match(
-						attachedFreshResult.content[0]?.text ?? "",
+						readString(readRecord(attachedFreshResult.content.at(0)).text),
 						/qa\.attached cannot be used with sessionMode=fresh/,
 					);
-					assert.equal(attachedFreshResult.details?.failureCategory, "validation-error");
+					assert.equal(readRecord(attachedFreshResult.details).failureCategory, "validation-error");
 
 					const attachedWithUrl = await executeRegisteredTool(harness.tool, harness.ctx, {
 						qa: { attached: true, url: "https://example.test/" },
 					});
 					assert.equal(attachedWithUrl.isError, true);
 					assert.match(
-						attachedWithUrl.content[0]?.text ?? "",
+						readString(readRecord(attachedWithUrl.content.at(0)).text),
 						/qa\.url must be omitted when qa\.attached is true/,
 					);
-					assert.equal(attachedWithUrl.details?.failureCategory, "validation-error");
+					assert.equal(readRecord(attachedWithUrl.details).failureCategory, "validation-error");
 				},
 			);
 		} finally {
@@ -2127,7 +2115,10 @@ process.stdin.on("end", () => {
 					qa: { attached: true, expectedText: "Welcome" },
 				});
 				assert.equal(attachedResult.isError, false);
-				assert.match(attachedResult.content[0]?.text ?? "", /QA preset passed\./);
+				assert.match(
+					readString(readRecord(attachedResult.content.at(0)).text),
+					/QA preset passed\./,
+				);
 				const invocations = await readInvocationLog(logPath);
 				const batchIndex = invocations.findIndex(
 					(entry) => entry.args.at(-2) === "batch" && entry.args.at(-1) === "--bail",
@@ -2242,14 +2233,20 @@ process.stdin.on("end", () => {
 					);
 					await executeRegisteredTool(harness.tool, harness.ctx, { args: ["connect", "9222"] });
 					for (const url of ["file:///tmp/app.html", "app://shell/home"]) {
+						// Verify attached targets in order using the same native session.
+						// oxlint-disable-next-line no-await-in-loop
 						await withPatchedEnv({ FAKE_ATTACHED_URL: url }, async () => {
 							const verifiedUrl = await executeRegisteredTool(harness.tool, harness.ctx, {
 								args: ["get", "url"],
 							});
+							// Both fixed non-HTTP targets must permit explicit URL verification.
+							// oxlint-disable-next-line node-test/no-conditional-assertion
 							assert.equal(verifiedUrl.isError, false, JSON.stringify(verifiedUrl));
 							const attachedResult = await executeRegisteredTool(harness.tool, harness.ctx, {
 								qa: { attached: true, expectedText: "Welcome" },
 							});
+							// Both fixed non-HTTP targets must remain usable for attached QA.
+							// oxlint-disable-next-line node-test/no-conditional-assertion
 							assert.equal(attachedResult.isError, false, JSON.stringify(attachedResult));
 						});
 					}

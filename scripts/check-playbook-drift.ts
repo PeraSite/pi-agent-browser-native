@@ -19,8 +19,8 @@ type Mode = "check" | "write";
 type BlockId = "inspection" | "shared-guidelines" | "wrapper-tab-recovery";
 
 type Target = {
-	path: string;
-	blocks: BlockId[];
+	readonly path: string;
+	readonly blocks: readonly BlockId[];
 };
 
 const TARGETS: Target[] = [
@@ -54,7 +54,7 @@ Exit codes:
   1  drift found, invalid arguments, missing markers, or file update failed`);
 }
 
-function parseMode(argv: string[]): Mode | "help" {
+function parseMode(argv: readonly string[]): Mode | "help" {
 	if (argv.length === 0) {
 		return "check";
 	}
@@ -95,7 +95,8 @@ function markedBlock(id: BlockId): string {
 	return [
 		`<!-- agent-browser-playbook:start ${id} -->`,
 		GENERATED_NOTICE,
-		renderBlock(id),
+		"",
+		renderBlock(id) + (id === "inspection" ? "" : "\n"),
 		`<!-- agent-browser-playbook:end ${id} -->`,
 	].join("\n");
 }
@@ -162,6 +163,6 @@ async function main(): Promise<void> {
 }
 
 main().catch((error: unknown) => {
-	console.error(error instanceof Error ? error.message : String(error));
+	console.error(error instanceof Error ? error.message : error);
 	process.exitCode = 1;
 });

@@ -7,6 +7,7 @@
  */
 
 import assert from "node:assert/strict";
+import { readRecord, readString, readArray } from "./helpers/assertions.js";
 import { existsSync } from "node:fs";
 import { chmod, link, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -70,19 +71,18 @@ test("agentBrowserExtension keeps full browser guidance and installed doc pointe
 			assert.equal(harness.tool.name, "agent_browser");
 			assert.match(harness.tool.description, /native agent-browser commands/);
 			assert.match(harness.tool.promptSnippet, /native command batches/);
-			const parameterSchema = harness.tool.parameters as {
-				properties?: Record<string, { description?: string }>;
-			};
-			assert.deepEqual(Object.keys(parameterSchema.properties ?? {}).sort(), [
+			const parameterSchema = readRecord(harness.tool.parameters);
+			const parameterProperties = readRecord(parameterSchema.properties);
+			assert.deepEqual(Object.keys(parameterProperties).sort(), [
 				"args",
 				"outputPath",
 				"sessionMode",
 				"stdin",
 				"timeoutMs",
 			]);
-			assert.match(parameterSchema.properties?.args?.description ?? "", /batch --bail/);
+			assert.match(readString(readRecord(parameterProperties.args).description), /batch --bail/);
 			assert.match(
-				parameterSchema.properties?.stdin?.description ?? "",
+				readString(readRecord(parameterProperties.stdin).description),
 				/batch JSON, eval --stdin.*auth save --password-stdin/,
 			);
 			assert.match(
@@ -115,6 +115,8 @@ test("agentBrowserExtension keeps full browser guidance and installed doc pointe
 				TOOL_PROMPT_GUIDELINES_SUFFIX[0],
 			];
 			for (const guideline of requiredGuidelines) {
+				// Every guideline in this fixed nonempty inventory must reach the delivered prompt.
+				// oxlint-disable-next-line node-test/no-conditional-assertion
 				assert.equal(
 					guidelineText.includes(guideline),
 					true,
@@ -208,7 +210,7 @@ test("agentBrowserExtension keeps full browser guidance and installed doc pointe
 				true,
 			);
 
-			const [genericTurn] = await runExtensionEventResults<{ systemPrompt: string }>(
+			const [genericTurn] = await runExtensionEventResults(
 				harness.handlers,
 				"before_agent_start",
 				{
@@ -220,10 +222,11 @@ test("agentBrowserExtension keeps full browser guidance and installed doc pointe
 			);
 			assert.equal(genericTurn, undefined);
 
+			const sections: Record<string, string> = {};
 			const browserTurn = {
 				prompt: "Open https://example.com and take a snapshot.",
 				systemPrompt: "Base system prompt",
-				systemPromptOptions: { sections: {} as Record<string, string> },
+				systemPromptOptions: { sections },
 			};
 			const overrides = await runExtensionEventResults(
 				harness.handlers,
@@ -253,34 +256,48 @@ test(
 	"built extension prompt doc pointers resolve to package-root docs",
 	{ skip: !existsSync(resolve("dist/extensions/agent-browser/index.js")) },
 	async () => {
-		const extension = await import(
+		const extension: unknown = await import(
 			pathToFileURL(resolve("dist/extensions/agent-browser/index.js")).href
 		);
 		let beforeStart: ((event: unknown, ctx: unknown) => Promise<void>) | undefined;
 		const pi = {
-			events: { on: () => () => {} },
+			events: {
+				on: () => () => {
+					/* No event bus listeners are exercised by prompt composition. */
+				},
+			},
 			on: (name: string, handler: typeof beforeStart) => {
 				if (name === "before_agent_start") {
 					beforeStart = handler;
 				}
 			},
-			registerTool: () => {},
+			registerTool: () => {
+				/* This fixture exercises prompt hooks, not tool registration. */
+			},
 		};
-		(extension.default as (api: typeof pi) => void)(pi);
+		const factory = readRecord(extension).default;
+		assert.ok(typeof factory === "function");
+		Reflect.apply(factory, undefined, [pi]);
 
-		const event = { systemPromptOptions: { sections: {} as Record<string, string> } };
-		await beforeStart!(event, { cwd: process.cwd(), isProjectTrusted: () => true });
+		const sections: Record<string, string> = {};
+		const event = { systemPromptOptions: { sections } };
+		assert.ok(beforeStart);
+		await beforeStart(event, { cwd: process.cwd(), isProjectTrusted: () => true });
 		const guideline = event.systemPromptOptions.sections.agent_browser
-			?.split("\n")
+			.split("\n")
 			.find((line) => line.includes("COMMAND_REFERENCE.md"));
-		assert.ok(guideline);
+		assert.ok(guideline !== undefined && guideline !== "");
 		assert.doesNotMatch(guideline, /\/dist\/docs\//);
 		for (const docsPath of [
 			resolve("README.md"),
 			resolve("docs/COMMAND_REFERENCE.md"),
 			resolve("docs/TOOL_CONTRACT.md"),
 		]) {
+			// Both fixed documentation links must appear in the prompt.
+			// oxlint-disable-next-line node-test/no-conditional-assertion
 			assert.match(guideline, new RegExp(docsPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+			// Both fixed documentation links must also resolve on disk.
+			// oxlint-disable-next-line node-test/no-conditional-assertion
 			assert.equal(existsSync(docsPath), true, `missing docs path ${docsPath}`);
 		}
 	},
@@ -367,10 +384,11 @@ test("agentBrowserExtension uses project browser launch guidance when project co
 				assert.doesNotMatch(staticGuidelineText, /Project Profile/);
 				assert.doesNotMatch(staticGuidelineText, /\/tmp\/project-browser/);
 				assert.equal(staticGuidelineText, "", "no eager configuration guidelines");
+				const sections: Record<string, string> = {};
 				const browserTurn = {
 					prompt: "Open https://example.com in the signed-in browser.",
 					systemPrompt: "Base system prompt",
-					systemPromptOptions: { sections: {} as Record<string, string> },
+					systemPromptOptions: { sections },
 				};
 				await runExtensionEvent(harness.handlers, "before_agent_start", browserTurn, harness.ctx);
 				assert.match(browserTurn.systemPromptOptions.sections.agent_browser, /Project Profile/);
@@ -435,8 +453,14 @@ test("agentBrowserExtension rejects unsupported public schema fields", () => {
 	);
 	assert.equal(Check(schema, { args: ["open", "https://example.test/"], outputPath: "" }), false);
 	assert.equal(Check(schema, { args: ["open", "https://example.test/"], timeoutMs: 0 }), false);
+	const actionTool = harness.getTool("agent_browser_action");
+	const sourceTool = harness.getTool("agent_browser_source");
+	const networkTool = harness.getTool("agent_browser_network_source");
+	assert.ok(actionTool);
+	assert.ok(sourceTool);
+	assert.ok(networkTool);
 	assert.equal(
-		Check(harness.getTool("agent_browser_action")!.parameters, {
+		Check(actionTool.parameters, {
 			action: "click",
 			locator: "role",
 			role: "button",
@@ -451,19 +475,16 @@ test("agentBrowserExtension rejects unsupported public schema fields", () => {
 		false,
 	);
 	assert.equal(
-		Check(harness.getTool("agent_browser_action")!.parameters, {
+		Check(actionTool.parameters, {
 			action: "select",
 			selector: "#flavor",
 			value: "chocolate",
 		}),
 		true,
 	);
+	assert.equal(Check(sourceTool.parameters, { selector: "main" }), true);
 	assert.equal(
-		Check(harness.getTool("agent_browser_source")!.parameters, { selector: "main" }),
-		true,
-	);
-	assert.equal(
-		Check(harness.getTool("agent_browser_network_source")!.parameters, {
+		Check(networkTool.parameters, {
 			namespace: "review",
 			url: "https://example.test/api",
 		}),
@@ -488,10 +509,13 @@ test(
 				args: ["press", "@e1", "Enter"],
 			});
 			assert.equal(topLevel.isError, true);
-			assert.match(topLevel.content[0]?.text ?? "", /accepts exactly one key argument/);
+			assert.match(
+				readString(readRecord(topLevel.content.at(0)).text),
+				/accepts exactly one key argument/,
+			);
 			assert.equal(
-				topLevel.details?.validationError,
-				topLevel.content[0]?.text?.split("\n\nObservation:")[0],
+				readRecord(topLevel.details).validationError,
+				topLevel.content.at(0)?.text?.split("\n\nObservation:")[0],
 			);
 
 			const batch = await executeRegisteredTool(harness.tool, harness.ctx, {
@@ -503,7 +527,7 @@ test(
 			});
 			assert.equal(batch.isError, true);
 			assert.match(
-				batch.content[0]?.text ?? "",
+				readString(readRecord(batch.content.at(0)).text),
 				/Unsupported batch step 2: agent-browser key\/press accepts exactly one key argument/,
 			);
 		} finally {
@@ -646,7 +670,7 @@ test(
 			});
 			assert.equal(lexicalAlias.isError, true);
 			assert.match(
-				lexicalAlias.content[0]?.text ?? "",
+				readString(readRecord(lexicalAlias.content.at(0)).text),
 				/artifact\.png is already written by step 1/,
 			);
 
@@ -658,7 +682,10 @@ test(
 				]),
 			});
 			assert.equal(sentinelAlias.isError, true);
-			assert.match(sentinelAlias.content[0]?.text ?? "", /capture is already written by step 1/);
+			assert.match(
+				readString(readRecord(sentinelAlias.content.at(0)).text),
+				/capture is already written by step 1/,
+			);
 
 			const slashPathAlias = await executeRegisteredTool(harness.tool, harness.ctx, {
 				args: ["batch"],
@@ -668,7 +695,10 @@ test(
 				]),
 			});
 			assert.equal(slashPathAlias.isError, true);
-			assert.match(slashPathAlias.content[0]?.text ?? "", /dir\/file is already written by step 1/);
+			assert.match(
+				readString(readRecord(slashPathAlias.content.at(0)).text),
+				/dir\/file is already written by step 1/,
+			);
 
 			const symlinkAlias = await executeRegisteredTool(harness.tool, harness.ctx, {
 				args: ["batch"],
@@ -679,7 +709,7 @@ test(
 			});
 			assert.equal(symlinkAlias.isError, true);
 			assert.match(
-				symlinkAlias.content[0]?.text ?? "",
+				readString(readRecord(symlinkAlias.content.at(0)).text),
 				/alias\/artifact\.png is already written by step 1/,
 			);
 
@@ -692,9 +722,13 @@ test(
 						["screenshot", "dangling-alias.png"],
 					]),
 				});
+				// The POSIX dangling-symlink variant must reject the duplicate destination.
+				// oxlint-disable-next-line node-test/no-conditional-assertion
 				assert.equal(danglingAlias.isError, true);
+				// The same supported-host variant must identify its conflicting artifact.
+				// oxlint-disable-next-line node-test/no-conditional-assertion
 				assert.match(
-					danglingAlias.content[0]?.text ?? "",
+					readString(readRecord(danglingAlias.content.at(0)).text),
 					/dangling-alias\.png is already written by step 1/,
 				);
 			}
@@ -704,7 +738,7 @@ test(
 			});
 			assert.equal(argumentAlias.isError, true);
 			assert.match(
-				argumentAlias.content[0]?.text ?? "",
+				readString(readRecord(argumentAlias.content.at(0)).text),
 				/\.\/argument\.png is already written by step 1/,
 			);
 
@@ -718,9 +752,13 @@ test(
 						["screenshot", "hardlink-b.png"],
 					]),
 				});
+				// Every non-Android host exercises the mandatory hardlink-alias rejection.
+				// oxlint-disable-next-line node-test/no-conditional-assertion
 				assert.equal(hardlinkAlias.isError, true);
+				// The same hardlink variant must identify its duplicate destination.
+				// oxlint-disable-next-line node-test/no-conditional-assertion
 				assert.match(
-					hardlinkAlias.content[0]?.text ?? "",
+					readString(readRecord(hardlinkAlias.content.at(0)).text),
 					/hardlink-b\.png is already written by step 1/,
 				);
 			}
@@ -733,9 +771,13 @@ test(
 						["screenshot", "CASE-ARTIFACT.png"],
 					]),
 				});
+				// macOS supplies the case-insensitive alias exercised by this mandatory rejection.
+				// oxlint-disable-next-line node-test/no-conditional-assertion
 				assert.equal(caseAlias.isError, true);
+				// The same macOS variant must identify its duplicate destination.
+				// oxlint-disable-next-line node-test/no-conditional-assertion
 				assert.match(
-					caseAlias.content[0]?.text ?? "",
+					readString(readRecord(caseAlias.content.at(0)).text),
 					/CASE-ARTIFACT\.png is already written by step 1/,
 				);
 				const unicodeAlias = await executeRegisteredTool(harness.tool, harness.ctx, {
@@ -745,8 +787,15 @@ test(
 						["screenshot", "e\u0301.png"],
 					]),
 				});
+				// macOS supplies the decomposed-Unicode alias exercised by this rejection.
+				// oxlint-disable-next-line node-test/no-conditional-assertion
 				assert.equal(unicodeAlias.isError, true);
-				assert.match(unicodeAlias.content[0]?.text ?? "", /é\.png is already written by step 1/);
+				// The same macOS Unicode variant must identify its duplicate destination.
+				// oxlint-disable-next-line node-test/no-conditional-assertion
+				assert.match(
+					readString(readRecord(unicodeAlias.content.at(0)).text),
+					/é\.png is already written by step 1/,
+				);
 				const fullFoldAlias = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: ["batch"],
 					stdin: JSON.stringify([
@@ -754,9 +803,13 @@ test(
 						["screenshot", "STRASSE.png"],
 					]),
 				});
+				// macOS supplies the full-case-fold alias exercised by this rejection.
+				// oxlint-disable-next-line node-test/no-conditional-assertion
 				assert.equal(fullFoldAlias.isError, true);
+				// The same macOS full-fold variant must identify its duplicate destination.
+				// oxlint-disable-next-line node-test/no-conditional-assertion
 				assert.match(
-					fullFoldAlias.content[0]?.text ?? "",
+					readString(readRecord(fullFoldAlias.content.at(0)).text),
 					/STRASSE\.png is already written by step 1/,
 				);
 			}
@@ -770,7 +823,7 @@ test(
 			});
 			assert.equal(recordingAlias.isError, true);
 			assert.match(
-				recordingAlias.content[0]?.text ?? "",
+				readString(readRecord(recordingAlias.content.at(0)).text),
 				/capture\.webm is already written by step 1/,
 			);
 		} finally {
@@ -810,7 +863,11 @@ else process.stdout.write(JSON.stringify({ success: true, data: { waited: true }
 						{ args: ["batch", "wait"] },
 						{ args: ["batch"], stdin: JSON.stringify([["wait"]]) },
 					]) {
+						// Inspections share a harness whose session state evolves after each call.
+						// oxlint-disable-next-line no-await-in-loop
 						const result = await executeRegisteredTool(harness.tool, harness.ctx, params);
+						// Every fixed provider-free inspection must succeed.
+						// oxlint-disable-next-line node-test/no-conditional-assertion
 						assert.equal(result.isError, false);
 					}
 				},
@@ -879,38 +936,48 @@ process.stdout.write(JSON.stringify({ success: true, data }));`,
 					sessionMode: "fresh",
 				});
 				assert.equal(noopResult.isError, true);
-				assert.equal(noopResult.details?.resultCategory, "failure");
-				assert.equal(noopResult.details?.failureCategory, "upstream-error");
+				assert.equal(readRecord(noopResult.details).resultCategory, "failure");
+				assert.equal(readRecord(noopResult.details).failureCategory, "upstream-error");
 				assert.match(
-					noopResult.content[0]?.text ?? "",
+					readString(readRecord(noopResult.content.at(0)).text),
 					/Scroll diagnostic: no observed scroll movement/,
 				);
-				assert.match(noopResult.content[0]?.text ?? "", /"scrolled": false/);
-				assert.doesNotMatch(noopResult.content[0]?.text ?? "", /lifecycle/);
+				assert.match(readString(readRecord(noopResult.content.at(0)).text), /"scrolled": false/);
+				assert.doesNotMatch(readString(readRecord(noopResult.content.at(0)).text), /lifecycle/);
 
-				assert.doesNotMatch(noopResult.content[0]?.text ?? "", /"scrolled": true/);
-				const noopDetails = noopResult.details as {
-					data: { noMovement?: boolean; scrolled?: boolean };
-					nextActions: Array<{ id: string; params?: { args: string[] } }>;
-					pageChangeSummary: { nextActionIds: string[] };
-					scrollNoop: { before: { containers: Array<{ id: string }> }; reason: string };
-				};
-				assert.equal(noopDetails.data.scrolled, false);
-				assert.equal(noopDetails.data.noMovement, true);
-				assert.equal(noopDetails.scrollNoop.reason, "no-observed-scroll-position-change");
-				assert.equal(noopDetails.scrollNoop.before.containers[0]?.id, "sample-0");
+				assert.doesNotMatch(
+					readString(readRecord(noopResult.content.at(0)).text),
+					/"scrolled": true/,
+				);
+				const noopDetails = readRecord(noopResult.details);
+				const noopData = readRecord(noopDetails.data);
+				const scrollNoop = readRecord(noopDetails.scrollNoop);
+				const noopActions = readArray(noopDetails.nextActions).map(readRecord);
+				assert.equal(noopData.scrolled, false);
+				assert.equal(noopData.noMovement, true);
+				assert.equal(scrollNoop.reason, "no-observed-scroll-position-change");
+				assert.equal(
+					readRecord(readArray(readRecord(scrollNoop.before).containers)[0]).id,
+					"sample-0",
+				);
 				assert.deepEqual(
-					noopDetails.nextActions
+					noopActions
 						.map((action) => action.id)
-						.filter((id) => id.includes("noop-scroll")),
+						.filter((id) => readString(id).includes("noop-scroll")),
 					["inspect-after-noop-scroll", "verify-noop-scroll-visually"],
 				);
-				const scrollRecoveryActions = noopDetails.nextActions.filter((action) =>
-					action.id.includes("noop-scroll"),
+				const scrollRecoveryActions = noopActions.filter((action) =>
+					readString(action.id).includes("noop-scroll"),
 				);
-				assert.ok(scrollRecoveryActions.every((action) => action.params?.args[0] === "--session"));
+				assert.ok(
+					scrollRecoveryActions.every(
+						(action) => readArray(readRecord(action.params).args)[0] === "--session",
+					),
+				);
 				assert.deepEqual(
-					noopDetails.pageChangeSummary.nextActionIds.filter((id) => id.includes("noop-scroll")),
+					readArray(readRecord(noopDetails.pageChangeSummary).nextActionIds).filter((id) =>
+						readString(id).includes("noop-scroll"),
+					),
 					["inspect-after-noop-scroll", "verify-noop-scroll-visually"],
 				);
 
@@ -918,9 +985,12 @@ process.stdout.write(JSON.stringify({ success: true, data }));`,
 					args: ["scroll", "down", "701"],
 				});
 				assert.equal(movedResult.isError, false);
-				const movedDetails = movedResult.details as { scrollNoop?: unknown };
+				const movedDetails = readRecord(movedResult.details);
 				assert.equal(movedDetails.scrollNoop, undefined);
-				assert.doesNotMatch(movedResult.content[0]?.text ?? "", /Scroll diagnostic/);
+				assert.doesNotMatch(
+					readString(readRecord(movedResult.content.at(0)).text),
+					/Scroll diagnostic/,
+				);
 
 				const evalCallsBeforeLaunchScopedScroll = (await readInvocationLog(logPath)).filter(
 					(entry) => entry.args.includes("eval"),
@@ -930,10 +1000,7 @@ process.stdout.write(JSON.stringify({ success: true, data }));`,
 					sessionMode: "fresh",
 				});
 				assert.equal(launchScopedResult.isError, false);
-				assert.equal(
-					(launchScopedResult.details as { scrollNoop?: unknown }).scrollNoop,
-					undefined,
-				);
+				assert.equal(readRecord(launchScopedResult.details).scrollNoop, undefined);
 				const invocations = await readInvocationLog(logPath);
 				assert.equal(
 					invocations.filter((entry) => entry.args.includes("eval")).length,
@@ -983,45 +1050,44 @@ else process.stdout.write(JSON.stringify({ success: true, data: { title: "Modal"
 					args: ["scrollintoview", "text=Target sentence"],
 				});
 				assert.equal(invalid.isError, true);
-				assert.equal(invalid.details?.failureCategory, "validation-error");
-				assert.match(invalid.content[0]?.text ?? "", /CSS selector, xpath=.*current @e… ref/);
-				const actions = invalid.details?.nextActions as
-					| Array<{ id?: string; params?: { args?: string[] } }>
-					| undefined;
-				const semanticRecovery = actions?.find(
+				assert.equal(readRecord(invalid.details).failureCategory, "validation-error");
+				assert.match(
+					readString(readRecord(invalid.content.at(0)).text),
+					/CSS selector, xpath=.*current @e… ref/,
+				);
+				const actions = readArray(readRecord(invalid.details).nextActions).map(readRecord);
+				const semanticRecovery = actions.find(
 					(action) => action.id === "scroll-semantic-text-target",
 				);
-				assert.deepEqual(semanticRecovery?.params?.args?.slice(-4), [
+				assert.ok(semanticRecovery);
+				const semanticParams = readRecord(semanticRecovery.params);
+				assert.deepEqual(readArray(semanticParams.args).slice(-4), [
 					"find",
 					"text",
 					"Target sentence",
 					"hover",
 				]);
 				assert.match(
-					invalid.content[0]?.text ?? "",
+					readString(readRecord(invalid.content.at(0)).text),
 					/scroll-semantic-text-target.*find.*text.*Target sentence.*hover/,
 				);
 				assert.match(
-					invalid.content[0]?.text ?? "",
+					readString(readRecord(invalid.content.at(0)).text),
 					/refresh-refs-for-scroll-target.*snapshot.*-i/,
 				);
 				assert.equal(
 					(await readInvocationLog(logPath)).some((entry) => entry.args.includes("scrollintoview")),
 					false,
 				);
-				assert.ok(semanticRecovery?.params);
-				const recovered = await executeRegisteredTool(
-					harness.tool,
-					harness.ctx,
-					semanticRecovery.params,
-				);
+				assert.ok(Object.keys(semanticParams).length > 0);
+				const recovered = await executeRegisteredTool(harness.tool, harness.ctx, semanticParams);
 				assert.equal(recovered.isError, false, JSON.stringify(recovered));
 
 				const help = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: ["scrollintoview", "text=Target sentence", "--help"],
 				});
 				assert.equal(help.isError, false, JSON.stringify(help));
-				assert.ok((await readInvocationLog(logPath)).at(-1)?.args.includes("--help"));
+				assert.equal((await readInvocationLog(logPath)).at(-1)?.args.includes("--help"), true);
 
 				const invocationsBeforeBatch = (await readInvocationLog(logPath)).length;
 				const invalidBatch = await executeRegisteredTool(harness.tool, harness.ctx, {
@@ -1030,7 +1096,7 @@ else process.stdout.write(JSON.stringify({ success: true, data: { title: "Modal"
 				});
 				assert.equal(invalidBatch.isError, true);
 				assert.match(
-					invalidBatch.content[0]?.text ?? "",
+					readString(readRecord(invalidBatch.content.at(0)).text),
 					/scroll-semantic-text-target.*find.*text.*Target sentence.*hover/,
 				);
 				assert.equal((await readInvocationLog(logPath)).length, invocationsBeforeBatch);
@@ -1080,18 +1146,16 @@ if (args.includes("dialog") || (args.includes("eval") && stdin.includes("confirm
 						args: ["dialog", "status"],
 					});
 					assert.equal(result.isError, true);
-					assert.equal(result.details?.failureCategory, "timeout");
-					assert.equal(result.details?.timeoutMs, 50);
-					const nextActions = result.details?.nextActions as
-						| Array<{ id?: string; params?: { args?: string[]; sessionMode?: string } }>
-						| undefined;
-					assert.ok(nextActions?.some((action) => action.id === "inspect-dialog-after-timeout"));
-					assert.ok(nextActions?.some((action) => action.id === "dismiss-dialog-after-timeout"));
+					assert.equal(readRecord(result.details).failureCategory, "timeout");
+					assert.equal(readRecord(result.details).timeoutMs, 50);
+					const nextActions = readArray(readRecord(result.details).nextActions).map(readRecord);
+					assert.ok(nextActions.some((action) => action.id === "inspect-dialog-after-timeout"));
+					assert.ok(nextActions.some((action) => action.id === "dismiss-dialog-after-timeout"));
 					assert.ok(
-						nextActions?.some(
+						nextActions.some(
 							(action) =>
 								action.id === "recover-fresh-session-after-dialog-timeout" &&
-								action.params?.sessionMode === "fresh",
+								readRecord(action.params).sessionMode === "fresh",
 						),
 					);
 
@@ -1100,21 +1164,23 @@ if (args.includes("dialog") || (args.includes("eval") && stdin.includes("confirm
 						timeoutMs: 75,
 					});
 					assert.equal(explicitTimeoutResult.isError, true);
-					assert.equal(explicitTimeoutResult.details?.timeoutMs, 75);
+					assert.equal(
+						readRecord(explicitTimeoutResult.details).timeoutMs,
+						75,
+						JSON.stringify(explicitTimeoutResult),
+					);
 
 					const evalResult = await executeRegisteredTool(harness.tool, harness.ctx, {
 						args: ["eval", "--stdin"],
 						stdin: "confirm('Continue?')",
 					});
 					assert.equal(evalResult.isError, true);
-					assert.equal(evalResult.details?.failureCategory, "timeout");
-					assert.equal(evalResult.details?.timeoutMs, 60);
-					const evalNextActions = evalResult.details?.nextActions as
-						| Array<{ id?: string }>
-						| undefined;
-					assert.ok(
-						evalNextActions?.some((action) => action.id === "inspect-dialog-after-timeout"),
+					assert.equal(readRecord(evalResult.details).failureCategory, "timeout");
+					assert.equal(readRecord(evalResult.details).timeoutMs, 60);
+					const evalNextActions = readArray(readRecord(evalResult.details).nextActions).map(
+						readRecord,
 					);
+					assert.ok(evalNextActions.some((action) => action.id === "inspect-dialog-after-timeout"));
 				},
 			);
 		} finally {
@@ -1173,14 +1239,13 @@ process.stdin.on("end", () => {
 						args: ["scroll", "#virtualList", "down"],
 					});
 					assert.equal(result.isError, false);
-					assert.match(result.content[0]?.text ?? "", /Scrolled container #virtualList down/);
-					assert.equal(
-						(result.details?.data as { status?: string } | undefined)?.status,
-						"scrolled",
+					assert.match(
+						readString(readRecord(result.content.at(0)).text),
+						/Scrolled container #virtualList down/,
 					);
+					assert.equal(readRecord(readRecord(result.details).data).status, "scrolled");
 					assert.equal(
-						(result.details?.scrollContainer as { request?: { selector?: string } } | undefined)
-							?.request?.selector,
+						readRecord(readRecord(readRecord(result.details).scrollContainer).request).selector,
 						"#virtualList",
 					);
 					const invocations = await readInvocationLog(logPath);
@@ -1246,14 +1311,10 @@ process.stdin.on("end", () => {
 						args: ["scroll", "to", "end"],
 					});
 					assert.equal(result.isError, false, JSON.stringify(result));
-					assert.match(result.content[0]?.text ?? "", /Scrolled page to end/);
+					assert.match(readString(readRecord(result.content.at(0)).text), /Scrolled page to end/);
+					assert.equal(readRecord(readRecord(result.details).data).status, "scrolled");
 					assert.equal(
-						(result.details?.data as { status?: string } | undefined)?.status,
-						"scrolled",
-					);
-					assert.equal(
-						(result.details?.scrollPage as { request?: { target?: string } } | undefined)?.request
-							?.target,
+						readRecord(readRecord(readRecord(result.details).scrollPage).request).target,
 						"end",
 					);
 					const invocations = await readInvocationLog(logPath);
@@ -1320,15 +1381,14 @@ process.stdin.on("end", () => {
 						args: ["scroll", "down", "700"],
 					});
 					assert.equal(result.isError, false, JSON.stringify(result));
-					assert.match(result.content[0]?.text ?? "", /Scrolled page down by 700/);
-					assert.equal(
-						(result.details?.data as { status?: string } | undefined)?.status,
-						"scrolled",
+					assert.match(
+						readString(readRecord(result.content.at(0)).text),
+						/Scrolled page down by 700/,
 					);
-					assert.equal(result.details?.exitCode, 0);
+					assert.equal(readRecord(readRecord(result.details).data).status, "scrolled");
+					assert.equal(readRecord(result.details).exitCode, 0);
 					assert.equal(
-						(result.details?.scrollPage as { request?: { direction?: string } } | undefined)
-							?.request?.direction,
+						readRecord(readRecord(readRecord(result.details).scrollPage).request).direction,
 						"down",
 					);
 
@@ -1337,7 +1397,7 @@ process.stdin.on("end", () => {
 					});
 					assert.equal(selectorScroll.isError, false);
 					assert.equal(
-						(selectorScroll.details?.data as { scrolled?: string } | undefined)?.scrolled,
+						readRecord(readRecord(selectorScroll.details).data).scrolled,
 						"unexpected-page-scroll",
 					);
 					const trailingTokenScroll = await executeRegisteredTool(harness.tool, harness.ctx, {
@@ -1403,36 +1463,31 @@ process.stdout.write(JSON.stringify({ success: true, data: { ok: true } }));`,
 					});
 					assert.equal(result.isError, false, JSON.stringify(result));
 					assert.match(
-						result.content[0]?.text ?? "",
+						readString(readRecord(result.content.at(0)).text),
 						/Snapshot filter: 1\/3 direct refs matched search "checkout"; 1 surrounding snapshot line shown\./,
 					);
-					assert.match(result.content[0]?.text ?? "", /Checkout/);
-					assert.doesNotMatch(result.content[0]?.text ?? "", /Theme/);
-					assert.equal(
-						(
-							result.details?.snapshotFilter as
-								| { search?: string; matchedRefs?: number }
-								| undefined
-						)?.search,
-						"checkout",
-					);
-					assert.equal(
-						(result.details?.snapshotFilter as { matchedRefs?: number } | undefined)?.matchedRefs,
-						1,
-					);
-					assert.deepEqual(
-						(result.details?.refSnapshot as { refIds?: string[] } | undefined)?.refIds,
-						["e1", "e2", "e3"],
-					);
+					assert.match(readString(readRecord(result.content.at(0)).text), /Checkout/);
+					assert.doesNotMatch(readString(readRecord(result.content.at(0)).text), /Theme/);
+					assert.equal(readRecord(readRecord(result.details).snapshotFilter).search, "checkout");
+					assert.equal(readRecord(readRecord(result.details).snapshotFilter).matchedRefs, 1);
+					assert.deepEqual(readRecord(readRecord(result.details).refSnapshot).refIds, [
+						"e1",
+						"e2",
+						"e3",
+					]);
 					const jsonResult = await executeRegisteredTool(harness.tool, harness.ctx, {
 						args: ["--json", "snapshot", "-i", "--filter", "role=button"],
 						outputPath: join(tempDir, "filtered.json"),
 					});
 					assert.equal(jsonResult.isError, false);
-					const envelope = JSON.parse(jsonResult.content[0]?.text ?? "");
+					const envelope = readRecord(
+						JSON.parse(readString(readRecord(jsonResult.content.at(0)).text)),
+					);
 					assert.equal(envelope.success, true);
-					assert.deepEqual(envelope.data, jsonResult.details?.data);
-					assert.deepEqual(envelope.data.refs, { e2: { role: "button", name: "Checkout" } });
+					assert.deepEqual(envelope.data, readRecord(jsonResult.details).data);
+					assert.deepEqual(readRecord(envelope.data).refs, {
+						e2: { role: "button", name: "Checkout" },
+					});
 					assert.deepEqual(
 						JSON.parse(await readFile(join(tempDir, "filtered.json"), "utf8")),
 						envelope.data,
@@ -1503,20 +1558,21 @@ process.stdout.write(JSON.stringify({ success: true, data: { ok: true } }));`,
 						args: ["snapshot", "-i", "--search", "does not match"],
 					});
 					assert.equal(warning.isError, false, JSON.stringify(warning));
-					assert.match(warning.content[0]?.text ?? "", /Rendered page text matches:/);
 					assert.match(
-						warning.content[0]?.text ?? "",
+						readString(readRecord(warning.content.at(0)).text),
+						/Rendered page text matches:/,
+					);
+					assert.match(
+						readString(readRecord(warning.content.at(0)).text),
 						/does not match any configured notification channel/,
 					);
-					assert.match(warning.content[0]?.text ?? "", /validation, outside viewport, alert, div/);
-					const warningFilter = warning.details?.snapshotFilter as
-						| {
-								matchedRefs?: number;
-								renderedTextMatches?: Array<{ kind?: string; offscreen?: boolean }>;
-						  }
-						| undefined;
-					assert.equal(warningFilter?.matchedRefs, 0);
-					assert.deepEqual(warningFilter?.renderedTextMatches, [
+					assert.match(
+						readString(readRecord(warning.content.at(0)).text),
+						/validation, outside viewport, alert, div/,
+					);
+					const warningFilter = readRecord(readRecord(warning.details).snapshotFilter);
+					assert.equal(warningFilter.matchedRefs, 0);
+					assert.deepEqual(warningFilter.renderedTextMatches, [
 						{
 							kind: "validation",
 							offscreen: true,
@@ -1530,13 +1586,14 @@ process.stdout.write(JSON.stringify({ success: true, data: { ok: true } }));`,
 						args: ["snapshot", "-i", "--search", "Add Channel"],
 					});
 					assert.equal(label.isError, false, JSON.stringify(label));
-					assert.match(label.content[0]?.text ?? "", /Add Channel.*button, @e2/);
-					const labelMatches = (
-						label.details?.snapshotFilter as
-							| { renderedTextMatches?: Array<{ ref?: string }> }
-							| undefined
-					)?.renderedTextMatches;
-					assert.equal(labelMatches?.[0]?.ref, "e2");
+					assert.match(
+						readString(readRecord(label.content.at(0)).text),
+						/Add Channel.*button, @e2/,
+					);
+					const labelMatches = readArray(
+						readRecord(readRecord(label.details).snapshotFilter).renderedTextMatches,
+					);
+					assert.equal(readRecord(labelMatches[0]).ref, "e2");
 				},
 			);
 		} finally {
@@ -1592,13 +1649,14 @@ process.stdout.write(JSON.stringify({ success: true, data: { ok: true } }));`,
 						args: ["snapshot", "-i", "--diff"],
 					});
 					assert.equal(second.isError, false, JSON.stringify(second));
-					assert.match(second.content[0]?.text ?? "", /Snapshot diff: \+1 \/ -1 \/ Δ1 refs/);
-					const diff = second.details?.snapshotDiff as
-						| { addedRefs?: string[]; changedRefs?: string[]; removedRefs?: string[] }
-						| undefined;
-					assert.deepEqual(diff?.addedRefs, ["e3"]);
-					assert.deepEqual(diff?.changedRefs, ["e1"]);
-					assert.deepEqual(diff?.removedRefs, ["e2"]);
+					assert.match(
+						readString(readRecord(second.content.at(0)).text),
+						/Snapshot diff: \+1 \/ -1 \/ Δ1 refs/,
+					);
+					const diff = readRecord(readRecord(second.details).snapshotDiff);
+					assert.deepEqual(diff.addedRefs, ["e3"]);
+					assert.deepEqual(diff.changedRefs, ["e1"]);
+					assert.deepEqual(diff.removedRefs, ["e2"]);
 					const invocations = await readInvocationLog(logPath);
 					assert.equal(
 						invocations.some((entry) => entry.args.includes("--diff")),
@@ -1656,16 +1714,16 @@ process.stdout.write(JSON.stringify({ success: true, data: { ok: true } }));`,
 						args: ["snapshot", "-i", "--viewport"],
 					});
 					assert.equal(result.isError, false, JSON.stringify(result));
-					assert.match(result.content[0]?.text ?? "", /Viewport: 1440×900, scroll 0,240/);
-					const viewport = result.details?.snapshotViewport as
-						| { innerHeight?: number; scrollY?: number }
-						| undefined;
-					assert.equal(viewport?.innerHeight, 900);
-					assert.equal(viewport?.scrollY, 240);
-					assert.equal(typeof result.details?.fullOutputPath, "string");
+					assert.match(
+						readString(readRecord(result.content.at(0)).text),
+						/Viewport: 1440×900, scroll 0,240/,
+					);
+					const viewport = readRecord(readRecord(result.details).snapshotViewport);
+					assert.equal(viewport.innerHeight, 900);
+					assert.equal(viewport.scrollY, 240);
+					assert.equal(typeof readRecord(result.details).fullOutputPath, "string");
 					assert.equal(
-						(result.details?.artifactManifest as { entries?: unknown[] } | undefined)?.entries
-							?.length,
+						readArray(readRecord(readRecord(result.details).artifactManifest).entries).length,
 						1,
 					);
 					const invocations = await readInvocationLog(logPath);
@@ -1722,18 +1780,16 @@ process.stdout.write(JSON.stringify({ success: true, data: { ok: true } }));`,
 					args: ["--namespace", "review", "network", "requests", "--current-page"],
 				});
 				assert.equal(result.isError, false, JSON.stringify(result));
-				assert.match(result.content[0]?.text ?? "", /2\/3 rows matched/);
-				assert.match(result.content[0]?.text ?? "", /shop\.example\/app\.js/);
-				assert.doesNotMatch(result.content[0]?.text ?? "", /cdn\.example/);
-				assert.equal(result.details?.namespace, "review");
-				const filter = result.details?.networkRequestsPageFilter as
-					| { matchedRows?: number; totalRows?: number }
-					| undefined;
-				assert.equal(filter?.matchedRows, 2);
-				assert.equal(filter?.totalRows, 3);
-				const data = result.details?.data as { requests?: Array<{ url?: string }> } | undefined;
+				assert.match(readString(readRecord(result.content.at(0)).text), /2\/3 rows matched/);
+				assert.match(readString(readRecord(result.content.at(0)).text), /shop\.example\/app\.js/);
+				assert.doesNotMatch(readString(readRecord(result.content.at(0)).text), /cdn\.example/);
+				assert.equal(readRecord(result.details).namespace, "review");
+				const filter = readRecord(readRecord(result.details).networkRequestsPageFilter);
+				assert.equal(filter.matchedRows, 2);
+				assert.equal(filter.totalRows, 3);
+				const data = readRecord(readRecord(result.details).data);
 				assert.deepEqual(
-					data?.requests?.map((request) => request.url),
+					readArray(data.requests).map((request) => readRecord(request).url),
 					[
 						"https://shop.example/app.js",
 						"https://shop.example/api/cart?access_token=%5BREDACTED%5D",
@@ -1758,8 +1814,11 @@ process.stdout.write(JSON.stringify({ success: true, data: { ok: true } }));`,
 				assert.doesNotMatch(JSON.stringify(jsonResult), /filter-header-secret|filter-url-secret/);
 				const exported = await readFile(path, "utf8");
 				assert.doesNotMatch(exported, /filter-header-secret|filter-url-secret/);
-				assert.deepEqual(JSON.parse(exported), result.details?.data);
-				assert.deepEqual(JSON.parse(jsonResult.content[0]?.text ?? "").data, result.details?.data);
+				assert.deepEqual(JSON.parse(exported), readRecord(result.details).data);
+				assert.deepEqual(
+					readRecord(JSON.parse(readString(readRecord(jsonResult.content.at(0)).text))).data,
+					readRecord(result.details).data,
+				);
 				const invocations = await readInvocationLog(logPath);
 				assert.equal(
 					invocations.some((entry) => entry.args.includes("--current-page")),
@@ -1856,66 +1915,64 @@ process.stdout.write(JSON.stringify({ success: true, data: command === "eval" ? 
 				});
 				assert.equal(comboboxResult.isError, false);
 				assert.match(
-					comboboxResult.content[0]?.text ?? "",
+					readString(readRecord(comboboxResult.content.at(0)).text),
 					/Combobox diagnostic: focused combobox did not expose visible options/,
 				);
-				const details = comboboxResult.details as {
-					comboboxFocus: { reason: string; activeElement: { name?: string; role?: string } };
-					nextActions: Array<{ id: string; params?: { args: string[] } }>;
-				};
-				assert.equal(details.comboboxFocus.reason, "focused-combobox-without-visible-options");
-				assert.equal(details.comboboxFocus.activeElement.role, "combobox");
-				assert.equal(details.comboboxFocus.activeElement.name, "Datasource");
-				const comboboxActionIds = details.nextActions
+				const details = readRecord(comboboxResult.details);
+				const focus = readRecord(details.comboboxFocus);
+				const activeElement = readRecord(focus.activeElement);
+				const focusActions = readArray(details.nextActions).map(readRecord);
+				assert.equal(focus.reason, "focused-combobox-without-visible-options");
+				assert.equal(activeElement.role, "combobox");
+				assert.equal(activeElement.name, "Datasource");
+				const comboboxActionIds = focusActions
 					.map((action) => action.id)
-					.filter((id) => id.includes("combobox"));
+					.filter((id) => readString(id).includes("combobox"));
 				assert.deepEqual(comboboxActionIds, [
 					"inspect-focused-combobox",
 					"try-open-combobox-with-arrow",
 					"try-open-combobox-with-enter",
 				]);
 				assert.ok(
-					details.nextActions
-						.filter((action) => action.id.includes("combobox"))
-						.every((action) => action.params?.args[0] === "--session"),
+					focusActions
+						.filter((action) => readString(action.id).includes("combobox"))
+						.every((action) => readArray(readRecord(action.params).args)[0] === "--session"),
 				);
 				const openComboboxResult = await executeRegisteredTool(harness.tool, harness.ctx, {
 					semanticAction: { action: "click", locator: "role", value: "combobox", name: "Open" },
 				});
 				assert.equal(openComboboxResult.isError, false);
 				assert.match(
-					openComboboxResult.content[0]?.text ?? "",
+					readString(readRecord(openComboboxResult.content.at(0)).text),
 					/Combobox diagnostic: focused combobox did not expose visible options/,
 				);
 				assert.equal(
-					(
-						openComboboxResult.details as {
-							comboboxFocus?: { activeElement?: { name?: string; expanded?: string } };
-						}
-					).comboboxFocus?.activeElement?.name,
+					readRecord(readRecord(readRecord(openComboboxResult.details).comboboxFocus).activeElement)
+						.name,
 					"Open",
 				);
 				assert.equal(
-					(
-						openComboboxResult.details as {
-							comboboxFocus?: { activeElement?: { name?: string; expanded?: string } };
-						}
-					).comboboxFocus?.activeElement?.expanded,
+					readRecord(readRecord(readRecord(openComboboxResult.details).comboboxFocus).activeElement)
+						.expanded,
 					"true",
 				);
 
 				for (const name of ["MissingExpanded", "OptionsVisible"]) {
+					// Both probes observe one page before later actions.
+					// oxlint-disable-next-line no-await-in-loop
 					const negativeComboboxResult = await executeRegisteredTool(harness.tool, harness.ctx, {
 						semanticAction: { action: "click", locator: "role", value: "combobox", name },
 					});
+					// Both fixed negative combobox states must remain successful no-recovery actions.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
 					assert.equal(negativeComboboxResult.isError, false, name);
-					assert.equal(
-						(negativeComboboxResult.details as { comboboxFocus?: unknown }).comboboxFocus,
-						undefined,
-						name,
-					);
+					// Neither fixed negative state may fabricate focus recovery.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
+					assert.equal(readRecord(negativeComboboxResult.details).comboboxFocus, undefined, name);
+					// Neither fixed negative state may claim a combobox diagnostic.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
 					assert.doesNotMatch(
-						negativeComboboxResult.content[0]?.text ?? "",
+						readString(readRecord(negativeComboboxResult.content.at(0)).text),
 						/Combobox diagnostic/,
 						name,
 					);
@@ -1925,11 +1982,11 @@ process.stdout.write(JSON.stringify({ success: true, data: command === "eval" ? 
 					args: ["click", "@text"],
 				});
 				assert.equal(textboxResult.isError, false);
-				assert.equal(
-					(textboxResult.details as { comboboxFocus?: unknown }).comboboxFocus,
-					undefined,
+				assert.equal(readRecord(textboxResult.details).comboboxFocus, undefined);
+				assert.doesNotMatch(
+					readString(readRecord(textboxResult.content.at(0)).text),
+					/Combobox diagnostic/,
 				);
-				assert.doesNotMatch(textboxResult.content[0]?.text ?? "", /Combobox diagnostic/);
 			});
 		} finally {
 			await rm(tempDir, { force: true, recursive: true });
@@ -2006,27 +2063,19 @@ if (command === "open") {
 				});
 				assert.equal(result.isError, false);
 				assert.match(
-					result.content[0]?.text ?? "",
+					readString(readRecord(result.content.at(0)).text),
 					/Combobox diagnostic: focused combobox did not expose visible options/,
 				);
-				assert.deepEqual((result.details?.effectiveArgs as string[] | undefined)?.slice(-2), [
+				assert.deepEqual(readArray(readRecord(result.details).effectiveArgs).slice(-2), [
 					"click",
 					"@e65",
 				]);
 				assert.equal(
-					(
-						result.details?.comboboxFocus as
-							| { activeElement?: { role?: string; name?: string } }
-							| undefined
-					)?.activeElement?.role,
+					readRecord(readRecord(readRecord(result.details).comboboxFocus).activeElement).role,
 					"combobox",
 				);
 				assert.equal(
-					(
-						result.details?.comboboxFocus as
-							| { activeElement?: { role?: string; name?: string } }
-							| undefined
-					)?.activeElement?.name,
+					readRecord(readRecord(readRecord(result.details).comboboxFocus).activeElement).name,
 					"Job",
 				);
 				const invocations = await readInvocationLog(logPath);
@@ -2086,24 +2135,25 @@ process.stdout.write(JSON.stringify({ success: true, data }));`,
 				const started = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: ["--session", sessionName, "record", "start", "z-previous.webm"],
 				});
-				assert.equal(started.isError, false, started.content[0]?.text);
+				assert.equal(started.isError, false, started.content.at(0)?.text);
 				const restarted = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: ["--session", sessionName, "record", "restart", "a-current.webm"],
 				});
-				assert.equal(restarted.isError, false, restarted.content[0]?.text);
-				const manifest = restarted.details?.artifactManifest as
-					| { entries?: Array<{ path?: string; subcommand?: string }> }
-					| undefined;
+				assert.equal(restarted.isError, false, restarted.content.at(0)?.text);
+				const manifest = readRecord(readRecord(restarted.details).artifactManifest);
 				assert.equal(
-					manifest?.entries?.some(
-						(entry) => entry.path === "z-previous.webm" && entry.subcommand === "restart-previous",
-					),
+					readArray(manifest.entries)
+						.map(readRecord)
+						.some(
+							(entry) =>
+								entry.path === "z-previous.webm" && entry.subcommand === "restart-previous",
+						),
 					true,
 				);
 				assert.equal(
-					manifest?.entries?.some(
-						(entry) => entry.path === "a-current.webm" && entry.subcommand === "restart",
-					),
+					readArray(manifest.entries)
+						.map(readRecord)
+						.some((entry) => entry.path === "a-current.webm" && entry.subcommand === "restart"),
 					true,
 				);
 
@@ -2134,7 +2184,7 @@ process.stdout.write(JSON.stringify({ success: true, data }));`,
 				);
 				assert.equal(reservedAfterReplay.isError, true);
 				assert.match(
-					reservedAfterReplay.content[0]?.text ?? "",
+					readString(readRecord(reservedAfterReplay.content.at(0)).text),
 					/a-current\.webm is reserved by an active recording/,
 				);
 				await executeRegisteredTool(harness.tool, harness.ctx, {
@@ -2153,7 +2203,7 @@ process.stdout.write(JSON.stringify({ success: true, data }));`,
 test(
 	"agentBrowserExtension makes close --all exclusive within its namespace",
 	{ concurrency: false },
-	async () => {
+	async (t) => {
 		for (const scenario of [
 			{
 				label: "caller-default",
@@ -2219,17 +2269,34 @@ test(
 				fresh: false,
 			},
 		]) {
-			const tempDir = await mkdtemp(join(tmpdir(), "piab-close-all-queue-"));
-			const cwd = join(tempDir, "g");
-			await mkdir(cwd);
-			const logPath = join(tempDir, "events.log");
-			const openGate = join(tempDir, "release-open");
-			const waitGate = join(tempDir, "release-wait");
-			const closeGate = join(tempDir, "release-close");
-			const nodeBinDir = dirname(process.execPath);
-			await writeFakeAgentBrowserBinary(
-				tempDir,
-				`const fs = require("node:fs");
+			// Each namespace scenario owns its gates, environment, and shutdown; do not overlap them.
+			// oxlint-disable-next-line no-await-in-loop
+			await t.test(scenario.label, async () => {
+				const openingNamespace = scenario.named ? "review-space" : "";
+				const openingPrefix = scenario.named ? ["--namespace", "Review Space"] : [];
+				const openingMode = scenario.callerOwned ? "auto" : "fresh";
+				const openingSessionPattern = scenario.callerOwned ? /^pi-root-/ : /^piab-/;
+				const namespace = scenario.override ?? openingNamespace;
+				const matchingPrefix =
+					namespace !== "" || (scenario.ambient !== undefined && scenario.ambient !== "")
+						? ["--namespace", namespace]
+						: [];
+				const closeNamespacePrefix =
+					scenario.override !== undefined ? ["--namespace", scenario.override] : [];
+				const closeCommand = scenario.batch ? ["batch", "close --all"] : ["close", "--all"];
+				const closeMode = scenario.fresh ? "fresh" : "auto";
+				const reportedNamespace = scenario.override ?? (namespace === "" ? undefined : namespace);
+				const tempDir = await mkdtemp(join(tmpdir(), "piab-close-all-queue-"));
+				const cwd = join(tempDir, "g");
+				await mkdir(cwd);
+				const logPath = join(tempDir, "events.log");
+				const openGate = join(tempDir, "release-open");
+				const waitGate = join(tempDir, "release-wait");
+				const closeGate = join(tempDir, "release-close");
+				const nodeBinDir = dirname(process.execPath);
+				await writeFakeAgentBrowserBinary(
+					tempDir,
+					`const fs = require("node:fs");
 const args = process.argv.slice(2);
 const valueFlags = new Set(["--allow-file-access", "--args", "--namespace", "--session"]);
 let commandIndex = -1;
@@ -2269,204 +2336,211 @@ const data = command === "get" ? { result: "https://safe.example/", url: "https:
 process.stdout.write(JSON.stringify(command === "batch"
   ? [{ command: ["close", "--all"], data: { closed: true }, success: true }]
   : { success: true, data }));`,
-			);
-			const readEvents = async () =>
-				(await readInvocationLog(logPath)) as Array<{
-					args: string[];
-					event: string;
-					namespace: string;
-					sessionName: string;
-				}>;
-			const waitForEvent = async (event: string) => {
-				const deadline = Date.now() + 15_000;
-				while (Date.now() <= deadline) {
-					const found = (await readEvents()).find((entry) => entry.event === event);
-					if (found) {
-						return found;
-					}
-					await new Promise((resolveDelay) => setTimeout(resolveDelay, 10));
-				}
-				assert.fail(`${scenario.label}: ${event} did not dispatch`);
-			};
-			try {
-				await withPatchedEnv(
-					{
-						AGENT_BROWSER_NAMESPACE: scenario.ambient,
-						AGENT_BROWSER_SESSION: undefined,
-						PATH: `${tempDir}${delimiter}${nodeBinDir}`,
-					},
-					async () => {
-						const harness = createExtensionHarness({
-							cwd,
-							prompt: "Exercise global close ordering.",
+				);
+				const readEvents = async () =>
+					(await readInvocationLog(logPath)).map((entry) => ({
+						args: entry.args,
+						event: readString(entry.event),
+						namespace: readString(readRecord(entry).namespace),
+						sessionName: readString(entry.sessionName),
+					}));
+				const waitForEvent = async (event: string) => {
+					const deadline = Date.now() + 15_000;
+					while (Date.now() <= deadline) {
+						// Observe the independently appended event before a deadline-limited retry.
+						// oxlint-disable-next-line no-await-in-loop
+						const found = (await readEvents()).find((entry) => entry.event === event);
+						if (found) {
+							return found;
+						}
+						// Wait between observations rather than overlapping native event reads.
+						// oxlint-disable-next-line no-await-in-loop
+						await new Promise((resolveDelay) => {
+							setTimeout(resolveDelay, 10);
 						});
-						await runExtensionEvent(
-							harness.handlers,
-							"session_start",
-							{ reason: "new" },
-							harness.ctx,
-						);
-						const pending: Array<ReturnType<typeof executeRegisteredTool>> = [];
-						try {
-							const open = executeRegisteredTool(harness.tool, harness.ctx, {
-								args: [
-									...(scenario.named ? ["--namespace", "Review Space"] : []),
-									"open",
-									"https://safe.example/",
-								],
-								sessionMode: scenario.callerOwned ? "auto" : "fresh",
+					}
+					assert.fail(`${scenario.label}: ${event} did not dispatch`);
+				};
+				try {
+					await withPatchedEnv(
+						{
+							AGENT_BROWSER_NAMESPACE: scenario.ambient,
+							AGENT_BROWSER_SESSION: undefined,
+							PATH: `${tempDir}${delimiter}${nodeBinDir}`,
+						},
+						async () => {
+							const harness = createExtensionHarness({
+								cwd,
+								prompt: "Exercise global close ordering.",
 							});
-							pending.push(open);
-							const openStarted = await Promise.race([
-								waitForEvent("open-start"),
-								open.then((result) =>
-									assert.fail(
-										`${scenario.label}: open ended before the fixture gate: ${result.content[0]?.text}`,
-									),
-								),
-							]);
-							assert.match(openStarted.sessionName, scenario.callerOwned ? /^pi-root-/ : /^piab-/);
-							assert.equal(openStarted.namespace, scenario.named ? "review-space" : "");
-							const namespace = scenario.override ?? (scenario.named ? "review-space" : "");
-							const matchingPrefix =
-								namespace || scenario.ambient ? ["--namespace", namespace] : [];
-							const wait = executeRegisteredTool(harness.tool, harness.ctx, {
-								args: [...matchingPrefix, "--session", "already-running", "wait", "1"],
-							});
-							pending.push(wait);
-							const waitStarted = await waitForEvent("wait-start");
-							assert.equal(waitStarted.namespace, namespace);
-							const closeAll = executeRegisteredTool(harness.tool, harness.ctx, {
-								args: [
-									...(scenario.override !== undefined ? ["--namespace", scenario.override] : []),
-									...(scenario.fresh
-										? []
-										: [
-												"--session",
-												scenario.callerOwned ? "caller-owned" : openStarted.sessionName,
-											]),
-									...(scenario.batch ? ["batch", "close --all"] : ["close", "--all"]),
-								],
-								sessionMode: scenario.fresh ? "fresh" : "auto",
-							});
-							pending.push(closeAll);
-							await writeFile(openGate, "go");
-							const openResult = await open;
-							assert.equal(openResult.isError, false, JSON.stringify(openResult));
-							assert.equal(openResult.details?.sessionName, openStarted.sessionName);
-							const beforeDrain = await executeRegisteredTool(harness.tool, harness.ctx, {
-								args: ["--namespace", "unrelated", "--session", "drain-control", "tab", "list"],
-							});
-							assert.equal(beforeDrain.isError, false, JSON.stringify(beforeDrain));
-							assert.equal(
-								(await readEvents()).some((entry) => entry.event === "close-start"),
-								false,
-								scenario.label,
-							);
-							await writeFile(waitGate, "go");
-							const waitResult = await wait;
-							assert.equal(waitResult.isError, false, JSON.stringify(waitResult));
-							const closeStarted = await waitForEvent("close-start");
-							assert.equal(closeStarted.namespace, namespace, scenario.label);
-							assert.equal(
-								closeStarted.sessionName,
-								scenario.fresh
-									? "default"
-									: scenario.callerOwned
-										? "caller-owned"
-										: openStarted.sessionName,
-							);
-							if (scenario.fresh) {
-								assert.deepEqual(closeStarted.args, ["--json", "close", "--all"]);
-							}
-							const atCloseStart = (await readEvents()).length;
-							const overlappingCaller = executeRegisteredTool(harness.tool, harness.ctx, {
-								args: [...matchingPrefix, "--session", "same-namespace", "tab", "list"],
-							});
-							const overlappingManaged = executeRegisteredTool(harness.tool, harness.ctx, {
-								args: ["get", "url"],
-							});
-							pending.push(overlappingCaller, overlappingManaged);
-							const otherNamespace = await executeRegisteredTool(harness.tool, harness.ctx, {
-								args: ["--namespace", "unrelated", "--session", "other-session", "tab", "list"],
-							});
-							assert.equal(otherNamespace.isError, false, JSON.stringify(otherNamespace));
-							const whileClosed = (await readEvents()).slice(atCloseStart);
-							assert.equal(
-								whileClosed.some(
-									(entry) =>
-										entry.sessionName === "same-namespace" ||
-										entry.sessionName.startsWith("piab-") ||
-										entry.sessionName.startsWith("pi-root-"),
-								),
-								false,
-								`${scenario.label}: ${JSON.stringify(whileClosed)}`,
-							);
-							await writeFile(closeGate, "go");
-							const [closeResult, callerResult, overlapResult] = await Promise.all([
-								closeAll,
-								overlappingCaller,
-								overlappingManaged,
-							]);
-							assert.equal(closeResult.isError, false, JSON.stringify(closeResult));
-							assert.equal(closeResult.details?.closeAllApplied, true, scenario.label);
-							assert.equal(
-								closeResult.details?.namespace,
-								scenario.override ?? (namespace || undefined),
-								scenario.label,
-							);
-							assert.equal(
-								closeResult.details?.sessionName,
-								scenario.fresh ? undefined : closeStarted.sessionName,
-							);
-							assert.equal(callerResult.isError, false, JSON.stringify(callerResult));
-							assert.equal(overlapResult.isError, false, JSON.stringify(overlapResult));
-							const events = await readEvents();
-							const waitEnd = events.findIndex((entry) => entry.event === "wait-end");
-							const closeStart = events.findIndex((entry) => entry.event === "close-start");
-							const closeEnd = events.findIndex((entry) => entry.event === "close-end");
-							const otherStart = events.findIndex(
-								(entry) => entry.sessionName === "other-session" && entry.event === "tab-start",
-							);
-							const lateStart = events.findIndex(
-								(entry) => entry.sessionName === "same-namespace" && entry.event === "tab-start",
-							);
-							const managedStart = events.findIndex(
-								(entry) =>
-									entry.sessionName === overlapResult.details?.sessionName &&
-									entry.event === "get-start",
-							);
-							assert.ok(waitEnd >= 0 && closeStart > waitEnd, JSON.stringify(events));
-							assert.ok(otherStart > closeStart && otherStart < closeEnd, JSON.stringify(events));
-							assert.ok(lateStart > closeEnd && managedStart > closeEnd, JSON.stringify(events));
-						} finally {
-							await Promise.all(
-								[openGate, waitGate, closeGate].map((gate) => writeFile(gate, "go")),
-							);
-							await Promise.allSettled(pending);
 							await runExtensionEvent(
 								harness.handlers,
-								"session_shutdown",
-								{ reason: "quit" },
+								"session_start",
+								{ reason: "new" },
 								harness.ctx,
 							);
-						}
-					},
-				);
-			} finally {
-				await rm(tempDir, { force: true, recursive: true });
-			}
+							const pending: Array<ReturnType<typeof executeRegisteredTool>> = [];
+							try {
+								const open = executeRegisteredTool(harness.tool, harness.ctx, {
+									args: [...openingPrefix, "open", "https://safe.example/"],
+									sessionMode: openingMode,
+								});
+								pending.push(open);
+								const openStarted = await Promise.race([
+									waitForEvent("open-start"),
+									open.then((result) =>
+										assert.fail(
+											`${scenario.label}: open ended before the fixture gate: ${readString(readRecord(result.content.at(0)).text)}`,
+										),
+									),
+								]);
+								assert.match(openStarted.sessionName, openingSessionPattern);
+								assert.equal(openStarted.namespace, openingNamespace);
+								let closeSessionName = openStarted.sessionName;
+								if (scenario.callerOwned) {
+									closeSessionName = "caller-owned";
+								}
+								if (scenario.fresh) {
+									closeSessionName = "default";
+								}
+								const wait = executeRegisteredTool(harness.tool, harness.ctx, {
+									args: [...matchingPrefix, "--session", "already-running", "wait", "1"],
+								});
+								pending.push(wait);
+								const waitStarted = await waitForEvent("wait-start");
+								assert.equal(waitStarted.namespace, namespace);
+								const closeAll = executeRegisteredTool(harness.tool, harness.ctx, {
+									args: [
+										...closeNamespacePrefix,
+										...(scenario.fresh ? [] : ["--session", closeSessionName]),
+										...closeCommand,
+									],
+									sessionMode: closeMode,
+								});
+								pending.push(closeAll);
+								await writeFile(openGate, "go");
+								const openResult = await open;
+								assert.equal(openResult.isError, false, JSON.stringify(openResult));
+								assert.equal(readRecord(openResult.details).sessionName, openStarted.sessionName);
+								const beforeDrain = await executeRegisteredTool(harness.tool, harness.ctx, {
+									args: ["--namespace", "unrelated", "--session", "drain-control", "tab", "list"],
+								});
+								assert.equal(beforeDrain.isError, false, JSON.stringify(beforeDrain));
+								assert.equal(
+									(await readEvents()).some((entry) => entry.event === "close-start"),
+									false,
+									scenario.label,
+								);
+								await writeFile(waitGate, "go");
+								const waitResult = await wait;
+								assert.equal(waitResult.isError, false, JSON.stringify(waitResult));
+								const closeStarted = await waitForEvent("close-start");
+								assert.equal(closeStarted.namespace, namespace, scenario.label);
+								assert.equal(closeStarted.sessionName, closeSessionName);
+								if (scenario.fresh) {
+									// Only the fixed fresh-launch variant emits this replacement close receipt.
+									// oxlint-disable-next-line node-test/no-conditional-assertion
+									assert.deepEqual(closeStarted.args, ["--json", "close", "--all"]);
+								}
+								const atCloseStart = (await readEvents()).length;
+								const overlappingCaller = executeRegisteredTool(harness.tool, harness.ctx, {
+									args: [...matchingPrefix, "--session", "same-namespace", "tab", "list"],
+								});
+								const overlappingManaged = executeRegisteredTool(harness.tool, harness.ctx, {
+									args: ["get", "url"],
+								});
+								pending.push(overlappingCaller, overlappingManaged);
+								const otherNamespace = await executeRegisteredTool(harness.tool, harness.ctx, {
+									args: ["--namespace", "unrelated", "--session", "other-session", "tab", "list"],
+								});
+								assert.equal(otherNamespace.isError, false, JSON.stringify(otherNamespace));
+								const whileClosed = (await readEvents()).slice(atCloseStart);
+								assert.equal(
+									whileClosed.some(
+										(entry) =>
+											entry.sessionName === "same-namespace" ||
+											entry.sessionName.startsWith("piab-") ||
+											entry.sessionName.startsWith("pi-root-"),
+									),
+									false,
+									`${scenario.label}: ${JSON.stringify(whileClosed)}`,
+								);
+								await writeFile(closeGate, "go");
+								const [closeResult, callerResult, overlapResult] = await Promise.all([
+									closeAll,
+									overlappingCaller,
+									overlappingManaged,
+								]);
+								assert.equal(closeResult.isError, false, JSON.stringify(closeResult));
+								assert.equal(readRecord(closeResult.details).closeAllApplied, true, scenario.label);
+								assert.equal(
+									readRecord(closeResult.details).namespace,
+									reportedNamespace,
+									scenario.label,
+								);
+								assert.equal(
+									readRecord(closeResult.details).sessionName,
+									scenario.fresh ? undefined : closeStarted.sessionName,
+								);
+								assert.equal(callerResult.isError, false, JSON.stringify(callerResult));
+								assert.equal(overlapResult.isError, false, JSON.stringify(overlapResult));
+								const events = await readEvents();
+								const waitEnd = events.findIndex((entry) => entry.event === "wait-end");
+								const closeStart = events.findIndex((entry) => entry.event === "close-start");
+								const closeEnd = events.findIndex((entry) => entry.event === "close-end");
+								const otherStart = events.findIndex(
+									(entry) => entry.sessionName === "other-session" && entry.event === "tab-start",
+								);
+								const lateStart = events.findIndex(
+									(entry) => entry.sessionName === "same-namespace" && entry.event === "tab-start",
+								);
+								const managedStart = events.findIndex(
+									(entry) =>
+										entry.sessionName === readRecord(overlapResult.details).sessionName &&
+										entry.event === "get-start",
+								);
+								assert.ok(waitEnd >= 0 && closeStart > waitEnd, JSON.stringify(events));
+								assert.ok(otherStart > closeStart && otherStart < closeEnd, JSON.stringify(events));
+								assert.ok(lateStart > closeEnd && managedStart > closeEnd, JSON.stringify(events));
+							} finally {
+								await Promise.all(
+									[openGate, waitGate, closeGate].map((gate) => writeFile(gate, "go")),
+								);
+								await Promise.allSettled(pending);
+								await runExtensionEvent(
+									harness.handlers,
+									"session_shutdown",
+									{ reason: "quit" },
+									harness.ctx,
+								);
+							}
+						},
+					);
+				} finally {
+					await rm(tempDir, { force: true, recursive: true });
+				}
+			});
 		}
 	},
 );
 
 // Each recording contract gets isolated state, an ffmpeg-free PATH, and a one-row manifest cap.
+type RecordingReservationHarnessView = Pick<
+	ReturnType<typeof createExtensionHarness>,
+	"ctx" | "getTool" | "tool"
+> & {
+	readonly appendedEntries: readonly Readonly<
+		ReturnType<typeof createExtensionHarness>["appendedEntries"][number]
+	>[];
+	readonly handlers: Parameters<typeof runExtensionEvent>[0];
+};
+
 async function withRecordingReservationHarness(
 	slug: string,
 	prompt: string,
 	run: (
-		harness: ReturnType<typeof createExtensionHarness>,
-		context: { noRecordingMarker: string; tempDir: string },
+		harness: RecordingReservationHarnessView,
+		context: { readonly noRecordingMarker: string; readonly tempDir: string },
 	) => Promise<void>,
 ): Promise<void> {
 	const tempDir = await mkdtemp(join(tmpdir(), `pi-agent-browser-recording-${slug}-`));
@@ -2572,32 +2646,30 @@ test(
 						stdin: JSON.stringify([["close"], ["click", "#missing-after-close"]]),
 					},
 				);
-				assert.equal(failedFirstCall.isError, true, failedFirstCall.content[0]?.text);
+				assert.equal(failedFirstCall.isError, true, failedFirstCall.content.at(0)?.text);
 				assert.equal(
-					(failedFirstCall.details?.managedSessionOutcome as { activeAfter?: boolean } | undefined)
-						?.activeAfter,
+					readRecord(readRecord(failedFirstCall.details).managedSessionOutcome).activeAfter,
 					true,
 				);
-				assert.equal(typeof failedFirstCall.details?.sessionName, "string");
+				assert.equal(typeof readRecord(failedFirstCall.details).sessionName, "string");
 				const recoveredFirstCall = await executeRegisteredTool(
 					firstCallHarness.tool,
 					firstCallHarness.ctx,
 					{ args: ["get", "url"] },
 				);
-				assert.equal(recoveredFirstCall.isError, false, recoveredFirstCall.content[0]?.text);
-				assert.equal(recoveredFirstCall.details?.sessionName, failedFirstCall.details?.sessionName);
+				assert.equal(recoveredFirstCall.isError, false, recoveredFirstCall.content.at(0)?.text);
+				assert.equal(
+					readRecord(recoveredFirstCall.details).sessionName,
+					readRecord(failedFirstCall.details).sessionName,
+				);
 				const closeAllFirstCall = await executeRegisteredTool(
 					firstCallHarness.tool,
 					firstCallHarness.ctx,
 					{ args: ["--session", "caller-owned", "close", "--all"] },
 				);
-				assert.equal(closeAllFirstCall.details?.closeAllApplied, true);
+				assert.equal(readRecord(closeAllFirstCall.details).closeAllApplied, true);
 				assert.equal(
-					(
-						closeAllFirstCall.details?.managedSessionOutcome as
-							| { activeAfter?: boolean }
-							| undefined
-					)?.activeAfter,
+					readRecord(readRecord(closeAllFirstCall.details).managedSessionOutcome).activeAfter,
 					false,
 				);
 				const rotatedAfterCloseAll = await executeRegisteredTool(
@@ -2606,8 +2678,8 @@ test(
 					{ args: ["get", "url"] },
 				);
 				assert.notEqual(
-					rotatedAfterCloseAll.details?.sessionName,
-					failedFirstCall.details?.sessionName,
+					readRecord(rotatedAfterCloseAll.details).sessionName,
+					readRecord(failedFirstCall.details).sessionName,
 				);
 				await executeRegisteredTool(firstCallHarness.tool, firstCallHarness.ctx, {
 					args: ["close"],
@@ -2646,14 +2718,14 @@ test(
 				assert.equal(
 					otherNamespaceRecording.isError,
 					false,
-					otherNamespaceRecording.content[0]?.text,
+					otherNamespaceRecording.content.at(0)?.text,
 				);
-				assert.equal(otherNamespaceRecording.details?.namespace, "other");
+				assert.equal(readRecord(otherNamespaceRecording.details).namespace, "other");
 				const globalClose = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: ["close", "--all"],
 				});
-				assert.equal(globalClose.details?.closeAllApplied, true);
-				assert.equal(globalClose.details?.namespace, undefined);
+				assert.equal(readRecord(globalClose.details).closeAllApplied, true);
+				assert.equal(readRecord(globalClose.details).namespace, undefined);
 				const releasedGlobalOne = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: ["pdf", "global-one.webm"],
 				});
@@ -2661,18 +2733,18 @@ test(
 					args: ["pdf", "global-two.webm"],
 				});
 				assert.doesNotMatch(
-					releasedGlobalOne.content[0]?.text ?? "",
+					readString(readRecord(releasedGlobalOne.content.at(0)).text),
 					/reserved by an active recording/,
 				);
 				assert.doesNotMatch(
-					releasedGlobalTwo.content[0]?.text ?? "",
+					readString(readRecord(releasedGlobalTwo.content.at(0)).text),
 					/reserved by an active recording/,
 				);
 				const retainedOtherNamespace = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: ["pdf", "global-three.webm"],
 				});
 				assert.match(
-					retainedOtherNamespace.content[0]?.text ?? "",
+					readString(readRecord(retainedOtherNamespace.content.at(0)).text),
 					/reserved by an active recording/,
 				);
 				await executeRegisteredTool(harness.tool, harness.ctx, {
@@ -2697,77 +2769,68 @@ test(
 					sessionMode: "fresh",
 				});
 				assert.equal(missingResult.isError, false);
-				assert.equal(missingResult.details?.successCategory, "artifact-pending");
-				assert.deepEqual(
-					(
-						missingResult.details?.nextActions as
-							| Array<{ id?: string; params?: { args?: string[] } }>
-							| undefined
-					)
-						?.find((action) => action.id === "stop-pending-recording")
-						?.params?.args?.slice(-2),
-					["record", "stop"],
-				);
-				assert.match(
-					missingResult.content[0]?.text ?? "",
-					/Recording dependency warning: ffmpeg not found on PATH/,
-				);
-				assert.match(missingResult.content[0]?.text ?? "", /Exists: pending until record stop/);
-				assert.match(missingResult.content[0]?.text ?? "", /Status: pending/);
-				assert.doesNotMatch(missingResult.content[0]?.text ?? "", /Status: missing/);
-				const missingArtifacts = missingResult.details?.artifacts as
-					| Array<{
-							exists?: boolean;
-							recordingState?: string;
-							status?: string;
-							willExistOnStop?: boolean;
-					  }>
-					| undefined;
-				assert.equal(missingArtifacts?.[0]?.exists, undefined);
-				assert.equal(missingArtifacts?.[0]?.status, "pending");
-				assert.equal(missingArtifacts?.[0]?.recordingState, "openRecording");
-				assert.equal(missingArtifacts?.[0]?.willExistOnStop, true);
-				const missingVerification = missingResult.details?.artifactVerification as
-					| {
-							artifacts?: Array<{
-								recordingState?: string;
-								state?: string;
-								status?: string;
-								willExistOnStop?: boolean;
-							}>;
-							missingCount?: number;
-							pendingCount?: number;
-					  }
-					| undefined;
-				assert.equal(missingVerification?.pendingCount, 1);
-				assert.equal(missingVerification?.missingCount, 0);
-				assert.equal(missingVerification?.artifacts?.[0]?.state, "pending");
-				assert.equal(missingVerification?.artifacts?.[0]?.status, "pending");
-				assert.equal(missingVerification?.artifacts?.[0]?.willExistOnStop, true);
-				const failedWhileRecording = await executeRegisteredTool(harness.tool, harness.ctx, {
-					semanticAction: { action: "click", locator: "text", value: "Missing Control" },
-				});
-				assert.equal(failedWhileRecording.isError, true);
-				assert.equal(failedWhileRecording.details?.failureCategory, "selector-not-found");
-				const stopAfterFailure = (
-					failedWhileRecording.details?.nextActions as
-						| Array<{ id?: string; params?: { args?: string[] } }>
-						| undefined
-				)?.find((action) => action.id === "stop-pending-recording");
-				assert.deepEqual(stopAfterFailure?.params?.args, [
-					"--session",
-					missingResult.details?.sessionName,
+				assert.equal(readRecord(missingResult.details).successCategory, "artifact-pending");
+				const stopAction = readArray(readRecord(missingResult.details).nextActions)
+					.map(readRecord)
+					.find((action) => action.id === "stop-pending-recording");
+				assert.ok(stopAction);
+				assert.deepEqual(readArray(readRecord(stopAction.params).args).slice(-2), [
 					"record",
 					"stop",
 				]);
 				assert.match(
-					failedWhileRecording.content[0]?.text ?? "",
+					readString(readRecord(missingResult.content.at(0)).text),
+					/Recording dependency warning: ffmpeg not found on PATH/,
+				);
+				assert.match(
+					readString(readRecord(missingResult.content.at(0)).text),
+					/Exists: pending until record stop/,
+				);
+				assert.match(readString(readRecord(missingResult.content.at(0)).text), /Status: pending/);
+				assert.doesNotMatch(
+					readString(readRecord(missingResult.content.at(0)).text),
+					/Status: missing/,
+				);
+				const missingArtifacts = readArray(readRecord(missingResult.details).artifacts).map(
+					readRecord,
+				);
+				assert.equal(missingArtifacts[0].exists, undefined);
+				assert.equal(missingArtifacts[0].status, "pending");
+				assert.equal(missingArtifacts[0].recordingState, "openRecording");
+				assert.equal(missingArtifacts[0].willExistOnStop, true);
+				const missingVerification = readRecord(
+					readRecord(missingResult.details).artifactVerification,
+				);
+				const verifiedArtifact = readRecord(readArray(missingVerification.artifacts)[0]);
+				assert.equal(missingVerification.pendingCount, 1);
+				assert.equal(missingVerification.missingCount, 0);
+				assert.equal(verifiedArtifact.state, "pending");
+				assert.equal(verifiedArtifact.status, "pending");
+				assert.equal(verifiedArtifact.willExistOnStop, true);
+				const failedWhileRecording = await executeRegisteredTool(harness.tool, harness.ctx, {
+					semanticAction: { action: "click", locator: "text", value: "Missing Control" },
+				});
+				assert.equal(failedWhileRecording.isError, true);
+				assert.equal(
+					readRecord(failedWhileRecording.details).failureCategory,
+					"selector-not-found",
+				);
+				const stopAfterFailure = readArray(readRecord(failedWhileRecording.details).nextActions)
+					.map(readRecord)
+					.find((action) => action.id === "stop-pending-recording");
+				assert.ok(stopAfterFailure);
+				assert.deepEqual(readRecord(stopAfterFailure.params).args, [
+					"--session",
+					readRecord(missingResult.details).sessionName,
+					"record",
+					"stop",
+				]);
+				assert.match(
+					readString(readRecord(failedWhileRecording.content.at(0)).text),
 					/active recording remains open.*stop-pending-recording/is,
 				);
 
-				const missingDetails = missingResult.details as {
-					recordingDependencyWarning?: { reason?: string; command?: string; dependency?: string };
-				};
+				const missingDetails = readRecord(missingResult.details);
 				assert.deepEqual(missingDetails.recordingDependencyWarning, {
 					command: "record start",
 					dependency: "ffmpeg",
@@ -2795,12 +2858,11 @@ test(
 					sessionMode: "fresh",
 				});
 				assert.equal(presentResult.isError, false);
-				assert.equal(
-					(presentResult.details as { recordingDependencyWarning?: unknown })
-						.recordingDependencyWarning,
-					undefined,
+				assert.equal(readRecord(presentResult.details).recordingDependencyWarning, undefined);
+				assert.doesNotMatch(
+					readString(readRecord(presentResult.content.at(0)).text),
+					/Recording dependency warning/,
 				);
-				assert.doesNotMatch(presentResult.content[0]?.text ?? "", /Recording dependency warning/);
 				const reservationEntryCount = harness.appendedEntries.length;
 				await runExtensionEvent(
 					harness.handlers,
@@ -2814,9 +2876,9 @@ test(
 						.some(
 							(entry) =>
 								entry.customType === "agent-browser-recording-reservation" &&
-								(entry.data as { sessionName?: string; state?: string }).sessionName ===
-									presentResult.details?.sessionName &&
-								(entry.data as { state?: string }).state === "closed",
+								readRecord(entry.data).sessionName ===
+									readRecord(presentResult.details).sessionName &&
+								readRecord(entry.data).state === "closed",
 						),
 				);
 				const resumedHarness = createExtensionHarness({
@@ -2836,7 +2898,7 @@ test(
 					{ args: ["pdf", "present.webm"] },
 				);
 				assert.doesNotMatch(
-					releasedAfterResume.content[0]?.text ?? "",
+					readString(readRecord(releasedAfterResume.content.at(0)).text),
 					/reserved by an active recording/,
 				);
 			},
@@ -2870,7 +2932,7 @@ test(
 				);
 				assert.equal(reservedExtraPositionalScreenshot.isError, true);
 				assert.match(
-					reservedExtraPositionalScreenshot.content[0]?.text ?? "",
+					readString(readRecord(reservedExtraPositionalScreenshot.content.at(0)).text),
 					/demo\.webm is reserved by an active recording/,
 				);
 				if (process.platform !== "win32") {
@@ -2878,9 +2940,13 @@ test(
 					const reservedEqualsScreenshot = await executeRegisteredTool(harness.tool, harness.ctx, {
 						args: ["screenshot", "--full=demo.png"],
 					});
+					// This POSIX symlink variant must reject the reserved recording destination.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
 					assert.equal(reservedEqualsScreenshot.isError, true);
+					// The same supported-host variant must identify the reserved equals-spelled operand.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
 					assert.match(
-						reservedEqualsScreenshot.content[0]?.text ?? "",
+						readString(readRecord(reservedEqualsScreenshot.content.at(0)).text),
 						/--full=demo\.png is reserved by an active recording/,
 					);
 				}
@@ -2889,7 +2955,7 @@ test(
 				});
 				assert.equal(reservedGlobalPdf.isError, true);
 				assert.match(
-					reservedGlobalPdf.content[0]?.text ?? "",
+					readString(readRecord(reservedGlobalPdf.content.at(0)).text),
 					/demo\.webm is reserved by an active recording/,
 				);
 				const reservedQuickPdf = await executeRegisteredTool(harness.tool, harness.ctx, {
@@ -2897,14 +2963,14 @@ test(
 				});
 				assert.equal(reservedQuickPdf.isError, true);
 				assert.match(
-					reservedQuickPdf.content[0]?.text ?? "",
+					readString(readRecord(reservedQuickPdf.content.at(0)).text),
 					/demo\.webm is reserved by an active recording/,
 				);
-				const noiseManifest = noise.details?.artifactManifest as
-					| { entries?: Array<{ subcommand?: string }> }
-					| undefined;
+				const noiseManifest = readRecord(readRecord(noise.details).artifactManifest ?? {});
 				assert.equal(
-					(noiseManifest?.entries ?? []).some((entry) => entry.subcommand === "start"),
+					readArray(noiseManifest.entries ?? [])
+						.map(readRecord)
+						.some((entry) => entry.subcommand === "start"),
 					false,
 				);
 				const reservedOutputPath = await executeRegisteredTool(harness.tool, harness.ctx, {
@@ -2913,7 +2979,7 @@ test(
 				});
 				assert.equal(reservedOutputPath.isError, true);
 				assert.match(
-					reservedOutputPath.content[0]?.text ?? "",
+					readString(readRecord(reservedOutputPath.content.at(0)).text),
 					/Unsupported outputPath: demo\.webm is reserved by an active recording/,
 				);
 				const reservedAtOutputPath = await executeRegisteredTool(harness.tool, harness.ctx, {
@@ -2922,17 +2988,18 @@ test(
 				});
 				assert.equal(reservedAtOutputPath.isError, true);
 				assert.match(
-					reservedAtOutputPath.content[0]?.text ?? "",
+					readString(readRecord(reservedAtOutputPath.content.at(0)).text),
 					/@demo\.webm is reserved by an active recording/,
 				);
-				const reservedScriptOutputPath = await executeRegisteredTool(
-					harness.getTool("agent_browser_code")!,
-					harness.ctx,
-					{ code: "emit({ ok: true });", outputPath: "demo.webm" },
-				);
+				const codeTool = harness.getTool("agent_browser_code");
+				assert.ok(codeTool);
+				const reservedScriptOutputPath = await executeRegisteredTool(codeTool, harness.ctx, {
+					code: "emit({ ok: true });",
+					outputPath: "demo.webm",
+				});
 				assert.equal(reservedScriptOutputPath.isError, true);
 				assert.match(
-					reservedScriptOutputPath.content[0]?.text ?? "",
+					readString(readRecord(reservedScriptOutputPath.content.at(0)).text),
 					/demo\.webm is reserved by an active recording/,
 				);
 				const reservedElectronOutputPath = await executeRegisteredTool(harness.tool, harness.ctx, {
@@ -2941,7 +3008,7 @@ test(
 				});
 				assert.equal(reservedElectronOutputPath.isError, true);
 				assert.match(
-					reservedElectronOutputPath.content[0]?.text ?? "",
+					readString(readRecord(reservedElectronOutputPath.content.at(0)).text),
 					/demo\.webm is reserved by an active recording/,
 				);
 				const reservedWaitDownload = await executeRegisteredTool(harness.tool, harness.ctx, {
@@ -2949,7 +3016,7 @@ test(
 				});
 				assert.equal(reservedWaitDownload.isError, true);
 				assert.match(
-					reservedWaitDownload.content[0]?.text ?? "",
+					readString(readRecord(reservedWaitDownload.content.at(0)).text),
 					/demo\.webm is reserved by an active recording/,
 				);
 				const reservedShortWaitDownload = await executeRegisteredTool(harness.tool, harness.ctx, {
@@ -2957,7 +3024,7 @@ test(
 				});
 				assert.equal(reservedShortWaitDownload.isError, true);
 				assert.match(
-					reservedShortWaitDownload.content[0]?.text ?? "",
+					readString(readRecord(reservedShortWaitDownload.content.at(0)).text),
 					/demo\.webm is reserved by an active recording/,
 				);
 				const reservedReorderedWaitDownload = await executeRegisteredTool(
@@ -2967,7 +3034,7 @@ test(
 				);
 				assert.equal(reservedReorderedWaitDownload.isError, true);
 				assert.match(
-					reservedReorderedWaitDownload.content[0]?.text ?? "",
+					readString(readRecord(reservedReorderedWaitDownload.content.at(0)).text),
 					/demo\.webm is reserved by an active recording/,
 				);
 				const reservedRepeatedTimeoutDownload = await executeRegisteredTool(
@@ -2977,7 +3044,7 @@ test(
 				);
 				assert.equal(reservedRepeatedTimeoutDownload.isError, true);
 				assert.match(
-					reservedRepeatedTimeoutDownload.content[0]?.text ?? "",
+					readString(readRecord(reservedRepeatedTimeoutDownload.content.at(0)).text),
 					/demo\.webm is reserved by an active recording/,
 				);
 				const unsupportedInlineWaitDownload = await executeRegisteredTool(
@@ -2987,7 +3054,7 @@ test(
 				);
 				assert.equal(unsupportedInlineWaitDownload.isError, true);
 				assert.match(
-					unsupportedInlineWaitDownload.content[0]?.text ?? "",
+					readString(readRecord(unsupportedInlineWaitDownload.content.at(0)).text),
 					/does not support `wait --download=<path>`/,
 				);
 				const reservedLastOutput = await executeRegisteredTool(harness.tool, harness.ctx, {
@@ -2995,7 +3062,7 @@ test(
 				});
 				assert.equal(reservedLastOutput.isError, true);
 				assert.match(
-					reservedLastOutput.content[0]?.text ?? "",
+					readString(readRecord(reservedLastOutput.content.at(0)).text),
 					/demo\.webm is reserved by an active recording/,
 				);
 				const reservedShortOutput = await executeRegisteredTool(harness.tool, harness.ctx, {
@@ -3003,7 +3070,7 @@ test(
 				});
 				assert.equal(reservedShortOutput.isError, true);
 				assert.match(
-					reservedShortOutput.content[0]?.text ?? "",
+					readString(readRecord(reservedShortOutput.content.at(0)).text),
 					/demo\.webm is reserved by an active recording/,
 				);
 				const reservedHarStop = await executeRegisteredTool(harness.tool, harness.ctx, {
@@ -3011,7 +3078,7 @@ test(
 				});
 				assert.equal(reservedHarStop.isError, true);
 				assert.match(
-					reservedHarStop.content[0]?.text ?? "",
+					readString(readRecord(reservedHarStop.content.at(0)).text),
 					/demo\.webm is reserved by an active recording/,
 				);
 				const sameCallOutput = await executeRegisteredTool(harness.tool, harness.ctx, {
@@ -3020,7 +3087,7 @@ test(
 				});
 				assert.equal(sameCallOutput.isError, true);
 				assert.match(
-					sameCallOutput.content[0]?.text ?? "",
+					readString(readRecord(sameCallOutput.content.at(0)).text),
 					/same destination as artifact path same-call\.webm/,
 				);
 				if (process.platform !== "win32") {
@@ -3029,9 +3096,13 @@ test(
 						args: ["record", "start", "same-call-alias-target.webm"],
 						outputPath: "same-call-output.json",
 					});
+					// The POSIX dangling-symlink variant must reject the same-call output collision.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
 					assert.equal(danglingSameCallOutput.isError, true);
+					// The same supported-host variant must identify both colliding destinations.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
 					assert.match(
-						danglingSameCallOutput.content[0]?.text ?? "",
+						readString(readRecord(danglingSameCallOutput.content.at(0)).text),
 						/same destination as artifact path same-call-alias-target\.webm/,
 					);
 					await rm(join(tempDir, "same-call-output.json"), { force: true });
@@ -3041,9 +3112,13 @@ test(
 					const screenshotAlias = await executeRegisteredTool(harness.tool, harness.ctx, {
 						args: ["screenshot", "demo.png"],
 					});
+					// The POSIX screenshot-symlink variant must reject the recording reservation.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
 					assert.equal(screenshotAlias.isError, true);
+					// The same supported-host variant must identify the reserved destination.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
 					assert.match(
-						screenshotAlias.content[0]?.text ?? "",
+						readString(readRecord(screenshotAlias.content.at(0)).text),
 						/demo\.png is reserved by an active recording/,
 					);
 				}
@@ -3052,7 +3127,7 @@ test(
 				});
 				assert.equal(restartSamePath.isError, true);
 				assert.match(
-					restartSamePath.content[0]?.text ?? "",
+					readString(readRecord(restartSamePath.content.at(0)).text),
 					/demo\.webm is reserved by an active recording/,
 				);
 			},
@@ -3083,13 +3158,11 @@ test(
 				if (process.platform !== "win32") {
 					await rm(join(tempDir, "demo.webm"), { force: true });
 				}
-				const closedManifest = closed.details?.artifactManifest as
-					| { entries?: Array<{ subcommand?: string }> }
-					| undefined;
+				const closedManifest = readRecord(readRecord(closed.details).artifactManifest ?? {});
 				assert.equal(
-					(closedManifest?.entries ?? []).some(
-						(entry) => entry.subcommand === "start" || entry.subcommand === "restart",
-					),
+					readArray(closedManifest.entries ?? [])
+						.map(readRecord)
+						.some((entry) => entry.subcommand === "start" || entry.subcommand === "restart"),
 					false,
 				);
 
@@ -3101,17 +3174,17 @@ test(
 					args: ["batch"],
 					stdin: JSON.stringify([["close"]]),
 				});
-				assert.equal(batchClose.isError, false, batchClose.content[0]?.text);
+				assert.equal(batchClose.isError, false, batchClose.content.at(0)?.text);
 				const releasedAfterBatchClose = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: ["pdf", "batch-close.webm"],
 				});
 				assert.doesNotMatch(
-					releasedAfterBatchClose.content[0]?.text ?? "",
+					readString(readRecord(releasedAfterBatchClose.content.at(0)).text),
 					/reserved by an active recording/,
 				);
 				assert.notEqual(
-					releasedAfterBatchClose.details?.sessionName,
-					batchRecording.details?.sessionName,
+					readRecord(releasedAfterBatchClose.details).sessionName,
+					readRecord(batchRecording.details).sessionName,
 				);
 
 				const argumentBatchRecording = await executeRegisteredTool(harness.tool, harness.ctx, {
@@ -3121,14 +3194,14 @@ test(
 				const argumentBatchClose = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: ["batch", "close"],
 				});
-				assert.equal(argumentBatchClose.isError, false, argumentBatchClose.content[0]?.text);
+				assert.equal(argumentBatchClose.isError, false, argumentBatchClose.content.at(0)?.text);
 				const releasedAfterArgumentBatchClose = await executeRegisteredTool(
 					harness.tool,
 					harness.ctx,
 					{ args: ["pdf", "batch-argument-close.webm"] },
 				);
 				assert.doesNotMatch(
-					releasedAfterArgumentBatchClose.content[0]?.text ?? "",
+					readString(readRecord(releasedAfterArgumentBatchClose.content.at(0)).text),
 					/reserved by an active recording/,
 				);
 			},
@@ -3159,22 +3232,14 @@ test(
 				assert.equal(
 					terminalDiagnosticClose.isError,
 					false,
-					terminalDiagnosticClose.content[0]?.text,
+					terminalDiagnosticClose.content.at(0)?.text,
 				);
 				assert.equal(
-					(
-						terminalDiagnosticClose.details?.managedSessionOutcome as
-							| { activeAfter?: boolean; status?: string }
-							| undefined
-					)?.activeAfter,
+					readRecord(readRecord(terminalDiagnosticClose.details).managedSessionOutcome).activeAfter,
 					false,
 				);
 				assert.equal(
-					(
-						terminalDiagnosticClose.details?.managedSessionOutcome as
-							| { activeAfter?: boolean; status?: string }
-							| undefined
-					)?.status,
+					readRecord(readRecord(terminalDiagnosticClose.details).managedSessionOutcome).status,
 					"closed",
 				);
 				const releasedAfterDiagnosticClose = await executeRegisteredTool(
@@ -3183,85 +3248,69 @@ test(
 					{ args: ["pdf", "batch-close-stream.webm"] },
 				);
 				assert.doesNotMatch(
-					releasedAfterDiagnosticClose.content[0]?.text ?? "",
+					readString(readRecord(releasedAfterDiagnosticClose.content.at(0)).text),
 					/reserved by an active recording/,
 				);
 				assert.notEqual(
-					releasedAfterDiagnosticClose.details?.sessionName,
-					diagnosticBatchRecording.details?.sessionName,
+					readRecord(releasedAfterDiagnosticClose.details).sessionName,
+					readRecord(diagnosticBatchRecording.details).sessionName,
 				);
 
 				const postCloseStop = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: ["batch"],
 					stdin: JSON.stringify([["close"], ["record", "stop"]]),
 				});
-				assert.equal(postCloseStop.isError, false, postCloseStop.content[0]?.text);
+				assert.equal(postCloseStop.isError, false, postCloseStop.content.at(0)?.text);
 				assert.equal(
-					(
-						postCloseStop.details?.managedSessionOutcome as
-							| { activeAfter?: boolean; status?: string }
-							| undefined
-					)?.activeAfter,
+					readRecord(readRecord(postCloseStop.details).managedSessionOutcome).activeAfter,
 					true,
 				);
 				assert.equal(
-					(
-						postCloseStop.details?.managedSessionOutcome as
-							| { activeAfter?: boolean; status?: string }
-							| undefined
-					)?.status,
+					readRecord(readRecord(postCloseStop.details).managedSessionOutcome).status,
 					"unchanged",
 				);
 				assert.equal(
-					postCloseStop.details?.sessionName,
-					releasedAfterDiagnosticClose.details?.sessionName,
+					readRecord(postCloseStop.details).sessionName,
+					readRecord(releasedAfterDiagnosticClose.details).sessionName,
 				);
 
 				const failedPostCloseLaunch = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: ["batch"],
 					stdin: JSON.stringify([["close"], ["open", "fail-after-close"]]),
 				});
-				assert.equal(failedPostCloseLaunch.isError, true, failedPostCloseLaunch.content[0]?.text);
 				assert.equal(
-					(
-						failedPostCloseLaunch.details?.managedSessionOutcome as
-							| { activeAfter?: boolean; status?: string }
-							| undefined
-					)?.activeAfter,
+					failedPostCloseLaunch.isError,
+					true,
+					failedPostCloseLaunch.content.at(0)?.text,
+				);
+				assert.equal(
+					readRecord(readRecord(failedPostCloseLaunch.details).managedSessionOutcome).activeAfter,
 					true,
 				);
 				assert.equal(
-					(
-						failedPostCloseLaunch.details?.managedSessionOutcome as
-							| { activeAfter?: boolean; status?: string }
-							| undefined
-					)?.status,
+					readRecord(readRecord(failedPostCloseLaunch.details).managedSessionOutcome).status,
 					"unchanged",
 				);
 				assert.equal(
-					failedPostCloseLaunch.details?.sessionName,
-					postCloseStop.details?.sessionName,
+					readRecord(failedPostCloseLaunch.details).sessionName,
+					readRecord(postCloseStop.details).sessionName,
 				);
 				assert.deepEqual(
-					(
-						failedPostCloseLaunch.details?.batchFailure as
-							| { failedStep?: { lifecycle?: unknown } }
-							| undefined
-					)?.failedStep?.lifecycle,
+					readRecord(readRecord(readRecord(failedPostCloseLaunch.details).batchFailure).failedStep)
+						.lifecycle,
 					{ effectiveLaunch: { browserLaunched: true } },
 				);
 
 				const activeBeforeCombined = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: ["get", "url"],
 				});
-				assert.equal(activeBeforeCombined.details?.sessionName, postCloseStop.details?.sessionName);
-				assert.equal(activeBeforeCombined.isError, false, activeBeforeCombined.content[0]?.text);
 				assert.equal(
-					(
-						activeBeforeCombined.details?.managedSessionOutcome as
-							| { activeAfter?: boolean }
-							| undefined
-					)?.activeAfter,
+					readRecord(activeBeforeCombined.details).sessionName,
+					readRecord(postCloseStop.details).sessionName,
+				);
+				assert.equal(activeBeforeCombined.isError, false, activeBeforeCombined.content.at(0)?.text);
+				assert.equal(
+					readRecord(readRecord(activeBeforeCombined.details).managedSessionOutcome).activeAfter,
 					true,
 				);
 
@@ -3269,8 +3318,8 @@ test(
 					args: ["batch"],
 					stdin: JSON.stringify([["record", "start", "batch-start-close.webm"], ["close"]]),
 				});
-				assert.equal(combinedStartClose.isError, true, combinedStartClose.content[0]?.text);
-				assert.equal(combinedStartClose.details?.failureCategory, "artifact-missing");
+				assert.equal(combinedStartClose.isError, true, combinedStartClose.content.at(0)?.text);
+				assert.equal(readRecord(combinedStartClose.details).failureCategory, "artifact-missing");
 				const combinedCloseBranch = harness.ctx.sessionManager.getBranch().slice();
 				const releasedAfterCombinedStartClose = await executeRegisteredTool(
 					harness.tool,
@@ -3278,29 +3327,25 @@ test(
 					{ args: ["pdf", "batch-start-close.webm"] },
 				);
 				assert.doesNotMatch(
-					releasedAfterCombinedStartClose.content[0]?.text ?? "",
+					readString(readRecord(releasedAfterCombinedStartClose.content.at(0)).text),
 					/reserved by an active recording/,
 				);
-				const combinedManifest = combinedStartClose.details?.artifactManifest as
-					| { entries?: Array<{ path?: string; subcommand?: string }> }
-					| undefined;
+				const combinedManifest = readRecord(
+					readRecord(combinedStartClose.details).artifactManifest ?? {},
+				);
 				assert.equal(
-					(combinedManifest?.entries ?? []).some(
-						(entry) => entry.path === "batch-start-close.webm" && entry.subcommand === "start",
-					),
+					readArray(combinedManifest.entries ?? [])
+						.map(readRecord)
+						.some(
+							(entry) => entry.path === "batch-start-close.webm" && entry.subcommand === "start",
+						),
 					false,
 				);
-				const combinedArtifacts = combinedStartClose.details?.artifacts as
-					| Array<{
-							path?: string;
-							recordingState?: string;
-							status?: string;
-							subcommand?: string;
-							willExistOnStop?: boolean;
-					  }>
-					| undefined;
+				const combinedArtifacts = readArray(readRecord(combinedStartClose.details).artifacts).map(
+					readRecord,
+				);
 				assert.deepEqual(
-					combinedArtifacts?.map((artifact) => ({
+					combinedArtifacts.map((artifact) => ({
 						path: artifact.path,
 						recordingState: artifact.recordingState,
 						status: artifact.status,
@@ -3317,31 +3362,23 @@ test(
 						},
 					],
 				);
-				const combinedVerification = combinedStartClose.details?.artifactVerification as
-					| { missingCount?: number; pendingCount?: number }
-					| undefined;
-				assert.equal(combinedVerification?.missingCount, 1);
-				assert.equal(combinedVerification?.pendingCount, 0);
+				const combinedVerification = readRecord(
+					readRecord(combinedStartClose.details).artifactVerification,
+				);
+				assert.equal(combinedVerification.missingCount, 1);
+				assert.equal(combinedVerification.pendingCount, 0);
 				assert.equal(
-					(combinedStartClose.details?.nextActions as Array<{ id?: string }> | undefined)?.some(
-						(action) => action.id === "stop-pending-recording",
-					),
+					readArray(readRecord(combinedStartClose.details).nextActions)
+						.map(readRecord)
+						.some((action) => action.id === "stop-pending-recording"),
 					false,
 				);
 				assert.equal(
-					(
-						combinedStartClose.details?.managedSessionOutcome as
-							| { activeAfter?: boolean; status?: string }
-							| undefined
-					)?.activeAfter,
+					readRecord(readRecord(combinedStartClose.details).managedSessionOutcome).activeAfter,
 					false,
 				);
 				assert.equal(
-					(
-						combinedStartClose.details?.managedSessionOutcome as
-							| { activeAfter?: boolean; status?: string }
-							| undefined
-					)?.status,
+					readRecord(readRecord(combinedStartClose.details).managedSessionOutcome).status,
 					"closed",
 				);
 				const replayHarness = createExtensionHarness({
@@ -3360,11 +3397,13 @@ test(
 					{ args: ["--headed", "open", "https://example.test/"] },
 				);
 				assert.doesNotMatch(
-					replayFreshLaunch.content[0]?.text ?? "",
+					readString(readRecord(replayFreshLaunch.content.at(0)).text),
 					/launch-scoped flags would be ignored/i,
 				);
 
 				for (const subcommand of ["start", "restart"]) {
+					// Validation attempts share one native session and invocation log.
+					// oxlint-disable-next-line no-await-in-loop
 					const closeThenRecord = await executeRegisteredTool(harness.tool, harness.ctx, {
 						args: ["batch"],
 						stdin: JSON.stringify([
@@ -3372,10 +3411,16 @@ test(
 							["record", subcommand, `batch-close-${subcommand}.webm`],
 						]),
 					});
-					assert.equal(closeThenRecord.isError, true, closeThenRecord.content[0]?.text);
-					assert.equal(closeThenRecord.details?.failureCategory, "validation-error");
+					// Both fixed native record launch variants must reject close-then-record batches.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
+					assert.equal(closeThenRecord.isError, true, closeThenRecord.content.at(0)?.text);
+					// Both variants must fail validation before native dispatch.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
+					assert.equal(readRecord(closeThenRecord.details).failureCategory, "validation-error");
+					// Both variants must identify their unsupported lifecycle ordering.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
 					assert.match(
-						closeThenRecord.content[0]?.text ?? "",
+						readString(readRecord(closeThenRecord.content.at(0)).text),
 						new RegExp(
 							`record ${subcommand} cannot follow close.*Split the close and recording`,
 							"s",
@@ -3405,11 +3450,14 @@ test(
 					args: ["record", "stop"],
 				});
 				assert.equal(staleStop.isError, true);
-				assert.match(staleStop.content[0]?.text ?? "", /No recording in progress/);
+				assert.match(
+					readString(readRecord(staleStop.content.at(0)).text),
+					/No recording in progress/,
+				);
 				assert.equal(
-					(staleStop.details?.nextActions as Array<{ id?: string }> | undefined)?.some(
-						(action) => action.id === "stop-pending-recording",
-					) ?? false,
+					readArray(readRecord(staleStop.details).nextActions ?? [])
+						.map(readRecord)
+						.some((action) => action.id === "stop-pending-recording"),
 					false,
 				);
 				await rm(noRecordingMarker, { force: true });
@@ -3419,7 +3467,7 @@ test(
 					{ args: ["pdf", "stale-recording.webm"] },
 				);
 				assert.doesNotMatch(
-					releasedAfterDefinitiveStopFailure.content[0]?.text ?? "",
+					readString(readRecord(releasedAfterDefinitiveStopFailure.content.at(0)).text),
 					/reserved by an active recording/,
 				);
 
@@ -3433,11 +3481,14 @@ test(
 					stdin: JSON.stringify([["record", "stop"]]),
 				});
 				assert.equal(staleBatchStop.isError, true);
-				assert.match(staleBatchStop.content[0]?.text ?? "", /No recording in progress/);
+				assert.match(
+					readString(readRecord(staleBatchStop.content.at(0)).text),
+					/No recording in progress/,
+				);
 				assert.equal(
-					(staleBatchStop.details?.nextActions as Array<{ id?: string }> | undefined)?.some(
-						(action) => action.id === "stop-pending-recording",
-					) ?? false,
+					readArray(readRecord(staleBatchStop.details).nextActions ?? [])
+						.map(readRecord)
+						.some((action) => action.id === "stop-pending-recording"),
 					false,
 				);
 				await rm(noRecordingMarker, { force: true });
@@ -3447,7 +3498,7 @@ test(
 					{ args: ["pdf", "stale-batch-recording.webm"] },
 				);
 				assert.doesNotMatch(
-					releasedAfterDefinitiveBatchStopFailure.content[0]?.text ?? "",
+					readString(readRecord(releasedAfterDefinitiveBatchStopFailure.content.at(0)).text),
 					/reserved by an active recording/,
 				);
 
@@ -3465,23 +3516,23 @@ test(
 				});
 				assert.equal(orderedBatchRestart.isError, true);
 				assert.equal(
-					(orderedBatchRestart.details?.nextActions as Array<{ id?: string }> | undefined)?.some(
-						(action) => action.id === "stop-pending-recording",
-					),
+					readArray(readRecord(orderedBatchRestart.details).nextActions)
+						.map(readRecord)
+						.some((action) => action.id === "stop-pending-recording"),
 					true,
 				);
 				// A final observation spill can occupy the one-row manifest; current artifacts and reservations must survive.
-				const orderedArtifacts = orderedBatchRestart.details?.artifacts as
-					| Array<{ path?: string; subcommand?: string }>
-					| undefined;
+				const orderedArtifacts = readArray(readRecord(orderedBatchRestart.details).artifacts).map(
+					readRecord,
+				);
 				assert.equal(
-					orderedArtifacts?.some(
+					orderedArtifacts.some(
 						(entry) => entry.path === "ordered-new.webm" && entry.subcommand === "start",
 					),
 					true,
 				);
 				assert.equal(
-					orderedArtifacts?.some(
+					orderedArtifacts.some(
 						(entry) => entry.path === "ordered-new.webm" && entry.subcommand === "close-abandoned",
 					),
 					false,
@@ -3491,14 +3542,14 @@ test(
 					args: ["pdf", "ordered-old.webm"],
 				});
 				assert.doesNotMatch(
-					releasedOrderedOld.content[0]?.text ?? "",
+					readString(readRecord(releasedOrderedOld.content.at(0)).text),
 					/reserved by an active recording/,
 				);
 				const reservedOrderedNew = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: ["pdf", "ordered-new.webm"],
 				});
 				assert.match(
-					reservedOrderedNew.content[0]?.text ?? "",
+					readString(readRecord(reservedOrderedNew.content.at(0)).text),
 					/ordered-new\.webm is reserved by an active recording/,
 				);
 				await executeRegisteredTool(harness.tool, harness.ctx, { args: ["close"] });
@@ -3513,9 +3564,9 @@ test(
 						sessionMode: "fresh",
 					}),
 				]);
-				assert.equal(concurrentResults.filter((result) => result.isError).length, 1);
+				assert.equal(concurrentResults.filter((result) => result.isError === true).length, 1);
 				assert.match(
-					concurrentResults.find((result) => result.isError)?.content[0]?.text ?? "",
+					concurrentResults.find((result) => result.isError === true)?.content.at(0)?.text ?? "",
 					/concurrent\.webm is reserved by an active recording/,
 				);
 				const replacement = await executeRegisteredTool(harness.tool, harness.ctx, {
@@ -3527,7 +3578,7 @@ test(
 					args: ["pdf", "concurrent.webm"],
 				});
 				assert.doesNotMatch(
-					releasedAfterReplacement.content[0]?.text ?? "",
+					readString(readRecord(releasedAfterReplacement.content.at(0)).text),
 					/reserved by an active recording/,
 				);
 				assert.equal(
@@ -3594,8 +3645,8 @@ process.stdout.write(JSON.stringify({ success: true, data }));`,
 				const two = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: ["--namespace", "two", "--session", "shared", "record", "start", "two.webm"],
 				});
-				assert.equal(one.isError, false, one.content[0]?.text);
-				assert.equal(two.isError, false, two.content[0]?.text);
+				assert.equal(one.isError, false, one.content.at(0)?.text);
+				assert.equal(two.isError, false, two.content.at(0)?.text);
 				harness.setBranch([
 					{
 						type: "message",
@@ -3621,7 +3672,7 @@ process.stdout.write(JSON.stringify({ success: true, data }));`,
 				});
 				assert.equal(stillReserved.isError, true);
 				assert.match(
-					stillReserved.content[0]?.text ?? "",
+					readString(readRecord(stillReserved.content.at(0)).text),
 					/two\.webm is reserved by an active recording/,
 				);
 				assert.equal(
@@ -3635,7 +3686,10 @@ process.stdout.write(JSON.stringify({ success: true, data }));`,
 				const released = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: ["pdf", "two.webm"],
 				});
-				assert.doesNotMatch(released.content[0]?.text ?? "", /reserved by an active recording/);
+				assert.doesNotMatch(
+					readString(readRecord(released.content.at(0)).text),
+					/reserved by an active recording/,
+				);
 			});
 		} finally {
 			await rm(tempDir, { force: true, recursive: true });
@@ -3695,7 +3749,7 @@ process.stdout.write(JSON.stringify({ success: true, data }));`,
 				const activeEntry = harness.appendedEntries.find(
 					(entry) =>
 						entry.customType === "agent-browser-recording-reservation" &&
-						(entry.data as { state?: string }).state === "active",
+						readRecord(entry.data).state === "active",
 				);
 				assert.ok(activeEntry);
 				const branchA = [{ type: "custom", ...activeEntry }];
@@ -3736,7 +3790,7 @@ process.stdout.write(JSON.stringify({ success: true, data }));`,
 					branchA.some(
 						(entry) =>
 							entry.customType === "agent-browser-recording-reservation" &&
-							(entry.data as { state?: string }).state === "closed",
+							readRecord(entry.data).state === "closed",
 					),
 				);
 
@@ -3761,7 +3815,10 @@ process.stdout.write(JSON.stringify({ success: true, data }));`,
 				const released = await executeRegisteredTool(resumedHarness.tool, resumedHarness.ctx, {
 					args: ["pdf", "branch.webm"],
 				});
-				assert.doesNotMatch(released.content[0]?.text ?? "", /reserved by an active recording/);
+				assert.doesNotMatch(
+					readString(readRecord(released.content.at(0)).text),
+					/reserved by an active recording/,
+				);
 			});
 		} finally {
 			await rm(tempDir, { force: true, recursive: true });
@@ -3841,6 +3898,8 @@ test("agentBrowserExtension renders long TUI output compactly without changing m
 	);
 	assert.match(expandedScriptCallText, /\/\/ browser call follows[^\S\r\n]*\nawait browser/);
 	assert.match(expandedScriptCallText, /emit\(rows\)/);
+	// Rendered source must reject terminal escapes and invisible line/direction controls.
+	// oxlint-disable-next-line no-control-regex
 	assert.doesNotMatch(expandedScriptCallText, /[\r\x1B\u2028\u202E\u200B]/);
 	assert.match(expandedScriptCallText, /�/);
 
@@ -3855,6 +3914,8 @@ test("agentBrowserExtension renders long TUI output compactly without changing m
 	)
 		.render(200)
 		.join("\n");
+	// Model-supplied text must not emit NUL, BEL, or terminal escape controls.
+	// oxlint-disable-next-line no-control-regex
 	assert.doesNotMatch(maliciousCallText, /[\x00\x07\x1B]/);
 	assert.match(maliciousCallText, /https:\/\/example\.com\//);
 	assert.doesNotMatch(maliciousCallText, /secret stdin/);
@@ -3960,18 +4021,22 @@ test("agentBrowserExtension renders long TUI output compactly without changing m
 			if (key === "colors") {
 				return themeVersion;
 			}
-			return Reflect.get(target, key, target);
+			const value: unknown = Reflect.get(target, key, target);
+			return value;
 		},
 	});
 	cached.setResult(longResult, { expanded: false, isPartial: false }, liveTheme, false);
 	assert.ok(colorCalls > 20, "initial JSON tokens are colorized");
 	const firstCachedLines = cached.render(80);
 	colorCalls = 0;
-	const nativeSetText = Text.prototype.setText;
+	const setTextDescriptor = Object.getOwnPropertyDescriptor(Text.prototype, "setText");
+	assert.ok(setTextDescriptor);
+	const nativeSetText: unknown = setTextDescriptor.value;
+	assert.ok(typeof nativeSetText === "function");
 	let resets = 0;
 	Text.prototype.setText = function (value) {
 		resets++;
-		nativeSetText.call(this, value);
+		Reflect.apply(nativeSetText, this, [value]);
 	};
 	try {
 		for (let index = 0; index < 100; index++) {
@@ -3999,7 +4064,7 @@ test("agentBrowserExtension renders long TUI output compactly without changing m
 		);
 		assert.equal(resets, 0, "identical formatted output must retain the native Text layout cache");
 	} finally {
-		Text.prototype.setText = nativeSetText;
+		Object.defineProperty(Text.prototype, "setText", setTextDescriptor);
 	}
 	assert.deepEqual(cached.render(80), firstCachedLines);
 	cached.setResult(longResult, { expanded: true, isPartial: false }, liveTheme, false);
@@ -4037,6 +4102,8 @@ test("agentBrowserExtension renders long TUI output compactly without changing m
 	)
 		.render(120)
 		.join("\n");
+	// Scalar output must strip NUL, BEL, and terminal escape controls.
+	// oxlint-disable-next-line no-control-regex
 	assert.doesNotMatch(scalarText, /[\x00\x07\x1B]/);
 	assert.match(scalarText, /<toolOutput>Clicked: true red<\/toolOutput>/);
 	assert.match(scalarText, /Null�byte/);
@@ -4055,6 +4122,8 @@ test("agentBrowserExtension renders long TUI output compactly without changing m
 	)
 		.render(120)
 		.join("\n");
+	// Fallback prose must strip NUL, BEL, and terminal escape controls too.
+	// oxlint-disable-next-line no-control-regex
 	assert.doesNotMatch(fallbackText, /[\x00\x07\x1B]/);
 	assert.match(fallbackText, /<success>summary ok<\/success>/);
 });
@@ -4083,7 +4152,11 @@ test("agentBrowserExtension blocks direct and wrapped agent-browser bash unless 
 		{ toolName: "bash", input: { command: "printf audit" } },
 		{ toolName: "bash", input: { command: "which agent-browser" } },
 	]) {
+		// Every fixed unrelated event must bypass browser-history inspection.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.deepEqual(
+			// Preserve event order against the shared branch-history guard fixture.
+			// oxlint-disable-next-line no-await-in-loop
 			await runExtensionEventResults(defaultHarness.handlers, "tool_call", event, noHistoryCtx),
 			[],
 		);
@@ -4101,14 +4174,23 @@ test("agentBrowserExtension blocks direct and wrapped agent-browser bash unless 
 		"pnpm dlx agent-browser open https://example.com",
 		"/opt/homebrew/bin/agent-browser open https://example.com",
 	]) {
-		const [blocked] = await runExtensionEventResults<{ block: boolean; reason?: string }>(
+		// Shell probes share mutable user-intent and branch state.
+		// oxlint-disable-next-line no-await-in-loop
+		const [blocked] = await runExtensionEventResults(
 			defaultHarness.handlers,
 			"tool_call",
 			{ toolName: "bash", input: { command } },
 			defaultHarness.ctx,
 		);
-		assert.equal(blocked?.block, true, command);
-		assert.match(blocked?.reason ?? "", /Use the native agent_browser tool instead of bash/i);
+		// Every command in this fixed execution inventory must be blocked.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
+		assert.equal(readRecord(blocked).block, true, command);
+		// Every blocked spelling must point to the native tool.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
+		assert.match(
+			readString(readRecord(blocked).reason),
+			/Use the native agent_browser tool instead of bash/i,
+		);
 	}
 
 	const userMessage = {
@@ -4132,13 +4214,13 @@ test("agentBrowserExtension blocks direct and wrapped agent-browser bash unless 
 	);
 	// Pi applies later message_end replacements to this same message before persistence.
 	userMessage.content = "Open a page and summarize it.";
-	const [blockedAfterReplacement] = await runExtensionEventResults<{ block: boolean }>(
+	const [blockedAfterReplacement] = await runExtensionEventResults(
 		defaultHarness.handlers,
 		"tool_call",
 		directEvent,
 		noHistoryCtx,
 	);
-	assert.equal(blockedAfterReplacement?.block, true);
+	assert.equal(readRecord(blockedAfterReplacement).block, true);
 	userMessage.content = "Please debug the browser integration via bash.";
 	await runExtensionEvent(
 		defaultHarness.handlers,
@@ -4146,14 +4228,14 @@ test("agentBrowserExtension blocks direct and wrapped agent-browser bash unless 
 		{ newLeafId: "original", oldLeafId: "steered" },
 		defaultHarness.ctx,
 	);
-	const [blockedAfterTree] = await runExtensionEventResults<{ block: boolean }>(
+	const [blockedAfterTree] = await runExtensionEventResults(
 		defaultHarness.handlers,
 		"tool_call",
 		directEvent,
 		noHistoryCtx,
 	);
 	assert.equal(
-		blockedAfterTree?.block,
+		readRecord(blockedAfterTree).block,
 		true,
 		"branch navigation restores raw user intent instead of retaining steered text",
 	);
@@ -4173,12 +4255,16 @@ test("agentBrowserExtension blocks direct and wrapped agent-browser bash unless 
 		"echo ok && grep agent-browser README.md",
 		"cat <<'EOF'\nagent-browser open https://example.com\nEOF",
 	]) {
+		// Preserve shell-probe order against the shared user-intent/branch fixture.
+		// oxlint-disable-next-line no-await-in-loop
 		const innocuousResults = await runExtensionEventResults(
 			defaultHarness.handlers,
 			"tool_call",
 			{ toolName: "bash", input: { command } },
 			defaultHarness.ctx,
 		);
+		// Every command in this fixed non-execution inventory must pass without a block.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.deepEqual(innocuousResults, [], command);
 	}
 
@@ -4269,7 +4355,7 @@ process.stdout.write(JSON.stringify(out));`,
 				args: ["eval", "const c = 1;"],
 			});
 			assert.equal(failed.isError, true);
-			assert.match(failed.content[0]?.text ?? "", /already been declared/);
+			assert.match(readString(readRecord(failed.content.at(0)).text), /already been declared/);
 
 			const invocationsAfterFailure = await readInvocationLog(logPath);
 			const evalIndex = invocationsAfterFailure.findIndex((entry) => entry.args.includes("eval"));
@@ -4286,11 +4372,8 @@ process.stdout.write(JSON.stringify(out));`,
 				args: ["eval", "const c = 2;"],
 			});
 			assert.equal(retried.isError, true);
-			assert.equal(
-				(retried.details as { failureCategory?: string }).failureCategory,
-				"upstream-error",
-			);
-			assert.doesNotMatch(retried.content[0]?.text ?? "", /became unverified/);
+			assert.equal(readRecord(retried.details).failureCategory, "upstream-error");
+			assert.doesNotMatch(readString(readRecord(retried.content.at(0)).text), /became unverified/);
 			const finalInvocations = await readInvocationLog(logPath);
 			assert.equal(finalInvocations.filter((entry) => entry.args.includes("eval")).length, 2);
 		});
@@ -4362,7 +4445,7 @@ process.stdout.write(JSON.stringify(out));`,
 
 			const reloaded = await executeRegisteredTool(harness.tool, harness.ctx, { args: ["reload"] });
 			assert.equal(reloaded.isError, false);
-			assert.match(reloaded.content[0]?.text ?? "", /Example B/);
+			assert.match(readString(readRecord(reloaded.content.at(0)).text), /Example B/);
 			const afterReload = await readInvocationLog(logPath);
 			assert.equal(
 				afterReload.filter((entry) => entry.args.includes("get") && entry.args.includes("title"))

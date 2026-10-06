@@ -1,4 +1,6 @@
 import type { ArgvDescriptor } from "./argv-descriptor.js";
+import { getExplicitReadUrl } from "./read-command.js";
+export { getExplicitReadUrl } from "./read-command.js";
 import {
 	hasOnlyBooleanFlags,
 	hasOnlyOptionFlags,
@@ -35,7 +37,9 @@ const STATE_CLEAN_VALUE_FLAGS = new Set(["--older-than"]);
 const SESSION_ID_VALUE_FLAGS = new Set(["--scope", "--prefix"]);
 
 function isSessionlessAuthCommand(commandTokens: readonly string[]): boolean {
-	const [, subcommand, target, ...rest] = commandTokens;
+	const subcommand = commandTokens.at(1);
+	const target = commandTokens.at(2);
+	const rest = commandTokens.slice(3);
 	if (!SESSIONLESS_AUTH_SUBCOMMANDS.has(subcommand ?? "")) {
 		return false;
 	}
@@ -63,41 +67,52 @@ function isSessionlessDashboardCommand(commandTokens: readonly string[]): boolea
 	);
 }
 
-function isSessionlessStateCommand(commandTokens: readonly string[]): boolean {
-	const [, subcommand, firstArg, secondArg, ...rest] = commandTokens;
-	if (!STATE_SESSIONLESS_SUBCOMMANDS.has(subcommand ?? "")) {
-		return false;
-	}
-	if (subcommand === "list") {
-		return firstArg === undefined;
-	}
-	if (subcommand === "show") {
-		return isNonFlagToken(firstArg) && secondArg === undefined;
-	}
-	if (subcommand === "rename") {
-		return isNonFlagToken(firstArg) && isNonFlagToken(secondArg) && rest.length === 0;
-	}
-	if (subcommand === "clean") {
-		const optionTokens = commandTokens.slice(2);
-		return (
-			optionTokens.length > 0 &&
-			hasOnlyOptionFlags(optionTokens, EMPTY_BOOLEAN_FLAGS, STATE_CLEAN_VALUE_FLAGS)
-		);
-	}
-	if (subcommand !== "clear") {
-		return false;
-	}
+function isSessionlessStateClear(operands: readonly string[]): boolean {
+	const firstArg = operands.at(0);
+	const secondArg = operands.at(1);
+	const rest = operands.slice(2);
 	if ((firstArg === "--all" || firstArg === "-a") && secondArg === undefined) {
 		return true;
 	}
-	if (!isNonFlagToken(firstArg)) {
+	return (
+		isNonFlagToken(firstArg) &&
+		(secondArg === undefined || (secondArg === "--all" && rest.length === 0))
+	);
+}
+
+function isSessionlessStateCommand(commandTokens: readonly string[]): boolean {
+	const subcommand = commandTokens.at(1);
+	const firstArg = commandTokens.at(2);
+	const secondArg = commandTokens.at(3);
+	const rest = commandTokens.slice(4);
+	if (!STATE_SESSIONLESS_SUBCOMMANDS.has(subcommand ?? "")) {
 		return false;
 	}
-	return secondArg === undefined || (secondArg === "--all" && rest.length === 0);
+	switch (subcommand) {
+		case undefined:
+			return false;
+		case "list":
+			return firstArg === undefined;
+		case "show":
+			return isNonFlagToken(firstArg) && secondArg === undefined;
+		case "rename":
+			return isNonFlagToken(firstArg) && isNonFlagToken(secondArg) && rest.length === 0;
+		case "clean": {
+			const optionTokens = commandTokens.slice(2);
+			return (
+				optionTokens.length > 0 &&
+				hasOnlyOptionFlags(optionTokens, EMPTY_BOOLEAN_FLAGS, STATE_CLEAN_VALUE_FLAGS)
+			);
+		}
+		case "clear":
+			return isSessionlessStateClear(commandTokens.slice(2));
+		default:
+			return false;
+	}
 }
 
 function isSessionlessPluginCommand(commandTokens: readonly string[]): boolean {
-	const [, subcommand] = commandTokens;
+	const subcommand = commandTokens.at(1);
 	if (subcommand === undefined) {
 		return true;
 	}
@@ -117,81 +132,37 @@ function isSessionlessSessionCommand(commandTokens: readonly string[]): boolean 
 
 function isSessionlessCommand(commandTokens: readonly string[]): boolean {
 	const normalizedTokens = stripSessionlessShapeGlobalFlags(commandTokens);
-	const [command, subcommand] = normalizedTokens;
-	if (command === "skills") {
-		return ["list", "get", "path"].includes(subcommand ?? "");
+	const command = normalizedTokens.at(0);
+	const subcommand = normalizedTokens.at(1);
+	switch (command) {
+		case undefined:
+			return false;
+		case "skills":
+			return ["list", "get", "path"].includes(subcommand ?? "");
+		case "auth":
+			return isSessionlessAuthCommand(normalizedTokens);
+		case "plugin":
+			return isSessionlessPluginCommand(normalizedTokens);
+		case "mcp":
+			return true;
+		case "dashboard":
+			return isSessionlessDashboardCommand(normalizedTokens);
+		case "device":
+			return normalizedTokens.length === 2 && subcommand === "list";
+		case "doctor":
+			return hasOnlyBooleanFlags(normalizedTokens.slice(1), DOCTOR_BOOLEAN_FLAGS);
+		case "install":
+			return hasOnlyBooleanFlags(normalizedTokens.slice(1), INSTALL_BOOLEAN_FLAGS);
+		case "profiles":
+		case "upgrade":
+			return normalizedTokens.length === 1;
+		case "session":
+			return isSessionlessSessionCommand(normalizedTokens);
+		case "state":
+			return isSessionlessStateCommand(normalizedTokens);
+		default:
+			return false;
 	}
-	if (command === "auth") {
-		return isSessionlessAuthCommand(normalizedTokens);
-	}
-	if (command === "plugin") {
-		return isSessionlessPluginCommand(normalizedTokens);
-	}
-	if (command === "mcp") {
-		return true;
-	}
-	if (command === "dashboard") {
-		return isSessionlessDashboardCommand(normalizedTokens);
-	}
-	if (command === "device") {
-		return normalizedTokens.length === 2 && subcommand === "list";
-	}
-	if (command === "doctor") {
-		return hasOnlyBooleanFlags(normalizedTokens.slice(1), DOCTOR_BOOLEAN_FLAGS);
-	}
-	if (command === "install") {
-		return hasOnlyBooleanFlags(normalizedTokens.slice(1), INSTALL_BOOLEAN_FLAGS);
-	}
-	if (command === "profiles" || command === "upgrade") {
-		return normalizedTokens.length === 1;
-	}
-	if (command === "session") {
-		return isSessionlessSessionCommand(normalizedTokens);
-	}
-	if (command === "state") {
-		return isSessionlessStateCommand(normalizedTokens);
-	}
-	return false;
-}
-
-// undefined is a valid DOM read; null is invalid native syntax, which must not trigger page helpers.
-export function getExplicitReadUrl(commandTokens: readonly string[]): string | null | undefined {
-	if (commandTokens[0] !== "read") {
-		return undefined;
-	}
-	let url: string | undefined;
-	let llms = false;
-	let outline = false;
-	for (let index = 1; index < commandTokens.length; index += 1) {
-		const token = commandTokens[index];
-		if (["--filter", "--llms", "--timeout"].includes(token)) {
-			const value = commandTokens[++index];
-			if (value === undefined) {
-				return null;
-			}
-			if (token === "--llms") {
-				if (!["index", "full"].includes(value)) {
-					return null;
-				}
-				llms = true;
-			}
-			if (
-				token === "--timeout" &&
-				(!/^\+?\d+$/.test(value) || BigInt(value) === 0n || BigInt(value) > 18446744073709551615n)
-			) {
-				return null;
-			}
-		} else if (["--raw", "--require-md", "--outline", "--json"].includes(token)) {
-			if (token === "--outline") {
-				outline = true;
-			}
-		} else if (token.startsWith("--") || url !== undefined) {
-			return null;
-		} else {
-			url = token;
-		}
-	}
-	return llms && outline ? null : url;
 }
 
 export function isBrowserIndependentRead(

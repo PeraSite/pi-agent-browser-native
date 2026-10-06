@@ -203,14 +203,17 @@ async function create(name, reopenFile, cwd = output) {
 	}
 	async function probe(destination) {
 		const controller = new AbortController();
-		controller.abort();
+		// Reservation protection is the observed boundary. A pre-aborted signal would stop
+		// at queue admission before validation and cannot test destination protection.
 		const tool = session.agent.state.tools.find((entry) => entry.name === "agent_browser");
 		const result = await tool
 			.execute(
-				`abort-${++serial}`,
+				`reservation-${++serial}`,
 				{ args: [...explicit(), "screenshot", destination] },
 				controller.signal,
-				() => {},
+				() => {
+					// Reservation protection is checked from the final receipt, not intermediate updates.
+				},
 			)
 			.catch((error) => ({ thrown: { name: error.name, message: error.message } }));
 		log(`${name}:destination-probe`, { destination, result });
@@ -285,13 +288,13 @@ async function relative() {
 	a.session.dispose();
 	const b = await create("relative-reopen", file);
 	try {
-		const active = [
+		const restoredActive = [
 			...restoreRecordingReservationStateFromBranch(b.sm.getBranch()).active.values(),
 		];
 		const goodProtected = protectedResult(await b.probe(good.absolutePath));
-		const badProtected = protectedResult(await b.probe(path.resolve("bad.webm")));
-		log("relative-summary", { active, goodProtected, badProtected });
-		assert.deepEqual(active, [
+		const badProtected = protectedResult(await b.probe(path.join(output, "bad.webm")));
+		log("relative-summary", { active: restoredActive, goodProtected, badProtected });
+		assert.deepEqual(restoredActive, [
 			{
 				absolutePath: good.absolutePath,
 				cwd: output,
@@ -303,7 +306,12 @@ async function relative() {
 		assert.equal(goodProtected, true);
 		assert.equal(badProtected, false);
 	} finally {
-		b.session.dispose();
+		try {
+			// The unreserved negative control may have launched this private explicit browser.
+			await b.call({ args: [...explicit(), "close"] });
+		} finally {
+			b.session.dispose();
+		}
 	}
 }
 
@@ -323,21 +331,21 @@ async function active() {
 			assert.equal((await a.call({ args: [...explicit("C"), "close"] })).isError, false);
 		}
 		for (const [index, name] of names.entries()) {
-			assert.equal(
-				(
-					await a.call({
-						args: [
-							...explicit(name),
-							"open",
-							"data:text/html,<title>recording</title><h1>recording</h1>",
-						],
-					})
-				).isError,
-				false,
-			);
+			// Launch each named browser before recording it; sessions share the native host resources.
+			// oxlint-disable-next-line no-await-in-loop
+			const opened = await a.call({
+				args: [
+					...explicit(name),
+					"open",
+					"data:text/html,<title>recording</title><h1>recording</h1>",
+				],
+			});
+			assert.equal(opened.isError, false);
 			const undo = name === "B" ? faultOnce(a.sm, "active", name) : () => 0;
 			let started;
 			try {
+				// The per-session append fault must be restored before the next recording starts.
+				// oxlint-disable-next-line no-await-in-loop
 				started = await a.call({
 					args: [...explicit(name), "--json", "record", "start", videos[index]],
 				});
@@ -392,10 +400,14 @@ async function active() {
 			protectedResult(await current.probe(path.join(output, "closed.webm")));
 		const protection = [];
 		for (const video of videos) {
+			// Probe destinations serially on one reopened Pi/browser session.
+			// oxlint-disable-next-line no-await-in-loop
 			protection.push(protectedResult(await current.probe(video)));
 		}
 		const stops = [];
 		for (const name of names) {
+			// Finish and verify one native encoder before stopping the next owned recording.
+			// oxlint-disable-next-line no-await-in-loop
 			stops.push(await current.call({ args: [...explicit(name), "record", "stop"] }));
 		}
 		log("active-summary", {
@@ -427,6 +439,8 @@ async function active() {
 		}
 	} finally {
 		for (const name of names) {
+			// Close each owned session in order before disposing the shared Pi runtime.
+			// oxlint-disable-next-line no-await-in-loop
 			await current.call({ args: [...explicit(name), "close"] });
 		}
 		current.session.dispose();
@@ -470,10 +484,13 @@ async function tree() {
 		if (mode === "tree-reload") {
 			await a.session.reload();
 		} else {
-			await a.session.navigateTree(
-				mode === "tree-active" ? beforeRecording : mode === "tree-phantom" ? phantom : activeTarget,
-				{ summarize: false },
-			);
+			let target = activeTarget;
+			if (mode === "tree-active") {
+				target = beforeRecording;
+			} else if (mode === "tree-phantom") {
+				target = phantom;
+			}
+			await a.session.navigateTree(target, { summarize: false });
 		}
 		a.sm.appendCustomEntry("native-checkpoint", { tree: true });
 		const file = a.sm.getSessionFile();
@@ -512,6 +529,124 @@ async function tree() {
 	} finally {
 		await current.call({ args: [...explicit(), "close"] });
 		current.session.dispose();
+	}
+}
+
+function assertCleanupFailures(failures, actions, start, identity) {
+	for (const [index, result] of failures.entries()) {
+		assert.equal(result.isError, true);
+		assert.equal(
+			result.details.managedSessionCleanupOnlyReason,
+			"restore-disabled-daemon-without-provenance",
+		);
+		assert.equal(result.details.sessionName, start.details.sessionName);
+		assert.equal(result.details.namespace, identity[1]);
+		assert.deepEqual(actions[index]?.params, { args: [...identity, "close"] });
+		assert.ok(!result.details.nextActions.some((action) => action.id === "stop-pending-recording"));
+		assert.match(actions[index].safety, /abandoned\/unverified/);
+	}
+}
+
+async function verifyRequestedRecording({ a, closed, identity, requestedPrompt, video }) {
+	assert.equal(closed.isError, true);
+	assert.equal(closed.details.promptGuard?.reason, "requested-artifacts-missing-before-close");
+	assert.ok(
+		closed.details.promptGuard.missingArtifacts.some(
+			(artifact) =>
+				artifact.kind === "recording" && artifact.path === video && artifact.required === true,
+		),
+	);
+	const permittedStop = closed.details.nextActions?.find(
+		(action) => action.id === "stop-pending-recording",
+	);
+	assert.ok(permittedStop?.params, "The guarded close must return the now-permitted stop action");
+	const stopped = await a.call(permittedStop.params, requestedPrompt);
+	assert.equal(stopped.isError, false, JSON.stringify(stopped));
+	assert.equal(stopped.details.sessionName, identity[3]);
+	assert.equal(stopped.details.namespace ?? "", identity[1]);
+	assert.equal(stopped.details.artifactVerification?.verified, true);
+	const artifact = stopped.details.artifactVerification.artifacts.find(
+		(entry) => entry.absolutePath === video,
+	);
+	assert.equal(artifact?.state, "verified");
+	assert.ok(artifact.sizeBytes > 0);
+	const ffprobe = JSON.parse(
+		execFileSync(
+			"ffprobe",
+			["-v", "error", "-show_entries", "format=format_name,duration,size", "-of", "json", video],
+			{ encoding: "utf8" },
+		),
+	);
+	fs.writeFileSync(
+		path.join(output, "requested-recording.ffprobe.json"),
+		`${JSON.stringify(ffprobe, null, 2)}\n`,
+	);
+	assert.ok(ffprobe.format.format_name.split(",").includes("webm"));
+	assert.equal(Number(ffprobe.format.size), artifact.sizeBytes);
+	const finalClose = await a.call({ args: [...identity, "close"] }, requestedPrompt);
+	assert.equal(finalClose.isError, false, JSON.stringify(finalClose));
+	log("requested-recording-summary", {
+		mode,
+		identity,
+		prompt: requestedPrompt,
+		video,
+		closeGuard: closed.details.promptGuard,
+		permittedStop,
+		verification: stopped.details.artifactVerification,
+		ffprobe,
+		finalCloseIsError: finalClose.isError,
+	});
+}
+
+async function verifyManagedAbandonment({
+	a,
+	start,
+	stopAction,
+	identity,
+	requestedPrompt,
+	video,
+	sameStop,
+}) {
+	assert.equal(start.details.managedSessionRestoreDisabled, true);
+	const implicit = await a.call({ args: ["snapshot", "-i"] }, requestedPrompt);
+	const failedStop = await a.call(stopAction.params, requestedPrompt);
+	const explicitNamespaceStop = await a.call(
+		{ args: [...identity, "record", "stop"] },
+		requestedPrompt,
+	);
+	const failures = [implicit, failedStop, explicitNamespaceStop];
+	const actions = failures.map((result) =>
+		result.details.nextActions?.find((action) => action.id === "close-pending-recording"),
+	);
+	if (requestedRecording) {
+		assert.ok(
+			actions[0]?.params,
+			"The requested-recording control must use the returned close action",
+		);
+	}
+	const closed = await a.call(
+		actions[0]?.params ?? { args: [...identity, "close"] },
+		requestedPrompt,
+	);
+	const manifestRow = closed.details.artifactManifest?.entries.find(
+		(entry) => entry.absolutePath === video,
+	);
+	log("managed-summary", {
+		mode,
+		requestedRecording,
+		identity,
+		sameInstanceVerified: sameStop.details.artifactVerification.verified,
+		actions,
+		closed: !closed.isError,
+		manifestRow,
+	});
+	assertCleanupFailures(failures, actions, start, identity);
+	if (requestedRecording) {
+		await verifyRequestedRecording({ a, closed, identity, requestedPrompt, video });
+	} else {
+		assert.equal(closed.isError, false);
+		assert.notEqual(closed.details.artifactVerification?.verified, true);
+		assert.equal(manifestRow.subcommand, "close-abandoned");
 	}
 }
 
@@ -573,123 +708,15 @@ async function managed() {
 			assert.equal(stopped.isError, false);
 			assert.equal(stopped.details.artifactVerification.verified, true);
 		} else {
-			assert.equal(start.details.managedSessionRestoreDisabled, true);
-			const implicit = await a.call({ args: ["snapshot", "-i"] }, requestedPrompt);
-			const failedStop = await a.call(stopAction.params, requestedPrompt);
-			const explicitNamespaceStop = await a.call(
-				{ args: [...identity, "record", "stop"] },
-				requestedPrompt,
-			);
-			const failures = [implicit, failedStop, explicitNamespaceStop];
-			const actions = failures.map((result) =>
-				result.details.nextActions?.find((action) => action.id === "close-pending-recording"),
-			);
-			if (requestedRecording) {
-				assert.ok(
-					actions[0]?.params,
-					"The requested-recording control must use the returned close action",
-				);
-			}
-			const closed = await a.call(
-				actions[0]?.params ?? { args: [...identity, "close"] },
-				requestedPrompt,
-			);
-			const manifestRow = closed.details.artifactManifest?.entries.find(
-				(entry) => entry.absolutePath === video,
-			);
-			log("managed-summary", {
-				mode,
-				requestedRecording,
+			await verifyManagedAbandonment({
+				a,
+				start,
+				stopAction,
 				identity,
-				sameInstanceVerified: sameStop.details.artifactVerification.verified,
-				actions,
-				closed: !closed.isError,
-				manifestRow,
+				requestedPrompt,
+				video,
+				sameStop,
 			});
-			for (const [index, result] of failures.entries()) {
-				assert.equal(result.isError, true);
-				assert.equal(
-					result.details.managedSessionCleanupOnlyReason,
-					"restore-disabled-daemon-without-provenance",
-				);
-				assert.equal(result.details.sessionName, start.details.sessionName);
-				assert.equal(result.details.namespace, identity[1]);
-				assert.deepEqual(actions[index]?.params, { args: [...identity, "close"] });
-				assert.ok(
-					!result.details.nextActions.some((action) => action.id === "stop-pending-recording"),
-				);
-				assert.match(actions[index].safety, /abandoned\/unverified/);
-			}
-			if (requestedRecording) {
-				assert.equal(closed.isError, true);
-				assert.equal(
-					closed.details.promptGuard?.reason,
-					"requested-artifacts-missing-before-close",
-				);
-				assert.ok(
-					closed.details.promptGuard.missingArtifacts.some(
-						(artifact) =>
-							artifact.kind === "recording" &&
-							artifact.path === video &&
-							artifact.required === true,
-					),
-				);
-				const permittedStop = closed.details.nextActions?.find(
-					(action) => action.id === "stop-pending-recording",
-				);
-				assert.ok(
-					permittedStop?.params,
-					"The guarded close must return the now-permitted stop action",
-				);
-				const stopped = await a.call(permittedStop.params, requestedPrompt);
-				assert.equal(stopped.isError, false, JSON.stringify(stopped));
-				assert.equal(stopped.details.sessionName, identity[3]);
-				assert.equal(stopped.details.namespace ?? "", identity[1]);
-				assert.equal(stopped.details.artifactVerification?.verified, true);
-				const artifact = stopped.details.artifactVerification.artifacts.find(
-					(entry) => entry.absolutePath === video,
-				);
-				assert.equal(artifact?.state, "verified");
-				assert.ok(artifact.sizeBytes > 0);
-				const ffprobe = JSON.parse(
-					execFileSync(
-						"ffprobe",
-						[
-							"-v",
-							"error",
-							"-show_entries",
-							"format=format_name,duration,size",
-							"-of",
-							"json",
-							video,
-						],
-						{ encoding: "utf8" },
-					),
-				);
-				fs.writeFileSync(
-					path.join(output, "requested-recording.ffprobe.json"),
-					`${JSON.stringify(ffprobe, null, 2)}\n`,
-				);
-				assert.ok(ffprobe.format.format_name.split(",").includes("webm"));
-				assert.equal(Number(ffprobe.format.size), artifact.sizeBytes);
-				const finalClose = await a.call({ args: [...identity, "close"] }, requestedPrompt);
-				assert.equal(finalClose.isError, false, JSON.stringify(finalClose));
-				log("requested-recording-summary", {
-					mode,
-					identity,
-					prompt: requestedPrompt,
-					video,
-					closeGuard: closed.details.promptGuard,
-					permittedStop,
-					verification: stopped.details.artifactVerification,
-					ffprobe,
-					finalCloseIsError: finalClose.isError,
-				});
-			} else {
-				assert.equal(closed.isError, false);
-				assert.notEqual(closed.details.artifactVerification?.verified, true);
-				assert.equal(manifestRow.subcommand, "close-abandoned");
-			}
 		}
 	} finally {
 		if (identity) {

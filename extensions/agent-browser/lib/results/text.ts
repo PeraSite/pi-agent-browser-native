@@ -9,10 +9,18 @@ export function stringifyUnknown(value: unknown): string {
 		return "";
 	}
 	try {
-		return JSON.stringify(value, null, 2);
+		const serialized: unknown = JSON.stringify(value, null, 2);
+		return typeof serialized === "string" ? serialized : "";
 	} catch {
+		return stringifyFallback(value);
+	}
+}
+
+function stringifyFallback(value: unknown): string {
+	if (typeof value === "bigint" || typeof value === "symbol" || typeof value === "function") {
 		return String(value);
 	}
+	return Object.prototype.toString.call(value);
 }
 
 export function countLines(text: string): number {

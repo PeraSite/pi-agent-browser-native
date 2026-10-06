@@ -7,6 +7,7 @@
  */
 
 import assert from "node:assert/strict";
+import { readArray, readNumber, readRecord, readString } from "./helpers/assertions.js";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -44,7 +45,7 @@ test(
 		const snapshot = Array.from(
 			{ length: 120 },
 			(_, index) =>
-				`- generic \"Extension persisted snapshot row ${index + 1}\" [ref=e${index + 1}] clickable [onclick]`,
+				`- generic "Extension persisted snapshot row ${index + 1}" [ref=e${index + 1}] clickable [onclick]`,
 		).join("\n");
 		await writeFakeAgentBrowserBinary(
 			tempDir,
@@ -69,28 +70,23 @@ test(
 						args: ["snapshot", "-i"],
 					});
 					assert.equal(result.isError, false);
-					const spillPath = result.details?.fullOutputPath as string | undefined;
+					const spillPath = readString(result.details?.fullOutputPath);
 					assert.equal(typeof spillPath, "string");
 					assert.equal(
-						spillPath?.startsWith(join(sessionDir, ".pi-agent-browser-artifacts", TEST_SESSION_ID)),
+						spillPath.startsWith(join(sessionDir, ".pi-agent-browser-artifacts", TEST_SESSION_ID)),
 						true,
 					);
-					const manifest = result.details?.artifactManifest as
-						| {
-								entries?: Array<{ path?: string; retentionState?: string; storageScope?: string }>;
-								liveCount?: number;
-						  }
-						| undefined;
-					assert.equal(manifest?.liveCount, 1);
-					assert.equal(manifest?.entries?.[0]?.path, spillPath);
-					assert.equal(manifest?.entries?.[0]?.retentionState, "live");
-					assert.equal(manifest?.entries?.[0]?.storageScope, "persistent-session");
-					assert.match(String(result.details?.artifactRetentionSummary), /1 live, 0 evicted/);
-					await runExtensionEvent(harness.handlers, "session_shutdown");
-					assert.match(
-						await readFile(String(spillPath), "utf8"),
-						/Extension persisted snapshot row 120/,
+					const manifest = readRecord(result.details?.artifactManifest);
+					assert.equal(manifest.liveCount, 1);
+					assert.equal(readArray(manifest.entries).map(readRecord)[0].path, spillPath);
+					assert.equal(readArray(manifest.entries).map(readRecord)[0].retentionState, "live");
+					assert.equal(
+						readArray(manifest.entries).map(readRecord)[0].storageScope,
+						"persistent-session",
 					);
+					assert.match(readString(result.details?.artifactRetentionSummary), /1 live, 0 evicted/);
+					await runExtensionEvent(harness.handlers, "session_shutdown");
+					assert.match(await readFile(spillPath, "utf8"), /Extension persisted snapshot row 120/);
 				},
 			);
 		} finally {
@@ -126,7 +122,7 @@ test(
 			snapshot: Array.from(
 				{ length: 120 },
 				(_, index) =>
-					`- generic \"${label} resume manifest row ${index + 1}\" [ref=e${index + 1}] clickable [onclick]`,
+					`- generic "${label} resume manifest row ${index + 1}" [ref=e${index + 1}] clickable [onclick]`,
 			).join("\n"),
 		});
 		const firstData = buildData("first");
@@ -170,13 +166,9 @@ process.stdout.write(JSON.stringify({ success: true, data }));`,
 						args: ["snapshot", "-i"],
 					});
 					assert.equal(firstResult.isError, false);
-					const firstPath = firstResult.details?.fullOutputPath as string | undefined;
+					const firstPath = readString(firstResult.details?.fullOutputPath);
 					assert.equal(typeof firstPath, "string");
-					assert.equal(
-						(firstResult.details?.artifactManifest as { liveCount?: number } | undefined)
-							?.liveCount,
-						1,
-					);
+					assert.equal(readRecord(firstResult.details?.artifactManifest).liveCount, 1);
 					await runExtensionEvent(firstHarness.handlers, "session_shutdown");
 
 					const resumedHarness = createExtensionHarness({
@@ -197,41 +189,35 @@ process.stdout.write(JSON.stringify({ success: true, data }));`,
 						{ args: ["snapshot", "-i"] },
 					);
 					assert.equal(secondResult.isError, false);
-					const secondPath = secondResult.details?.fullOutputPath as string | undefined;
+					const secondPath = readString(secondResult.details?.fullOutputPath);
 					assert.equal(typeof secondPath, "string");
 					assert.equal(
-						await readFile(String(firstPath), "utf8").then(
+						await readFile(firstPath, "utf8").then(
 							() => true,
 							() => false,
 						),
 						false,
 					);
+					assert.match(await readFile(secondPath, "utf8"), /second resume manifest row 120/);
+					const manifest = readRecord(secondResult.details?.artifactManifest);
+					assert.equal(manifest.liveCount, 1);
+					assert.equal(manifest.evictedCount, 1);
+					assert.equal(
+						readArray(manifest.entries)
+							.map(readRecord)
+							.some((entry) => entry.path === firstPath && entry.retentionState === "evicted"),
+						true,
+					);
+					assert.equal(
+						readArray(manifest.entries)
+							.map(readRecord)
+							.some((entry) => entry.path === secondPath && entry.retentionState === "live"),
+						true,
+					);
 					assert.match(
-						await readFile(String(secondPath), "utf8"),
-						/second resume manifest row 120/,
+						readString(secondResult.details?.artifactRetentionSummary),
+						/1 live, 1 evicted/,
 					);
-					const manifest = secondResult.details?.artifactManifest as
-						| {
-								entries?: Array<{ path?: string; retentionState?: string }>;
-								evictedCount?: number;
-								liveCount?: number;
-						  }
-						| undefined;
-					assert.equal(manifest?.liveCount, 1);
-					assert.equal(manifest?.evictedCount, 1);
-					assert.equal(
-						manifest?.entries?.some(
-							(entry) => entry.path === firstPath && entry.retentionState === "evicted",
-						),
-						true,
-					);
-					assert.equal(
-						manifest?.entries?.some(
-							(entry) => entry.path === secondPath && entry.retentionState === "live",
-						),
-						true,
-					);
-					assert.match(String(secondResult.details?.artifactRetentionSummary), /1 live, 1 evicted/);
 				},
 			);
 		} finally {
@@ -270,21 +256,15 @@ process.stdout.write(JSON.stringify([
 				assert.equal(result.isError, false);
 				assert.equal(result.content[0]?.type, "text");
 				assert.equal(result.content[1]?.type, "image");
-				assert.match((result.content[0] as { text: string }).text, /Step 2 — screenshot/);
+				assert.match(readString(readRecord(result.content[0]).text), /Step 2 — screenshot/);
 				assert.match(
-					(result.content[0] as { text: string }).text,
+					readString(readRecord(result.content[0]).text),
 					/1 inline image attachment below/,
 				);
-				assert.equal(
-					(result.details?.imagePath as string | undefined)?.endsWith("batched.png"),
-					true,
-				);
+				assert.equal(readString(result.details?.imagePath).endsWith("batched.png"), true);
 				assert.deepEqual(result.details?.imagePaths, [imagePath]);
-				assert.equal(Array.isArray(result.details?.batchSteps), true);
-				assert.equal(
-					(result.details?.batchSteps as Array<{ imagePath?: string }>)[1]?.imagePath,
-					imagePath,
-				);
+				assert.equal(Array.isArray(result.details.batchSteps), true);
+				assert.equal(readArray(result.details.batchSteps).map(readRecord)[1]?.imagePath, imagePath);
 			});
 		} finally {
 			await rm(tempDir, { force: true, recursive: true });
@@ -318,47 +298,39 @@ process.exitCode = 1;`,
 				});
 				assert.equal(result.isError, true);
 				assert.equal(result.content[0]?.type, "text");
-				assert.match((result.content[0] as { text: string }).text, /Batch failed: 1\/2 succeeded/);
 				assert.match(
-					(result.content[0] as { text: string }).text,
+					readString(readRecord(result.content[0]).text),
+					/Batch failed: 1\/2 succeeded/,
+				);
+				assert.match(
+					readString(readRecord(result.content[0]).text),
 					/First failing step: 2 — click @zzz/,
 				);
 				assert.match(
-					(result.content[0] as { text: string }).text,
+					readString(readRecord(result.content[0]).text),
 					/Step 1 — open https:\/\/example.com\/? \(succeeded\)/,
 				);
-				assert.match((result.content[0] as { text: string }).text, /Example Domain/);
+				assert.match(readString(readRecord(result.content[0]).text), /Example Domain/);
 				assert.match(
-					(result.content[0] as { text: string }).text,
+					readString(readRecord(result.content[0]).text),
 					/Step 2 — click @zzz \(failed\)/,
 				);
-				assert.match((result.content[0] as { text: string }).text, /Error: Unknown ref: zzz/);
-				assert.match((result.content[0] as { text: string }).text, /snapshot -i/);
-				assert.match((result.content[0] as { text: string }).text, /find role\|text\|label/);
-				assert.match((result.content[0] as { text: string }).text, /scrollintoview/);
+				assert.match(readString(readRecord(result.content[0]).text), /Error: Unknown ref: zzz/);
+				assert.match(readString(readRecord(result.content[0]).text), /snapshot -i/);
+				assert.match(readString(readRecord(result.content[0]).text), /find role\|text\|label/);
+				assert.match(readString(readRecord(result.content[0]).text), /scrollintoview/);
 				assert.equal(
-					(result.details?.summary as string | undefined)?.includes("Batch failed: 1/2 succeeded"),
+					readString(result.details?.summary).includes("Batch failed: 1/2 succeeded"),
 					true,
 				);
-				assert.equal((result.details?.exitCode as number | undefined) ?? 0, 1);
+				assert.equal(readNumber(result.details?.exitCode ?? 0), 1);
+				assert.equal(readRecord(readRecord(result.details?.batchFailure).failedStep).index, 1);
 				assert.equal(
-					(
-						result.details?.batchFailure as
-							| { failedStep?: { index?: number; commandText?: string } }
-							| undefined
-					)?.failedStep?.index,
-					1,
-				);
-				assert.equal(
-					(
-						result.details?.batchFailure as
-							| { failedStep?: { index?: number; commandText?: string } }
-							| undefined
-					)?.failedStep?.commandText,
+					readRecord(readRecord(result.details?.batchFailure).failedStep).commandText,
 					"click @zzz",
 				);
 				assert.equal(Array.isArray(result.details?.batchSteps), true);
-				assert.equal((result.details?.stderr as string | undefined) ?? "", "");
+				assert.equal(readString(result.details?.stderr ?? ""), "");
 			});
 		} finally {
 			await rm(tempDir, { force: true, recursive: true });
@@ -402,22 +374,15 @@ if (args.includes("click")) {
 				});
 				assert.equal(result.isError, false);
 				assert.equal(result.content[0]?.type, "text");
-				assert.match((result.content[0] as { text: string }).text, /Clicked: true/);
+				assert.match(readString(readRecord(result.content[0]).text), /Clicked: true/);
 				assert.match(
-					(result.content[0] as { text: string }).text,
+					readString(readRecord(result.content[0]).text),
 					/Href: https:\/\/example.com\/docs/,
 				);
-				assert.match((result.content[0] as { text: string }).text, /Current page:/);
-				assert.match((result.content[0] as { text: string }).text, /Destination Docs/);
-				assert.equal(
-					(result.details?.navigationSummary as { title?: string; url?: string } | undefined)
-						?.title,
-					"Destination Docs",
-				);
-				assert.equal(
-					(result.details?.navigationSummary as { title?: string; url?: string } | undefined)?.url,
-					"https://example.com/docs",
-				);
+				assert.match(readString(readRecord(result.content[0]).text), /Current page:/);
+				assert.match(readString(readRecord(result.content[0]).text), /Destination Docs/);
+				assert.equal(readRecord(result.details?.navigationSummary).title, "Destination Docs");
+				assert.equal(readRecord(result.details?.navigationSummary).url, "https://example.com/docs");
 
 				const invocations = await readInvocationLog(logPath);
 				assert.equal(invocations.length, 5);
@@ -552,21 +517,31 @@ process.stdout.write(JSON.stringify({ success: true, data }));`,
 			await withPatchedEnv({ PATH: `${tempDir}:${process.env.PATH ?? ""}` }, async () => {
 				for (const mode of ["stdin", "raw", "snapshot", "open-click", "closed"]) {
 					const harness = createExtensionHarness({ cwd: tempDir });
+					// Fixture transitions and their assertions run in order against this test's shared state.
+					// oxlint-disable-next-line no-await-in-loop
 					await runExtensionEvent(
 						harness.handlers,
 						"session_start",
 						{ reason: "new" },
 						harness.ctx,
 					);
+					// Fixture transitions and their assertions run in order against this test's shared state.
+					// oxlint-disable-next-line no-await-in-loop
 					const opened = await executeRegisteredTool(harness.tool, harness.ctx, {
 						args: ["--session", "popup", "open", "https://popup.example/same"],
 					});
+					// All five literal popup modes run their lifecycle checks before the next mode.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
 					assert.equal(opened.isError, false, JSON.stringify(opened));
+					// All five literal popup modes run their lifecycle checks before the next mode.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
 					assert.ok(opened.details);
 					const resumed = createExtensionHarness({
 						cwd: tempDir,
 						branch: harness.ctx.sessionManager.getBranch().slice(),
 					});
+					// Fixture transitions and their assertions run in order against this test's shared state.
+					// oxlint-disable-next-line no-await-in-loop
 					await runExtensionEvent(
 						resumed.handlers,
 						"session_start",
@@ -578,6 +553,8 @@ process.stdout.write(JSON.stringify({ success: true, data }));`,
 						["click", "#popup"],
 						...(mode === "closed" ? [["close"]] : []),
 					];
+					// Fixture transitions and their assertions run in order against this test's shared state.
+					// oxlint-disable-next-line no-await-in-loop
 					const popup = await executeRegisteredTool(resumed.tool, resumed.ctx, {
 						args: [
 							"--session",
@@ -588,10 +565,18 @@ process.stdout.write(JSON.stringify({ success: true, data }));`,
 						],
 						stdin: JSON.stringify(steps),
 					});
+					// All five literal popup modes run their lifecycle checks before the next mode.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
 					assert.equal(popup.isError, false, JSON.stringify(popup));
 					if (mode === "closed") {
+						// The fixed closed mode checks retired target and no probe, then skips live-page actions.
+						// oxlint-disable-next-line node-test/no-conditional-assertion
 						assert.equal(popup.details?.sessionTabTarget, undefined);
+						// Fixture transitions and their assertions run in order against this test's shared state.
+						// oxlint-disable-next-line no-await-in-loop
 						const invocations = await readInvocationLog(logPath);
+						// The fixed closed mode checks retired target and no probe, then skips live-page actions.
+						// oxlint-disable-next-line node-test/no-conditional-assertion
 						assert.equal(
 							invocations.at(-1)?.args.includes("batch"),
 							true,
@@ -599,24 +584,38 @@ process.stdout.write(JSON.stringify({ success: true, data }));`,
 						);
 						continue;
 					}
-					assert.equal(
-						(popup.details?.sessionTabTarget as { targetId?: string })?.targetId,
-						"t2",
-						mode,
-					);
+					// All five literal popup modes run their lifecycle checks before the next mode.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
+					assert.equal(readRecord(popup.details?.sessionTabTarget).targetId, "t2", mode);
 					if (mode === "snapshot") {
+						// Fixture transitions and their assertions run in order against this test's shared state.
+						// oxlint-disable-next-line no-await-in-loop
 						const snapshot = await executeRegisteredTool(resumed.tool, resumed.ctx, {
 							args: ["--session", "popup", "snapshot", "-i"],
 						});
+						// The fixed snapshot mode additionally checks refs; all live modes still check the saved tab.
+						// oxlint-disable-next-line node-test/no-conditional-assertion
 						assert.equal(snapshot.isError, false, JSON.stringify(snapshot));
+						// The fixed snapshot mode additionally checks refs; all live modes still check the saved tab.
+						// oxlint-disable-next-line node-test/no-conditional-assertion
 						assert.match(JSON.stringify(snapshot.details?.data), /Save t2/);
+						// The fixed snapshot mode additionally checks refs; all live modes still check the saved tab.
+						// oxlint-disable-next-line node-test/no-conditional-assertion
 						assert.equal(snapshot.details?.sessionTabCorrection, undefined);
 					}
+					// Fixture transitions and their assertions run in order against this test's shared state.
+					// oxlint-disable-next-line no-await-in-loop
 					const save = await executeRegisteredTool(resumed.tool, resumed.ctx, {
 						args: ["--session", "popup", "click", "#save"],
 					});
+					// All five literal popup modes run their lifecycle checks before the next mode.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
 					assert.equal(save.isError, false, JSON.stringify(save));
-					assert.equal((save.details?.data as { savedTab?: string })?.savedTab, "t2");
+					// All five literal popup modes run their lifecycle checks before the next mode.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
+					assert.equal(readRecord(save.details?.data).savedTab, "t2");
+					// All five literal popup modes run their lifecycle checks before the next mode.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
 					assert.equal(save.details?.sessionTabCorrection, undefined);
 				}
 			});
@@ -658,20 +657,31 @@ process.stdout.write(JSON.stringify({ success: true, data }));`,
 					["tab", "t2"],
 					["batch", "--bail"],
 				]) {
+					// Fixture transitions and their assertions run in order against this test's shared state.
+					// oxlint-disable-next-line no-await-in-loop
 					await rm(statePath, { force: true });
 					const harness = createExtensionHarness({ cwd: tempDir });
+					// Fixture transitions and their assertions run in order against this test's shared state.
+					// oxlint-disable-next-line no-await-in-loop
 					await runExtensionEvent(
 						harness.handlers,
 						"session_start",
 						{ reason: "new" },
 						harness.ctx,
 					);
-					const call = (args: string[], stdin?: string) =>
+					const call = (args: readonly string[], stdin?: string) =>
 						executeRegisteredTool(harness.tool, harness.ctx, {
 							args: ["--session", "blank-tab", ...args],
 							stdin,
 						});
-					assert.equal((await call(["open", "https://example.test/original"])).isError, false);
+					// Fixture transitions and their assertions run in order against this test's shared state.
+					// oxlint-disable-next-line no-await-in-loop
+					const initialOpenResult = await call(["open", "https://example.test/original"]);
+					// Each of the three literal tab-selection modes checks blank focus and subsequent navigation.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
+					assert.equal(initialOpenResult.isError, false);
+					// Fixture transitions and their assertions run in order against this test's shared state.
+					// oxlint-disable-next-line no-await-in-loop
 					const selected = await call(
 						selection,
 						selection[0] === "batch"
@@ -681,22 +691,39 @@ process.stdout.write(JSON.stringify({ success: true, data }));`,
 								])
 							: undefined,
 					);
+					// Each of the three literal tab-selection modes checks blank focus and subsequent navigation.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
 					assert.equal(selected.isError, false);
+					// Each of the three literal tab-selection modes checks blank focus and subsequent navigation.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
 					assert.equal(selected.details?.aboutBlankSessionMismatch, undefined, selection.join(" "));
+					// Each of the three literal tab-selection modes checks blank focus and subsequent navigation.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
+					assert.equal(readRecord(selected.details?.sessionTabTarget).url, "about:blank");
+					// Each of the three literal tab-selection modes checks blank focus and subsequent navigation.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
 					assert.equal(
-						(selected.details?.sessionTabTarget as { url?: string })?.url,
-						"about:blank",
-					);
-					assert.equal(
-						JSON.parse(await readFile(statePath, "utf8")).active,
+						// Fixture transitions and their assertions run in order against this test's shared state.
+						// oxlint-disable-next-line no-await-in-loop
+						readRecord(JSON.parse(await readFile(statePath, "utf8"))).active,
 						"t2",
 						selection.join(" "),
 					);
+					// Fixture transitions and their assertions run in order against this test's shared state.
+					// oxlint-disable-next-line no-await-in-loop
 					const opened = await call(["open", "https://example.test/second"]);
+					// Each of the three literal tab-selection modes checks blank focus and subsequent navigation.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
 					assert.equal(opened.isError, false);
-					assert.equal((opened.details?.data as { navigatedTab?: string })?.navigatedTab, "t2");
+					// Each of the three literal tab-selection modes checks blank focus and subsequent navigation.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
+					assert.equal(readRecord(opened.details?.data).navigatedTab, "t2");
+					// Each of the three literal tab-selection modes checks blank focus and subsequent navigation.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
 					assert.equal(
-						JSON.parse(await readFile(statePath, "utf8")).urls.t1,
+						// Fixture transitions and their assertions run in order against this test's shared state.
+						// oxlint-disable-next-line no-await-in-loop
+						readRecord(readRecord(JSON.parse(await readFile(statePath, "utf8"))).urls).t1,
 						"https://example.test/original",
 					);
 				}
@@ -862,14 +889,8 @@ else process.stdout.write(JSON.stringify({ success: true, data: page }));`,
 				});
 				assert.equal(blank.isError, false, JSON.stringify(blank));
 				assert.equal(blank.details?.aboutBlankSessionMismatch, undefined);
-				assert.equal(
-					(blank.details?.sessionTabTarget as { title?: string; url?: string } | undefined)?.url,
-					"about:blank",
-				);
-				assert.equal(
-					(blank.details?.sessionTabTarget as { title?: string; url?: string } | undefined)?.title,
-					undefined,
-				);
+				assert.equal(readRecord(blank.details?.sessionTabTarget).url, "about:blank");
+				assert.equal(readRecord(blank.details?.sessionTabTarget).title, undefined);
 				assert.equal(await readFile(statePath, "utf8"), "blank");
 
 				assert.equal(

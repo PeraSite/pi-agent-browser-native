@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readRecord } from "./helpers/assertions.js";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
@@ -28,6 +29,8 @@ test("upstream version output accepts stable versions at or above the supported 
 		"0.35.2",
 		"1.0.0",
 	]) {
+		// Every fixed supported stable version must pass the minimum-version contract.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.equal(getAgentBrowserVersionValidationError(`agent-browser ${version}\n`), undefined);
 	}
 	assert.match(
@@ -74,12 +77,15 @@ process.stdout.write(JSON.stringify({ success: true, data: { url: "https://examp
 						args: ["open", "https://example.com"],
 					});
 					assert.equal(blocked.isError, true);
-					assert.equal(blocked.details?.failureCategory, "validation-error");
-					assert.equal(blocked.details?.observedVersion, "0.33.20");
-					assert.equal(blocked.details?.minimumSupportedVersion, MINIMUM_AGENT_BROWSER_VERSION);
-					assert.equal(blocked.details?.expectedVersion, TARGET_AGENT_BROWSER_VERSION);
+					assert.equal(readRecord(blocked.details).failureCategory, "validation-error");
+					assert.equal(readRecord(blocked.details).observedVersion, "0.33.20");
+					assert.equal(
+						readRecord(blocked.details).minimumSupportedVersion,
+						MINIMUM_AGENT_BROWSER_VERSION,
+					);
+					assert.equal(readRecord(blocked.details).expectedVersion, TARGET_AGENT_BROWSER_VERSION);
 					assert.ok(
-						(blocked.content[0]?.text ?? "").includes(
+						(blocked.content.at(0)?.text ?? "").includes(
 							`Install agent-browser ${TARGET_AGENT_BROWSER_VERSION}`,
 						),
 					);
@@ -89,7 +95,7 @@ process.stdout.write(JSON.stringify({ success: true, data: { url: "https://examp
 						args: ["--version"],
 					});
 					assert.equal(inspection.isError, false);
-					assert.match(inspection.content[0]?.text ?? "", /0\.33\.20/);
+					assert.match(inspection.content.at(0)?.text ?? "", /0\.33\.20/);
 
 					const doctor = await executeRegisteredTool(harness.tool, harness.ctx, {
 						args: ["doctor"],

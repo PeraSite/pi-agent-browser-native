@@ -7,6 +7,7 @@
  */
 
 import assert from "node:assert/strict";
+import { readRecord, readString } from "./helpers/assertions.js";
 import { execFile as execFileCallback } from "node:child_process";
 import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -14,88 +15,10 @@ import { join } from "node:path";
 import test, { before } from "node:test";
 import { promisify } from "node:util";
 
+// Native execFile returns ChildProcess and supplies custom promisify; the ambient callback expects void.
+// oxlint-disable-next-line typescript/strict-void-return
 const execFile = promisify(execFileCallback);
-const verifyPackageModulePath = "../scripts/verify-package.mjs";
-
-interface PackResult {
-	entryCount: number;
-	filename: string;
-	files: Array<{ path: string }>;
-	size: number;
-	unpackedSize: number;
-}
-
-interface PublishContract {
-	declaredPackageFiles: string[];
-	forbiddenPackedFiles: string[];
-	forbiddenRepoFiles: string[];
-	requiredPackedFiles: string[];
-	requiredRepoFiles: string[];
-}
-
-const verifyPackageModule = (await import(verifyPackageModulePath)) as {
-	FORBIDDEN_PACKED_FILES: string[];
-	FORBIDDEN_REPO_FILES: string[];
-	collectPackedMarkdownLinkFailures: (options: {
-		cwd?: string;
-		packedPaths: Set<string>;
-	}) => Promise<string[]>;
-	loadPublishContract: (options?: { cwd?: string }) => Promise<PublishContract>;
-	packToTemporaryPackageDir: (cwd?: string) => Promise<{
-		cleanup: () => Promise<void>;
-		packageDir: string;
-		packResult: PackResult;
-	}>;
-	collectVerificationFailures: (options: {
-		forbiddenPackedFiles: string[];
-		forbiddenRepoFiles: string[];
-		missingPackedFiles: string[];
-		missingRepoFiles: string[];
-	}) => string[];
-	evaluatePackResult: (options: {
-		forbiddenRepoFiles: string[];
-		missingRepoFiles: string[];
-		packResult: PackResult;
-		publishContract: Pick<PublishContract, "forbiddenPackedFiles" | "requiredPackedFiles">;
-	}) => {
-		failures: string[];
-		forbiddenPackedFiles: string[];
-		missingPackedFiles: string[];
-	};
-	evaluatePiSmokeResult: (options: {
-		packageDir: string;
-		tools: Array<{
-			name: string;
-			path?: string;
-			source?: { path?: string };
-			sourceInfo?: { path?: string };
-		}>;
-	}) => string[];
-	executePackagedAgentBrowserSmoke: (options: {
-		packageDir: string;
-		session: {
-			createReplacedSessionContext?: () => unknown;
-			getToolDefinition?: (name: string) =>
-				| {
-						execute: (
-							toolCallId: string,
-							params: { args: string[] },
-							signal: AbortSignal | undefined,
-							onUpdate: ((update: unknown) => void) | undefined,
-							ctx: unknown,
-						) => Promise<unknown>;
-				  }
-				| undefined;
-		};
-	}) => Promise<{ failures: string[]; invocation?: unknown }>;
-	parseCliArgs: (argv?: string[]) => { listFiles: boolean; showHelp: boolean; smokePi: boolean };
-	verifyPackageRelease: (options?: { cwd?: string }) => Promise<{ failures: string[] }>;
-};
-before(async () => {
-	await execFile(process.execPath, ["scripts/build.mjs"], { maxBuffer: 10 * 1024 * 1024 });
-});
-
-const {
+import {
 	FORBIDDEN_PACKED_FILES,
 	FORBIDDEN_REPO_FILES,
 	collectPackedMarkdownLinkFailures,
@@ -107,7 +30,11 @@ const {
 	packToTemporaryPackageDir,
 	parseCliArgs,
 	verifyPackageRelease,
-} = verifyPackageModule;
+} from "../scripts/verify-package.mjs";
+
+before(async () => {
+	await execFile(process.execPath, ["scripts/build.mjs"], { maxBuffer: 10 * 1024 * 1024 });
+});
 
 test("parseCliArgs supports help, list-files, and smoke-pi modes", () => {
 	assert.deepEqual(parseCliArgs([]), { listFiles: false, showHelp: false, smokePi: false });
@@ -193,7 +120,11 @@ test("evaluatePiSmokeResult requires exactly one packaged agent_browser source a
 });
 
 test("executePackagedAgentBrowserSmoke invokes the packaged agent_browser tool with deterministic version args", async () => {
-	const calls: Array<{ ctx: unknown; params: { args: string[] }; toolCallId: string }> = [];
+	const calls: Array<{
+		ctx: unknown;
+		params: Readonly<{ args: readonly string[] }>;
+		toolCallId: string;
+	}> = [];
 	const context = { cwd: "/tmp/pkg/package" };
 	const report = await executePackagedAgentBrowserSmoke({
 		packageDir: "/tmp/pkg/package",
@@ -202,7 +133,13 @@ test("executePackagedAgentBrowserSmoke invokes the packaged agent_browser tool w
 			getToolDefinition: (name: string) =>
 				name === "agent_browser"
 					? {
-							execute: async (toolCallId, params, _signal, onUpdate, ctx) => {
+							execute: async (
+								toolCallId: string,
+								params: Readonly<{ args: readonly string[] }>,
+								_signal: AbortSignal | undefined,
+								onUpdate: ((update: unknown) => void) | undefined,
+								ctx: unknown,
+							) => {
 								onUpdate?.({
 									content: [{ type: "text", text: "Running agent-browser --version" }],
 								});
@@ -259,31 +196,24 @@ test("executePackagedAgentBrowserSmoke reports packaged invocation failures clea
 });
 
 test("package metadata keeps Pi peers host-provided and declares the qualified runtime graph", async () => {
-	const packageJson = JSON.parse(await readFile("package.json", "utf8")) as {
-		dependencies?: Record<string, string>;
-		engines?: Record<string, string>;
-		overrides?: Record<string, string>;
-		packageManager?: string;
-		peerDependencies?: Record<string, string>;
-		scripts?: Record<string, string>;
-	};
+	const packageJson = readRecord(JSON.parse(await readFile("package.json", "utf8")));
 
 	assert.equal(
-		packageJson.dependencies?.["cross-spawn"],
+		readRecord(packageJson.dependencies)["cross-spawn"],
 		"7.0.6",
 		"the spawner must not rely on Pi's private transitive dependencies",
 	);
 	assert.equal(
-		packageJson.dependencies?.["path-key"],
+		readRecord(packageJson.dependencies)["path-key"],
 		"3.1.1",
 		"launcher PATH selection must match cross-spawn 7",
 	);
 	assert.equal(
-		packageJson.dependencies?.which,
+		readRecord(packageJson.dependencies).which,
 		"2.0.2",
 		"launcher resolution must match cross-spawn 7",
 	);
-	assert.equal(packageJson.engines?.node, ">=24.21.0");
+	assert.equal(readRecord(packageJson.engines).node, ">=24.21.0");
 	assert.equal(packageJson.packageManager, "npm@12.2.0");
 	assert.equal(
 		packageJson.overrides,
@@ -296,19 +226,21 @@ test("package metadata keeps Pi peers host-provided and declares the qualified r
 		"@earendil-works/pi-tui",
 		"typebox",
 	]) {
+		// All four literal Pi peer names are checked; no peer-dependent branch skips a row.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.equal(
-			packageJson.peerDependencies?.[packageName],
+			readRecord(packageJson.peerDependencies)[packageName],
 			"*",
 			`${packageName} should stay host-provided per Pi package docs`,
 		);
 	}
 	assert.equal(
-		packageJson.scripts?.prepare,
+		readRecord(packageJson.scripts).prepare,
 		"node ./scripts/prepare.mjs",
 		"Packed and GitHub/source installs must build the ignored dist entrypoint before Pi loads it, even when Pi installs with --omit=dev",
 	);
 	assert.equal(
-		packageJson.scripts?.prepack,
+		readRecord(packageJson.scripts).prepack,
 		undefined,
 		"npm pack must not duplicate the prepare-owned build",
 	);
@@ -371,6 +303,8 @@ test("publish contract derives required packed files from package.json", async (
 		"scripts/platform-smoke/browser-dogfood-windows.ps1",
 		"scripts/platform-smoke/linux-image/Dockerfile",
 	]) {
+		// Every literal platform publish path is required by this nonempty contract table.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.ok(
 			publishContract.requiredPackedFiles.includes(path),
 			`expected publish contract to require ${path}`,
@@ -489,10 +423,14 @@ test("evaluatePackResult rejects private paths and tarballs without rejecting ne
 				requiredPackedFiles: ["package.json"],
 			},
 		});
+		// Each literal allowed/forbidden path row checks both classification and failures.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.deepEqual(report.forbiddenPackedFiles, [...forbidden], path);
+		// Each literal allowed/forbidden path row checks both classification and failures.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.deepEqual(
 			report.failures,
-			forbidden.length ? [`Forbidden packed file present: ${forbidden.join(", ")}`] : [],
+			forbidden.length > 0 ? [`Forbidden packed file present: ${forbidden.join(", ")}`] : [],
 			path,
 		);
 	}
@@ -530,11 +468,14 @@ test("packToTemporaryPackageDir writes a tarball even under npm publish dry-run 
 	try {
 		packed = await packToTemporaryPackageDir();
 		await access(join(packed.packageDir, "package.json"));
-		assert.match(packed.packResult.filename, /^pi-agent-browser-native-.*\.tgz$/);
+		assert.match(
+			readString(readRecord(packed.packResult).filename),
+			/^pi-agent-browser-native-.*\.tgz$/,
+		);
 		const report = evaluatePackResult({
 			forbiddenRepoFiles: [],
 			missingRepoFiles: [],
-			packResult: packed.packResult,
+			packResult: readRecord(packed.packResult),
 			publishContract: await loadPublishContract(),
 		});
 		assert.deepEqual(

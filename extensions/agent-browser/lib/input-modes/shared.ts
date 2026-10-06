@@ -4,10 +4,18 @@ import {
 	SOURCE_LOOKUP_MAX_WORKSPACE_FILES,
 } from "./types.js";
 
+function isString(value: unknown): value is string {
+	return typeof value === "string";
+}
+
+export function isStringArray(value: unknown): value is string[] {
+	return Array.isArray(value) && value.every(isString);
+}
+
 export function getSelectValues(
-	input: Record<string, unknown>,
+	input: Readonly<Record<string, unknown>>,
 	context: string,
-): { values?: string[]; error?: string } {
+): { values: string[]; error?: never } | { values?: never; error: string } {
 	const rawValue = input.value;
 	const rawValues = input.values;
 	if (rawValue !== undefined && rawValues !== undefined) {
@@ -15,9 +23,9 @@ export function getSelectValues(
 	}
 	if (rawValues !== undefined) {
 		if (
-			!Array.isArray(rawValues) ||
+			!isStringArray(rawValues) ||
 			rawValues.length === 0 ||
-			rawValues.some((value) => typeof value !== "string" || value.trim().length === 0)
+			rawValues.some((value) => value.trim().length === 0)
 		) {
 			return {
 				error: `${context}.values must be a non-empty array of non-empty strings for select.`,
@@ -35,7 +43,9 @@ export function getBatchResultItems(data: unknown): Array<Record<string, unknown
 	return Array.isArray(data) ? data.filter(isRecord) : [];
 }
 
-export function getCommandNameFromBatchItem(item: Record<string, unknown>): string | undefined {
+export function getCommandNameFromBatchItem(
+	item: Readonly<Record<string, unknown>>,
+): string | undefined {
 	const command = item.command;
 	return Array.isArray(command) && typeof command[0] === "string" ? command[0] : undefined;
 }
@@ -43,7 +53,7 @@ export function getCommandNameFromBatchItem(item: Record<string, unknown>): stri
 export function validateLookupMaxWorkspaceFiles(
 	value: unknown,
 	fieldName: string,
-): { value?: number; error?: string } {
+): { value: number; error?: never } | { value?: never; error: string } {
 	if (value === undefined) {
 		return { value: SOURCE_LOOKUP_DEFAULT_MAX_WORKSPACE_FILES };
 	}

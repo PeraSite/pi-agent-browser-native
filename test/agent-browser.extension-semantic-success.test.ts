@@ -7,6 +7,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { readArray, readRecord, readString } from "./helpers/assertions.js";
 
 import {
 	createExtensionHarness,
@@ -64,51 +65,44 @@ if (command === "find") {
 					semanticAction: { action: "click", locator: "text", value: "Close" },
 				});
 				assert.equal(semanticClick.isError, false);
-				const semanticText = (semanticClick.content[0] as { text: string }).text;
+				const semanticText = readString(readRecord(semanticClick.content[0]).text);
 				assert.match(semanticText, /Clicked: text "Close"/);
 				assert.doesNotMatch(semanticText, /data-agent-browser-located/);
 				assert.match(semanticText, /Current page:/);
 				assert.match(semanticText, /Example Domain/);
 				assert.match(semanticText, /https:\/\/example.test\//);
-				assert.match(semanticClick.details?.summary as string, /click → Example Domain/);
-				assert.deepEqual(
-					semanticClick.details?.navigationSummary as
-						| { title?: string; url?: string; urlChanged?: boolean }
-						| undefined,
-					{ title: "Example Domain", url: "https://example.test/", urlChanged: false },
+				assert.match(
+					readString(readRecord(semanticClick.details).summary),
+					/click → Example Domain/,
 				);
+				assert.deepEqual(readRecord(semanticClick.details).navigationSummary, {
+					title: "Example Domain",
+					url: "https://example.test/",
+					urlChanged: false,
+				});
 				assert.equal(
-					(
-						semanticClick.details?.pageChangeSummary as
-							| { command?: string; changeType?: string }
-							| undefined
-					)?.command,
+					readRecord(readRecord(semanticClick.details).pageChangeSummary).command,
 					"click",
 				);
 				assert.equal(
-					(
-						semanticClick.details?.pageChangeSummary as
-							| { command?: string; changeType?: string; observed?: boolean }
-							| undefined
-					)?.changeType,
+					readRecord(readRecord(semanticClick.details).pageChangeSummary).changeType,
 					"mutation",
 				);
 				assert.equal(
-					(semanticClick.details?.pageChangeSummary as { observed?: boolean } | undefined)
-						?.observed,
+					readRecord(readRecord(semanticClick.details).pageChangeSummary).observed,
 					false,
 				);
 				assert.match(semanticText, /Action dispatched; application change unverified/);
-				const nextActionIds = (
-					semanticClick.details?.nextActions as Array<{ id: string }> | undefined
-				)?.map((action) => action.id);
-				assert.ok(nextActionIds?.includes("inspect-after-mutation"));
+				const nextActionIds = readArray(readRecord(semanticClick.details).nextActions).map(
+					(action) => readRecord(action).id,
+				);
+				assert.ok(nextActionIds.includes("inspect-after-mutation"));
 
 				const directClick = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: ["click", "#direct"],
 				});
 				assert.equal(directClick.isError, false);
-				const directText = (directClick.content[0] as { text: string }).text;
+				const directText = readString(readRecord(directClick.content[0]).text);
 				assert.match(directText, /Clicked: true/);
 				assert.match(directText, /Href: https:\/\/example.test\/docs/);
 				assert.match(directText, /Current page:/);

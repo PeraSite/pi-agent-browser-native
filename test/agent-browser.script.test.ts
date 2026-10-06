@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readRecord, readString, readArray } from "./helpers/assertions.js";
 import { mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -86,7 +87,7 @@ emit({kept,parallel:parallel.map(r=>r.data.value),batch:batch.data.value});`,
 		dispatch: async (params) => {
 			active += 1;
 			maxActive = Math.max(active, maxActive);
-			calls.push(params.args);
+			calls.push([...params.args]);
 			await delay(5);
 			active -= 1;
 			return successEnvelope({ value: params.args[1] });
@@ -112,6 +113,8 @@ test("code validates JSON calls without restricting native commands or local aut
 		["--profile", "Default", "open", "https://example.test"],
 		["batch", "--bail"],
 	]) {
+		// Every fixed allowed native command must preserve its validated argv.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.deepEqual(validateAgentBrowserScriptBrowserParams({ args }).params?.args, args);
 	}
 	assert.match(
@@ -163,8 +166,11 @@ test("code observations carry failures and exact recoveries without duplicated t
 		text: "undefined",
 		details: "undefined",
 	});
-	assert.equal(result.failures?.[0]?.failureCategory, "selector-not-found");
-	assert.deepEqual(result.failures?.[0]?.nextActions?.[0]?.params, { args: ["snapshot", "-i"] });
+	const failure = readRecord(readArray(result.failures)[0]);
+	assert.equal(failure.failureCategory, "selector-not-found");
+	assert.deepEqual(readRecord(readArray(failure.nextActions)[0]).params, {
+		args: ["snapshot", "-i"],
+	});
 	const failedInput = await runAgentBrowserScript({
 		code: `emit(await browser());`,
 		dispatch: async () => assert.fail("invalid input must not dispatch"),
@@ -248,11 +254,17 @@ test("code enforces call, output, IPC and time limits and retains partial emissi
 	assert.equal(timedOut.timedOut, true);
 	assert.equal(timedOut.data, "completed prefix");
 	for (const code of ["emit(undefined);", "emit(()=>1);"]) {
+		// Finish each serialization attempt before launching the next permissioned child.
+		// oxlint-disable-next-line no-await-in-loop
 		const invalid = await runAgentBrowserScript({
 			code,
 			dispatch: async () => successEnvelope(null),
 		});
+		// Both fixed non-JSON values must fail emission.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.equal(invalid.ok, false);
+		// Both failures must identify serialization rather than another child failure.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.match(invalid.error ?? "", /JSON-serializable value/);
 	}
 });
@@ -299,7 +311,7 @@ test("abort waits for the dispatched operation and does not start queued sibling
 	assert.equal(result.failures?.[0]?.failureCategory, "aborted");
 });
 
-test("selected image emission forwards real bytes once and rejects stale or invented handles", async () => {
+test("selected image emission forwards real bytes once and rejects stale or invented handles", async (t) => {
 	const dir = await mkdtemp(join(tmpdir(), "piab-code-image-"));
 	try {
 		const path = join(dir, "capture.png");
@@ -324,7 +336,7 @@ test("selected image emission forwards real bytes once and rejects stale or inve
 		const result = await runAgentBrowserScript({
 			code: `const r=await browser({args:["screenshot"]}); emitImage(r.imageObservations[0]); emitImage(r.imageObservations[0]); emit({visible:true});`,
 			dispatch: async () => observation,
-			emitImage: output.emitImage,
+			emitImage: output.emitImage.bind(output),
 		});
 		assert.equal(result.ok, true, result.error);
 		const final = await output.finish(result, "persistent");
@@ -332,6 +344,88 @@ test("selected image emission forwards real bytes once and rejects stale or inve
 		const image = final.content.find((item) => item.type === "image");
 		assert.ok(image?.type === "image");
 		assert.deepEqual(Buffer.from(image.data, "base64"), PNG);
+		const validImage = readRecord(observation.imageObservations?.[0]);
+		const malformedImages = [
+			["pixel width type", { pixels: { width: "1", height: 1 } }],
+			["non-finite pixels", { pixels: { width: 1, height: Infinity } }],
+			["geometry container", { geometry: "measured" }],
+			["geometry status", { geometry: { status: "invented", reason: "Fixture" } }],
+			["geometry reason", { geometry: { status: "unknown", reason: 1 } }],
+			[
+				"partial sample",
+				{ geometry: { status: "measured", reason: "Fixture", before: { dpr: 1 } } },
+			],
+			[
+				"crop dimensions",
+				{
+					geometry: {
+						status: "measured",
+						reason: "Fixture",
+						crop: { x: 0, y: 0, width: "1", height: 1 },
+					},
+				},
+			],
+			[
+				"CSS mapping",
+				{
+					geometry: { status: "measured", reason: "Fixture", pixelsPerCssPixel: { x: "1", y: 1 } },
+				},
+			],
+		] as const;
+		await Promise.all(
+			malformedImages.map(([name, malformed]) =>
+				t.test(`rejects malformed ${name} without publishing an image handle`, async () => {
+					const invalid = createBrowserCodeOutput();
+					await assert.rejects(
+						invalid.observe({
+							content: [],
+							details: {
+								resultCategory: "success",
+								imageObservations: [{ ...validImage, ...malformed }],
+							},
+						}),
+						/invalid image observation geometry/,
+					);
+					await assert.rejects(
+						invalid.emitImage({ id: "image-1", path }),
+						/handle returned by browser/,
+					);
+					const rejected = await invalid.finish(result, "persistent");
+					assert.deepEqual(readRecord(rejected.details).imageObservations, []);
+					assert.equal(
+						rejected.content.some((part) => part.type === "image"),
+						false,
+					);
+				}),
+			),
+		);
+		await t.test(
+			"unknown geometry with absent pixels remains a usable verified handle",
+			async () => {
+				const unknown = createBrowserCodeOutput();
+				const captured = await unknown.observe({
+					content: [],
+					details: {
+						resultCategory: "success",
+						imageObservations: [
+							{
+								path,
+								mimeType: "image/png",
+								capture: "unknown",
+								geometry: { status: "unknown", reason: "No geometry evidence" },
+							},
+						],
+					},
+				});
+				await unknown.emitImage({ id: captured.imageObservations?.[0]?.id });
+				const selected = await unknown.finish(result, "persistent");
+				assert.equal(selected.content.filter((part) => part.type === "image").length, 1);
+				const metadata = readRecord(readArray(readRecord(selected.details).imageObservations)[0]);
+				assert.equal(metadata.pixels, undefined);
+				assert.equal(readRecord(metadata.geometry).status, "unknown");
+				assert.equal(readRecord(metadata.geometry).pixelsPerCssPixel, undefined);
+			},
+		);
 		await assert.rejects(output.emitImage({ id: "not-captured" }), /handle returned by browser/);
 		const staleOutput = createBrowserCodeOutput();
 		const stale = await staleOutput.observe({
@@ -364,12 +458,17 @@ test("missing compiled worker returns a setup failure", { concurrency: false }, 
 	}
 });
 
+type CodeHarnessView = Pick<
+	ReturnType<typeof createExtensionHarness>,
+	"ctx" | "getTool" | "tool"
+> & {
+	readonly appendedEntries: readonly Readonly<
+		ReturnType<typeof createExtensionHarness>["appendedEntries"][number]
+	>[];
+};
+
 async function withCodeHarness(
-	run: (
-		harness: ReturnType<typeof createExtensionHarness>,
-		logPath: string,
-		dir: string,
-	) => Promise<void>,
+	run: (harness: CodeHarnessView, logPath: string, dir: string) => Promise<void>,
 ) {
 	const dir = await mkdtemp(join(tmpdir(), "piab-code-integration-"));
 	const logPath = join(dir, "calls.jsonl");
@@ -390,7 +489,7 @@ process.stdout.write(JSON.stringify({success:true,data}));`,
 	try {
 		await withPatchedEnv(
 			{
-				PATH: `${dir}${process.platform === "win32" ? ";" : ":"}${process.env.PATH}`,
+				PATH: `${dir}${process.platform === "win32" ? ";" : ":"}${process.env.PATH ?? ""}`,
 				AGENT_BROWSER_SESSION: undefined,
 				AGENT_BROWSER_NAMESPACE: undefined,
 			},
@@ -432,13 +531,13 @@ test(
 				code: `await browser({args:["open","https://fixture.test/one"]}); await browser({args:["snapshot","-i"]}); emit((await browser({args:["open","https://fixture.test/two"]})).data.url);`,
 			});
 			assert.equal(first.isError, false, JSON.stringify(first));
-			assert.equal(first.details?.data, "https://fixture.test/two");
-			assert.equal(first.details?.sessionName, direct.details?.sessionName);
+			assert.equal(readRecord(first.details).data, "https://fixture.test/two");
+			assert.equal(readRecord(first.details).sessionName, readRecord(direct.details).sessionName);
 			const second = await executeRegisteredTool(code, harness.ctx, {
 				code: `emit((await browser({args:["get","url"]})).data.url);`,
 			});
-			assert.equal(second.details?.data, "https://fixture.test/two");
-			assert.equal(second.details?.sessionName, first.details?.sessionName);
+			assert.equal(readRecord(second.details).data, "https://fixture.test/two");
+			assert.equal(readRecord(second.details).sessionName, readRecord(first.details).sessionName);
 			assert.equal(
 				(await readInvocationLog(logPath)).some((call) => call.args.includes("close")),
 				false,
@@ -454,12 +553,14 @@ test(
 			);
 			assert.ok(
 				transitions.every(
-					(entry) => !("data" in (entry.data as { event: { state: object } }).event.state),
+					(entry) => !("data" in readRecord(readRecord(readRecord(entry.data).event).state)),
 				),
 				"state journal must not copy page output",
 			);
 			const state = SessionPageState.fromBranch(harness.ctx.sessionManager.getBranch());
-			const key = getAgentBrowserSessionIdentityKey(String(first.details?.sessionName));
+			const key = getAgentBrowserSessionIdentityKey(
+				readString(readRecord(first.details).sessionName),
+			);
 			assert.equal(state.get(key).tabTarget?.url, "https://fixture.test/two");
 			const resumed = createExtensionHarness({
 				cwd: harness.ctx.cwd,
@@ -490,13 +591,17 @@ test(
 				code: `const r=await browser({args:["eval","--stdin"],stdin:"[]"}); emit({length:r.data.result.length,end:r.data.result.slice(-3)});`,
 			});
 			assert.equal(result.isError, false, JSON.stringify(result));
-			assert.deepEqual(result.details?.data, { length: 30003, end: "END" });
-			assert.equal(result.details?.sessionName, "selection");
-			assert.equal(result.details?.namespace, "code-tests");
-			const manifest = result.details?.artifactManifest as
-				| { entries?: Array<{ kind?: string }> }
-				| undefined;
-			assert.equal(manifest?.entries?.some((entry) => entry.kind === "spill") ?? false, false);
+			assert.deepEqual(readRecord(result.details).data, { length: 30003, end: "END" });
+			assert.equal(readRecord(result.details).sessionName, "selection");
+			assert.equal(readRecord(result.details).namespace, "code-tests");
+			const entries =
+				readRecord(result.details).artifactManifest === undefined
+					? []
+					: readArray(readRecord(readRecord(result.details).artifactManifest).entries);
+			assert.equal(
+				entries.map(readRecord).some((entry) => entry.kind === "spill"),
+				false,
+			);
 		});
 	},
 );
@@ -512,21 +617,25 @@ test(
 				session: "selected",
 				code: `emit(await browser({args:["--session","other","open","https://fixture.test/other"]})); emit(await browser({args:["close","--all"]}));`,
 			});
-			const values = result.details?.data as Array<{ success: boolean; error: string }>;
-			assert.equal(values[0]?.success, false);
-			assert.match(values[0]?.error ?? "", /one browser identity/);
-			assert.equal(values[1]?.success, false);
-			assert.match(values[1]?.error ?? "", /namespace-wide close/);
+			const values = readArray(readRecord(result.details).data).map(readRecord);
+			assert.equal(values[0].success, false);
+			assert.match(readString(values[0].error), /one browser identity/);
+			assert.equal(values[1].success, false);
+			assert.match(readString(values[1].error), /namespace-wide close/);
 			assert.equal(
 				(await readInvocationLog(logPath)).some(
 					(call) => call.args.includes("other") || call.args.includes("close"),
 				),
 				false,
 			);
-			const recovery = JSON.parse(
-				result.content.find((item) => item.type === "text")?.text ?? "{}",
+			const recovery = readRecord(
+				JSON.parse(result.content.find((item) => item.type === "text")?.text ?? "{}"),
 			);
-			assert.equal(recovery.failures.length, 2, "unemitted errors must still be visible");
+			assert.equal(
+				readArray(recovery.failures).length,
+				2,
+				"unemitted errors must still be visible",
+			);
 		});
 	},
 );
@@ -536,11 +645,16 @@ test(
 	{ concurrency: false, timeout: 10_000 },
 	async () => {
 		await withCodeHarness(async (harness, logPath) => {
-			const tool = harness.getTool("agent_browser_code")!;
+			const tool = harness.getTool("agent_browser_code");
+			assert.ok(tool);
 			const first = executeRegisteredTool(tool, harness.ctx, {
 				code: 'await browser({args:["get","url"]}); const end=Date.now()+1500; while(Date.now()<end) {} emit("first");',
 			});
+			// Poll the receipt until inner dispatch has begun before cancelling.
+			// oxlint-disable-next-line no-await-in-loop
 			while (!(await readInvocationLog(logPath)).some((call) => call.args.includes("get"))) {
+				// The next receipt observation must wait for its retry delay.
+				// oxlint-disable-next-line no-await-in-loop
 				await delay(10);
 			}
 			const second = executeRegisteredTool(tool, harness.ctx, {
@@ -548,10 +662,10 @@ test(
 				timeoutMs: 50,
 			});
 			try {
-				const result = await Promise.race([second, delay(500).then(() => undefined)]);
+				const result = await Promise.race([second, delay(500)]);
 				assert.ok(result, "queued code must time out without waiting for the first cell to finish");
 				assert.equal(result.isError, true);
-				assert.equal(result.details?.failureCategory, "timeout");
+				assert.equal(readRecord(result.details).failureCategory, "timeout");
 			} finally {
 				await Promise.all([first, second]);
 			}
@@ -565,21 +679,22 @@ test(
 	async () => {
 		await withCodeHarness(async (harness, _log, dir) => {
 			await writeFile(join(dir, "blocked"), "existing file");
-			const result = await executeRegisteredTool(
-				harness.getTool("agent_browser_code")!,
-				harness.ctx,
-				{ code: "emit({done:true});", outputPath: join(dir, "blocked", "out.json") },
-			);
-			const observation = JSON.parse(
-				result.content.find((item) => item.type === "text")?.text ?? "{}",
+			const tool = harness.getTool("agent_browser_code");
+			assert.ok(tool);
+			const result = await executeRegisteredTool(tool, harness.ctx, {
+				code: "emit({done:true});",
+				outputPath: join(dir, "blocked", "out.json"),
+			});
+			const observation = readRecord(
+				JSON.parse(result.content.find((item) => item.type === "text")?.text ?? "{}"),
 			);
 			assert.equal(result.isError, true);
 			assert.equal(observation.success, false);
 			assert.equal(observation.resultCategory, "failure");
 			assert.equal(observation.failureCategory, "upstream-error");
-			assert.match(observation.error, /ENOTDIR|EEXIST/);
+			assert.match(readString(observation.error), /ENOTDIR|EEXIST/);
 			assert.deepEqual(observation.data, { done: true });
-			assert.doesNotMatch(observation.summary, /completed/);
+			assert.doesNotMatch(readString(observation.summary), /completed/);
 		});
 	},
 );
@@ -600,7 +715,7 @@ else process.stdout.write(JSON.stringify({success:true,data:{url:'https://fixtur
 			);
 			await withPatchedEnv(
 				{
-					PATH: `${root}${process.platform === "win32" ? ";" : ":"}${process.env.PATH}`,
+					PATH: `${root}${process.platform === "win32" ? ";" : ":"}${process.env.PATH ?? ""}`,
 					AGENT_BROWSER_SESSION: undefined,
 					AGENT_BROWSER_NAMESPACE: undefined,
 				},
@@ -624,24 +739,28 @@ else process.stdout.write(JSON.stringify({success:true,data:{url:'https://fixtur
 						{ reason: "new" },
 						harness.ctx,
 					);
-					const pending = executeRegisteredTool(
-						harness.getTool("agent_browser_code")!,
-						harness.ctx,
-						{
-							session: "finalization-race",
-							code: 'emit("x".repeat(24000)); await browser({args:["eval","--stdin"],stdin:"1"});',
-						},
-					);
+					const tool = harness.getTool("agent_browser_code");
+					assert.ok(tool);
+					const pending = executeRegisteredTool(tool, harness.ctx, {
+						session: "finalization-race",
+						code: 'emit("x".repeat(24000)); await browser({args:["eval","--stdin"],stdin:"1"});',
+					});
 					const deadline = Date.now() + 10_000;
 					while (true) {
 						try {
+							// Observe the real child effect before triggering branch navigation.
+							// oxlint-disable-next-line no-await-in-loop
 							await readFile(marker);
 							break;
 						} catch {
+							// Missing markers must stay within the deadline; a successful read ends polling.
+							// oxlint-disable-next-line node-test/no-conditional-assertion
 							assert.ok(
 								Date.now() < deadline,
 								"code must reach the real fake-upstream effect before tree navigation",
 							);
+							// Wait between missing-marker observations rather than overlapping reads.
+							// oxlint-disable-next-line no-await-in-loop
 							await delay(10);
 						}
 					}
@@ -654,28 +773,32 @@ else process.stdout.write(JSON.stringify({success:true,data:{url:'https://fixtur
 					);
 					const result = await pending;
 					assert.equal(result.isError, true);
-					assert.equal((result.details?.codeRun as { aborted?: boolean }).aborted, true);
+					assert.equal(readRecord(readRecord(result.details).codeRun).aborted, true);
 					assert.equal(
-						result.details?.data,
+						readRecord(result.details).data,
 						"x".repeat(24000),
 						"the caller retains complete selected output after interruption",
 					);
-					const observation = JSON.parse(
-						result.content.find((part) => part.type === "text")?.text ?? "{}",
+					const observation = readRecord(
+						JSON.parse(result.content.find((part) => part.type === "text")?.text ?? "{}"),
 					);
 					assert.equal(
-						JSON.parse(await readFile(observation.observationPath, "utf8")).data,
+						readRecord(JSON.parse(await readFile(readString(observation.observationPath), "utf8")))
+							.data,
 						"x".repeat(24000),
 					);
 					assert.deepEqual(
-						harness.ctx.sessionManager.getBranch().map((entry) => (entry as { id: string }).id),
+						harness.ctx.sessionManager.getBranch().map((entry) => readRecord(entry).id),
 						["b"],
 						"outer finalization cannot append A's artifact state beneath B",
 					);
 					const all = (await readFile(file, "utf8"))
 						.trim()
 						.split("\n")
-						.map((line) => JSON.parse(line));
+						.map((line) => {
+							const value: unknown = JSON.parse(line);
+							return value;
+						});
 					const begins = all
 						.map(getBrowserRecord)
 						.filter((record) => record?.event.phase === "begin");
@@ -709,13 +832,11 @@ test(
 				"storage local set token synthetic-storage-value",
 				"clipboard write synthetic-clipboard-value",
 			];
-			const result = await executeRegisteredTool(
-				harness.getTool("agent_browser_code")!,
-				harness.ctx,
-				{
-					code: `await browser({args:["batch","--bail",...${JSON.stringify(rows)}]}); emit("done");`,
-				},
-			);
+			const tool = harness.getTool("agent_browser_code");
+			assert.ok(tool);
+			const result = await executeRegisteredTool(tool, harness.ctx, {
+				code: `await browser({args:["batch","--bail",...${JSON.stringify(rows)}]}); emit("done");`,
+			});
 			assert.equal(result.isError, false, JSON.stringify(result));
 			const journal = JSON.stringify(
 				harness.appendedEntries.filter((entry) => entry.customType === BROWSER_TRANSITION_ENTRY),
@@ -810,11 +931,10 @@ test(
 				),
 			);
 			assert.equal(
-				(
-					resumed.appendedEntries.at(-1)?.data as {
-						event: { state: { scriptLease: { cleanup?: string } } };
-					}
-				).event.state.scriptLease.cleanup,
+				readRecord(
+					readRecord(readRecord(readRecord(resumed.appendedEntries.at(-1)?.data).event).state)
+						.scriptLease,
+				).cleanup,
 				"closed",
 			);
 		});

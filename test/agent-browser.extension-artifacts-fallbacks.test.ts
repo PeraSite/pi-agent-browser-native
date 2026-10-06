@@ -22,6 +22,7 @@ import {
 	withPatchedEnv,
 	writeFakeAgentBrowserBinary,
 } from "./helpers/agent-browser-harness.js";
+import { readRecord, readArray, readString } from "./helpers/assertions.js";
 
 test("agentBrowserExtension leaves download execution upstream-owned on local and remote pages", async () => {
 	const tempDir = await mkdtemp(join(tmpdir(), "pi-agent-browser-native-download-"));
@@ -43,20 +44,25 @@ if (args.includes("download")) {
 	);
 	try {
 		for (const url of ["http://127.0.0.1:12345/", "https://fixture.test/"]) {
+			// The next fixture operation depends on completion of this shared lifecycle transition.
+			// oxlint-disable-next-line no-await-in-loop
 			await withPatchedEnv(
-				{ PATH: `${tempDir}:${process.env.PATH}`, PI_AGENT_BROWSER_TEST_PAGE_URL: url },
+				{ PATH: `${tempDir}:${process.env.PATH ?? ""}`, PI_AGENT_BROWSER_TEST_PAGE_URL: url },
 				async () => {
 					const harness = createExtensionHarness({ cwd: tempDir });
 					const path = join(tempDir, "downloads", "report.csv");
 					const result = await executeRegisteredTool(harness.tool, harness.ctx, {
 						args: ["download", "#export", path],
 					});
-					assert.equal(result.isError, false, result.content[0]?.text);
+					// The nonempty url fixture matrix exhaustively verifies each case; any failed assertion fails the test.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
+					assert.equal(result.isError, false, result.content[0].text);
+					// The nonempty url fixture matrix exhaustively verifies each case; any failed assertion fails the test.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
 					assert.equal(await readFile(path, "utf8"), "native-download");
-					assert.equal(
-						(result.details?.artifactVerification as { verified?: boolean })?.verified,
-						true,
-					);
+					// The nonempty url fixture matrix exhaustively verifies each case; any failed assertion fails the test.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
+					assert.equal(readRecord(result.details?.artifactVerification).verified, true);
 				},
 			);
 		}
@@ -102,13 +108,11 @@ process.exit(1);`,
 
 					assert.equal(result.isError, true);
 					assert.equal(result.details?.resultCategory, "failure");
-					assert.equal(result.details?.failureCategory, "download-not-verified");
-					const nextActions = result.details?.nextActions as
-						| Array<{ params?: { args: string[] } }>
-						| undefined;
-					assert.deepEqual(nextActions?.[0]?.params?.args, [
+					assert.equal(result.details.failureCategory, "download-not-verified");
+					const nextActions = readArray(result.details.nextActions).map(readRecord);
+					assert.deepEqual(readRecord(nextActions[0].params).args, [
 						"--session",
-						result.details?.sessionName,
+						result.details.sessionName,
 						"wait",
 						"--download",
 						"/tmp/export.csv",
@@ -172,13 +176,13 @@ process.stdout.write(JSON.stringify({ success: true, data: { tabs: [
 				});
 
 				assert.equal(result.isError, true);
-				assert.equal(result.content[0]?.type, "text");
-				const text = (result.content[0] as { text: string }).text;
-				assert.match(text, /Could not locate element/);
-				assert.match(text, /(?:@ref may be stale|ref may be stale)/);
-				assert.match(text, /snapshot/);
+				assert.equal(result.content[0].type, "text");
+				const text = readString(readRecord(result.content[0]).text);
+				assert.match(readString(text), /Could not locate element/);
+				assert.match(readString(text), /(?:@ref may be stale|ref may be stale)/);
+				assert.match(readString(text), /snapshot/);
 				assert.equal(result.details?.resultCategory, "failure");
-				assert.equal(result.details?.failureCategory, "stale-ref");
+				assert.equal(result.details.failureCategory, "stale-ref");
 			});
 		} finally {
 			await rm(tempDir, { force: true, recursive: true });
@@ -239,13 +243,13 @@ process.stdout.write(JSON.stringify({ success: true, data: { tabs: [
 				});
 
 				assert.equal(result.isError, true);
-				assert.equal(result.content[0]?.type, "text");
-				const text = (result.content[0] as { text: string }).text;
-				assert.match(text, /Could not locate element/);
-				assert.match(text, /refresh-interactive-refs/);
-				assert.match(text, /snapshot/);
+				assert.equal(result.content[0].type, "text");
+				const text = readString(readRecord(result.content[0]).text);
+				assert.match(readString(text), /Could not locate element/);
+				assert.match(readString(text), /refresh-interactive-refs/);
+				assert.match(readString(text), /snapshot/);
 				assert.equal(
-					(result.details?.batchSteps as Array<{ failureCategory: string }>)[0].failureCategory,
+					readArray(result.details?.batchSteps).map(readRecord)[0].failureCategory,
 					"stale-ref",
 				);
 			});
@@ -277,34 +281,32 @@ process.exit(1);`,
 				});
 
 				assert.equal(result.isError, true);
-				assert.equal(result.content[0]?.type, "text");
-				const text = (result.content[0] as { text: string }).text;
+				assert.equal(result.content[0].type, "text");
+				const text = readString(readRecord(result.content[0]).text);
 				assert.match(
-					text,
+					readString(text),
 					/^agent-browser --args --no-startup-window --json --session \S+ open https:\/\/example\.com\/? reported failure \(exit code 1\)\.$/m,
 				);
-				assert.match(text, /inspect-page-after-navigation-error/);
-				assert.deepEqual((result.details?.effectiveArgs as string[] | undefined)?.slice(0, 5), [
+				assert.match(readString(text), /inspect-page-after-navigation-error/);
+				assert.deepEqual(readArray(result.details?.effectiveArgs).map(readString).slice(0, 5), [
 					"--args",
 					"--no-startup-window",
 					"--json",
 					"--session",
 					result.details?.sessionName,
 				]);
-				assert.deepEqual((result.details?.effectiveArgs as string[] | undefined)?.slice(-2), [
+				assert.deepEqual(readArray(result.details?.effectiveArgs).map(readString).slice(-2), [
 					"open",
 					"https://example.com",
 				]);
 				assert.equal(result.details?.resultCategory, "failure");
-				assert.equal(result.details?.failureCategory, "upstream-error");
-				const implicitAction = (
-					result.details?.nextActions as
-						| Array<{ id?: string; params?: { args?: string[] } }>
-						| undefined
-				)?.find((action) => action.id === "inspect-page-after-navigation-error");
-				assert.deepEqual(implicitAction?.params?.args, [
+				assert.equal(result.details.failureCategory, "upstream-error");
+				const implicitAction = readArray(result.details.nextActions)
+					.map(readRecord)
+					.find((action) => action.id === "inspect-page-after-navigation-error");
+				assert.deepEqual(readRecord(implicitAction?.params).args, [
 					"--session",
-					result.details?.sessionName,
+					result.details.sessionName,
 					"get",
 					"url",
 				]);
@@ -314,13 +316,11 @@ process.exit(1);`,
 						args: ["--namespace", "", "--session", "named", "open", "https://example.com"],
 					}),
 				);
-				const namedAction = (
-					namedResult.details?.nextActions as
-						| Array<{ id?: string; params?: { args?: string[] } }>
-						| undefined
-				)?.find((action) => action.id === "inspect-page-after-navigation-error");
+				const namedAction = readArray(namedResult.details?.nextActions)
+					.map(readRecord)
+					.find((action) => action.id === "inspect-page-after-navigation-error");
 				assert.equal(namedResult.details?.namespace, "");
-				assert.deepEqual(namedResult.details?.effectiveArgs, [
+				assert.deepEqual(namedResult.details.effectiveArgs, [
 					"--args",
 					"--no-startup-window",
 					"--json",
@@ -331,7 +331,7 @@ process.exit(1);`,
 					"open",
 					"https://example.com",
 				]);
-				assert.deepEqual(namedAction?.params?.args, [
+				assert.deepEqual(readRecord(namedAction?.params).args, [
 					"--namespace",
 					"",
 					"--session",
@@ -372,10 +372,10 @@ test(
 				});
 
 				assert.equal(result.isError, true);
-				assert.match(String(result.details?.parseError ?? ""), /invalid JSON/i);
+				assert.match(readString(result.details?.parseError ?? ""), /invalid JSON/i);
 				assert.equal(result.details?.fullOutputPath, undefined);
 				assert.match(
-					String(result.details?.fullOutputUnavailable ?? ""),
+					readString(result.details?.fullOutputUnavailable ?? ""),
 					/discarded because it may contain sensitive browser data/,
 				);
 				assert.equal(result.details?.artifactManifest, undefined);
@@ -424,7 +424,7 @@ test(
 					assert.equal(result.isError, true);
 					assert.equal(result.details?.fullOutputPath, undefined);
 					assert.match(
-						String(result.details?.fullOutputUnavailable ?? ""),
+						readString(result.details?.fullOutputUnavailable ?? ""),
 						/discarded because it may contain sensitive browser data/,
 					);
 					assert.equal(result.details?.artifactManifest, undefined);
@@ -470,10 +470,10 @@ test(
 					});
 
 					assert.equal(result.isError, true);
-					assert.match(String(result.details?.parseError ?? ""), /invalid JSON/i);
+					assert.match(readString(result.details?.parseError ?? ""), /invalid JSON/i);
 					assert.equal(result.details?.fullOutputPath, undefined);
 					assert.match(
-						String(result.details?.fullOutputUnavailable ?? ""),
+						readString(result.details?.fullOutputUnavailable ?? ""),
 						/discarded because it may contain sensitive browser data/,
 					);
 					assert.equal(result.details?.artifactManifest, undefined);

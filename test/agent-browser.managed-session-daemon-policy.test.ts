@@ -3,6 +3,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import test from "node:test";
+import { readArray, readString } from "./helpers/assertions.js";
 
 import {
 	closeManagedSession,
@@ -93,7 +94,7 @@ if (inspection === ${JSON.stringify(stalledPhase === "daemon inspection")}) {
 				const calls = (await readFile(logPath, "utf8"))
 					.trim()
 					.split("\n")
-					.map((line) => JSON.parse(line) as string[]);
+					.map((line) => readArray(JSON.parse(line)).map(readString));
 				assert.equal(
 					calls.filter((args) => args.at(-1) === "close").length,
 					stalledPhase === "native close" ? 1 : 0,

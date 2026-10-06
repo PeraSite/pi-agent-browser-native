@@ -5,6 +5,7 @@
  */
 
 import assert from "node:assert/strict";
+import { readRecord, readArray, readString } from "./helpers/assertions.js";
 import { mkdtemp, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -117,15 +118,13 @@ if (args.includes("screenshot")) {
 				});
 				assert.equal(blockedClose.isError, true);
 				assert.match(
-					(blockedClose.content[0] as { text: string }).text,
+					readString(readRecord(blockedClose.content[0]).text),
 					/requested artifact paths are missing or unverified/,
 				);
 				assert.deepEqual(
-					(
-						blockedClose.details?.promptGuard as
-							| { missingArtifacts?: Array<{ path?: string }> }
-							| undefined
-					)?.missingArtifacts?.map((artifact) => artifact.path),
+					readArray(readRecord(blockedClose.details?.promptGuard).missingArtifacts).map(
+						(artifact) => readRecord(artifact).path,
+					),
 					[firstScreenshotPath, secondScreenshotPath],
 				);
 
@@ -140,11 +139,9 @@ if (args.includes("screenshot")) {
 				});
 				assert.equal(stillBlockedClose.isError, true);
 				assert.deepEqual(
-					(
-						stillBlockedClose.details?.promptGuard as
-							| { missingArtifacts?: Array<{ path?: string }> }
-							| undefined
-					)?.missingArtifacts?.map((artifact) => artifact.path),
+					readArray(readRecord(stillBlockedClose.details?.promptGuard).missingArtifacts).map(
+						(artifact) => readRecord(artifact).path,
+					),
 					[secondScreenshotPath],
 				);
 
@@ -190,14 +187,22 @@ process.stdout.write(JSON.stringify({ success: true, data: { closed: true } }));
 				];
 				for (const prompt of prompts) {
 					const harness = createExtensionHarness({ cwd: tempDir, prompt });
+					// Startup establishes this prompt's artifact requirements before its close.
+					// oxlint-disable-next-line no-await-in-loop
 					await runExtensionEvent(
 						harness.handlers,
 						"session_start",
 						{ reason: "new" },
 						harness.ctx,
 					);
+					// Close the current fixture session before the next prompt reuses native state.
+					// oxlint-disable-next-line no-await-in-loop
 					const close = await executeRegisteredTool(harness.tool, harness.ctx, { args: ["close"] });
+					// Each fixed prompt fixture must allow closing its own session.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
 					assert.equal(close.isError, false, JSON.stringify(close));
+					// Every fixed prompt fixture must avoid gating session cleanup.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
 					assert.equal(close.details?.promptGuard, undefined);
 				}
 				const invocations = await readInvocationLog(logPath);
@@ -250,11 +255,8 @@ if (args.includes("screenshot")) {
 				});
 				assert.equal(blockedClose.isError, true);
 				assert.equal(
-					(
-						blockedClose.details?.promptGuard as
-							| { missingArtifacts?: Array<{ path?: string }> }
-							| undefined
-					)?.missingArtifacts?.[0]?.path,
+					readRecord(readArray(readRecord(blockedClose.details?.promptGuard).missingArtifacts)[0])
+						.path,
 					relativeScreenshotPath,
 				);
 

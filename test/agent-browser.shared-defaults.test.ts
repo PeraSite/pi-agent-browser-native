@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { watch } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
@@ -13,6 +14,7 @@ import {
 	withPatchedEnv,
 	writeFakeAgentBrowserBinary,
 } from "./helpers/agent-browser-harness.js";
+import { readRecord, readArray, readString, hasErrorCode } from "./helpers/assertions.js";
 
 const clearedBrowserEnv = Object.fromEntries(
 	Object.keys(process.env)
@@ -27,7 +29,7 @@ test("native environment defaults share caller ownership across Pi sessions and 
 		root,
 		`
 const args = process.argv.slice(2);
-require("node:fs").appendFileSync(${JSON.stringify(log)}, JSON.stringify({ args, idleTimeout: process.env.AGENT_BROWSER_IDLE_TIMEOUT_MS ?? null, actionPolicy: process.env.AGENT_BROWSER_ACTION_POLICY ?? null, confirmActions: process.env.AGENT_BROWSER_CONFIRM_ACTIONS ?? null, debug: process.env.AGENT_BROWSER_DEBUG ?? null, noAutoDialog: process.env.AGENT_BROWSER_NO_AUTO_DIALOG ?? null }) + "\\n");
+require("node:fs").appendFileSync(${JSON.stringify(log)}, JSON.stringify({ args, executablePath: process.env.AGENT_BROWSER_EXECUTABLE_PATH, launchArgs: process.env.AGENT_BROWSER_ARGS, idleTimeout: process.env.AGENT_BROWSER_IDLE_TIMEOUT_MS ?? null, actionPolicy: process.env.AGENT_BROWSER_ACTION_POLICY ?? null, confirmActions: process.env.AGENT_BROWSER_CONFIRM_ACTIONS ?? null, debug: process.env.AGENT_BROWSER_DEBUG ?? null, noAutoDialog: process.env.AGENT_BROWSER_NO_AUTO_DIALOG ?? null }) + "\\n");
 const data = args.includes("snapshot") ? { snapshot: "- button \\"Continue\\" [ref=e1]", refs: { e1: { role: "button", name: "Continue" } }, url: "https://fixture.test/" } : { title: "Fixture", url: "https://fixture.test/" };
 console.log(JSON.stringify({ success: true, data }));
 `,
@@ -39,8 +41,10 @@ console.log(JSON.stringify({ success: true, data }));
 				HOME: root,
 				USERPROFILE: root,
 				PI_AGENT_BROWSER_SOCKET_DIR: join(root, "s"),
-				PATH: `${root}${delimiter}${process.env.PATH}`,
+				PATH: `${root}${delimiter}${process.env.PATH ?? ""}`,
 				AGENT_BROWSER_SESSION: "shared",
+				AGENT_BROWSER_EXECUTABLE_PATH: "/caller/chrome",
+				AGENT_BROWSER_ARGS: "--caller-launch-arg",
 				AGENT_BROWSER_NAMESPACE: "Team Work",
 				AGENT_BROWSER_DEBUG: "1",
 				AGENT_BROWSER_NO_AUTO_DIALOG: "0",
@@ -50,15 +54,29 @@ console.log(JSON.stringify({ success: true, data }));
 				const one = createExtensionHarness({ cwd: root, sessionId: "pi-one" });
 				const two = createExtensionHarness({ cwd: root, sessionId: "pi-two" });
 				for (const harness of [one, two]) {
+					// Complete this shared-session/configuration transition before the next scenario observes or restores it.
+					// oxlint-disable-next-line no-await-in-loop
 					await runExtensionEvent(harness.handlers, "session_start", {}, harness.ctx);
+					// Complete this shared-session/configuration transition before the next scenario observes or restores it.
+					// oxlint-disable-next-line no-await-in-loop
 					const result = await executeRegisteredTool(harness.tool, harness.ctx, {
 						args: ["snapshot", "-i"],
 					});
-					assert.equal(result.isError, false, result.content[0]?.text);
+					// The nonempty harness fixture matrix exhaustively verifies each case; any failed assertion fails the test.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
+					assert.equal(result.isError, false, result.content[0].text);
+					// The nonempty harness fixture matrix exhaustively verifies each case; any failed assertion fails the test.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
 					assert.equal(result.details?.sessionName, "shared");
-					assert.equal(result.details?.namespace, "team-work");
-					assert.equal(result.details?.usedImplicitSession, false);
-					assert.equal(result.details?.managedSessionOutcome, undefined);
+					// The nonempty harness fixture matrix exhaustively verifies each case; any failed assertion fails the test.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
+					assert.equal(result.details.namespace, "team-work");
+					// The nonempty harness fixture matrix exhaustively verifies each case; any failed assertion fails the test.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
+					assert.equal(result.details.usedImplicitSession, false);
+					// The nonempty harness fixture matrix exhaustively verifies each case; any failed assertion fails the test.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
+					assert.equal(result.details.managedSessionOutcome, undefined);
 				}
 				const override = await executeRegisteredTool(two.tool, two.ctx, {
 					args: [
@@ -88,23 +106,30 @@ console.log(JSON.stringify({ success: true, data }));
 						"title",
 					],
 				});
-				assert.equal(override.isError, false, override.content[0]?.text);
+				assert.equal(override.isError, false, override.content[0].text);
 				assert.equal(override.details?.sessionName, "override");
-				assert.equal(override.details?.namespace, "");
+				assert.equal(override.details.namespace, "");
 				assert.equal(
 					(await executeRegisteredTool(one.tool, one.ctx, { args: ["get", "title"] })).isError,
 					false,
 				);
+				const saved = await executeRegisteredTool(one.tool, one.ctx, {
+					args: ["auth", "save", "fixture", "--url", "https://fixture.test/"],
+				});
+				assert.equal(saved.isError, false, saved.content[0].text);
 				await runExtensionEvent(one.handlers, "session_shutdown", { reason: "quit" }, one.ctx);
 				await runExtensionEvent(two.handlers, "session_shutdown", { reason: "quit" }, two.ctx);
-				const calls = (await readInvocationLog(log)) as Array<{
-					args: string[];
-					idleTimeout: string | null;
-					actionPolicy: string | null;
-					confirmActions: string | null;
-					debug: string | null;
-					noAutoDialog: string | null;
-				}>;
+				const calls = await readInvocationLog(log);
+				assert.ok(calls.some((call) => call.args.includes("save")));
+				assert.ok(
+					calls.every(
+						(call) =>
+							!call.args.includes("--args") &&
+							readRecord(call).executablePath === "/caller/chrome" &&
+							readRecord(call).launchArgs === "--caller-launch-arg",
+					),
+					"browser, local auth and helper calls preserve the same caller launch environment without automatic args",
+				);
 				assert.ok(
 					calls.some((call) => call.args.includes("url")),
 					"caller-owned live target helpers run",
@@ -124,16 +149,18 @@ console.log(JSON.stringify({ success: true, data }));
 				assert.ok(
 					calls.every(
 						(call) =>
-							call.actionPolicy === (call.args.includes("override") ? "policy.json" : null) &&
-							call.confirmActions === (call.args.includes("override") ? "navigate" : null),
+							readRecord(call).actionPolicy ===
+								(call.args.includes("override") ? "policy.json" : null) &&
+							readRecord(call).confirmActions ===
+								(call.args.includes("override") ? "navigate" : null),
 					),
 					"last explicit policy values reach every helper without leaking into later calls",
 				);
 				assert.ok(
 					calls.every(
 						(call) =>
-							call.debug === (call.args.includes("override") ? null : "1") &&
-							call.noAutoDialog === (call.args.includes("override") ? "1" : "0"),
+							readRecord(call).debug === (call.args.includes("override") ? null : "1") &&
+							readRecord(call).noAutoDialog === (call.args.includes("override") ? "1" : "0"),
 					),
 					"explicit last-wins booleans reach helpers; later calls keep inherited values",
 				);
@@ -151,16 +178,30 @@ console.log(JSON.stringify({ success: true, data }));
 test("explicit fresh sessions retain ownership and idle cleanup", async () => {
 	const root = await mkdtemp(join(process.platform === "win32" ? tmpdir() : "/tmp", "pbs-owned-"));
 	const log = join(root, "calls.jsonl");
+	const startedPath = join(root, "fresh-started");
+	const releasePath = join(root, "fresh-release");
+	await mkdir(join(root, "pi", "config", "pi-agent-browser-native"), { recursive: true });
+	await writeFile(
+		join(root, "pi", "config", "pi-agent-browser-native", "config.json"),
+		JSON.stringify({ browser: { defaultProfile: { name: "Default", policy: "always" } } }),
+	);
 	await writeFakeAgentBrowserBinary(
 		root,
 		`
 const args = process.argv.slice(2);
-require("node:fs").appendFileSync(${JSON.stringify(log)}, JSON.stringify({ args, idleTimeout: process.env.AGENT_BROWSER_IDLE_TIMEOUT_MS ?? null, confirmActions: process.env.AGENT_BROWSER_CONFIRM_ACTIONS ?? null }) + "\\n");
+const fs = require("node:fs");
+fs.appendFileSync(${JSON.stringify(log)}, JSON.stringify({ args, idleTimeout: process.env.AGENT_BROWSER_IDLE_TIMEOUT_MS ?? null, confirmActions: process.env.AGENT_BROWSER_CONFIRM_ACTIONS ?? null, profile: process.env.AGENT_BROWSER_PROFILE ?? null, restore: process.env.AGENT_BROWSER_RESTORE ?? null }) + "\\n");
 if (args.includes("close") && process.env.FAIL_CLOSE === "1") {
   console.log(JSON.stringify({ success: false, error: "fixture close refused" }));
   process.exit(1);
 }
-console.log(JSON.stringify({ success: true, data: { title: "Fixture", url: "about:blank" } }));
+const finish = () => console.log(JSON.stringify({ success: true, data: { title: "Fixture", url: "about:blank" } }));
+if (args.includes("open") && !fs.existsSync(${JSON.stringify(releasePath)})) {
+  fs.writeFileSync(${JSON.stringify(startedPath)}, "started");
+  const timer = setInterval(() => {
+    if (fs.existsSync(${JSON.stringify(releasePath)})) { clearInterval(timer); finish(); }
+  }, 5);
+} else finish();
 `,
 	);
 	try {
@@ -170,51 +211,93 @@ console.log(JSON.stringify({ success: true, data: { title: "Fixture", url: "abou
 				HOME: root,
 				USERPROFILE: root,
 				PI_AGENT_BROWSER_SOCKET_DIR: join(root, "s"),
-				PATH: `${root}${delimiter}${process.env.PATH}`,
+				PATH: `${root}${delimiter}${process.env.PATH ?? ""}`,
 				PI_AGENT_BROWSER_MANAGED_SESSION_RESTORE: "0",
+				PI_SUBAGENT_CHILD: undefined,
+				PI_SUBAGENT_ROOT_SESSION_ID: undefined,
 			},
 			async () => {
 				const harness = createExtensionHarness({ cwd: root });
-				const result = await executeRegisteredTool(harness.tool, harness.ctx, {
+				let markReady!: () => void;
+				const ready = new Promise<void>((resolve) => {
+					markReady = resolve;
+				});
+				const watcher = watch(root, (_event, filename) => {
+					if (filename === "fresh-started") {
+						markReady();
+					}
+				});
+				const first = executeRegisteredTool(harness.tool, harness.ctx, {
 					args: ["--confirm-actions", "navigate", "open", "about:blank"],
 					sessionMode: "fresh",
 				});
-				assert.equal(result.isError, false, result.content[0]?.text);
-				assert.equal(
-					(result.details?.managedSessionOutcome as { activeAfter?: boolean })?.activeAfter,
-					true,
-				);
+				let result: Awaited<typeof first>;
+				try {
+					await Promise.race([
+						ready,
+						first.then(() => assert.fail("fresh launch finished before fixture release")),
+					]);
+					assert.equal(await readFile(startedPath, "utf8"), "started");
+					const tool = harness.getTool("agent_browser_code");
+					assert.ok(tool);
+					const queuedCode = executeRegisteredTool(tool, harness.ctx, {
+						code: 'emit((await browser({args:["get","title"]})).data.title);',
+					});
+					await writeFile(releasePath, "go");
+					const [fresh, code] = await Promise.all([first, queuedCode]);
+					result = fresh;
+					assert.equal(code.isError, false, code.content[0].text);
+					assert.equal(code.details?.data, "Fixture");
+					assert.equal(
+						code.details.sessionName,
+						result.details?.sessionName,
+						"code admitted behind the paused fresh launch must select its new managed browser",
+					);
+					const calls = await readInvocationLog(log);
+					assert.ok(
+						calls.some((call) => call.args.includes("title")),
+						"code reached native dispatch",
+					);
+					assert.ok(
+						calls.every(
+							(call) => readRecord(call).profile === null && readRecord(call).restore === null,
+						),
+						"root profile/restore defaults must not leak into the queued managed code or its helpers",
+					);
+				} finally {
+					watcher.close();
+					await writeFile(releasePath, "go");
+					await first;
+				}
+				assert.equal(result.isError, false, result.content[0].text);
+				assert.equal(readRecord(result.details?.managedSessionOutcome).activeAfter, true);
 				const fresh = await withPatchedEnv({ FAIL_CLOSE: "1" }, () =>
 					executeRegisteredTool(harness.tool, harness.ctx, {
 						args: ["open", "about:blank"],
 						sessionMode: "fresh",
 					}),
 				);
-				assert.equal(fresh.isError, false, fresh.content[0]?.text);
+				assert.equal(fresh.isError, false, fresh.content[0].text);
 				assert.notEqual(
 					fresh.details?.sessionName,
 					result.details?.sessionName,
 					"fresh still rotates unconfigured implicit sessions",
 				);
-				assert.equal(
-					(fresh.details?.managedSessionOutcome as { replacedSessionClosed?: boolean })
-						?.replacedSessionClosed,
-					false,
-				);
-				const oldSession = String(result.details?.sessionName);
+				assert.equal(readRecord(fresh.details?.managedSessionOutcome).replacedSessionClosed, false);
+				const oldSession = readString(result.details?.sessionName);
 				const followup = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: ["--session", oldSession, "get", "title"],
 				});
-				assert.equal(followup.isError, false, followup.content[0]?.text);
+				assert.equal(followup.isError, false, followup.content[0].text);
 				const closed = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: ["--session", oldSession, "close"],
 				});
-				assert.equal(closed.isError, false, closed.content[0]?.text);
+				assert.equal(closed.isError, false, closed.content[0].text);
 				const offBranch = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: ["--confirm-actions", "click", "open", "about:blank"],
 					sessionMode: "fresh",
 				});
-				assert.equal(offBranch.isError, false, offBranch.content[0]?.text);
+				assert.equal(offBranch.isError, false, offBranch.content[0].text);
 				harness.setBranch([]);
 				await runExtensionEvent(harness.handlers, "session_tree", {}, harness.ctx);
 				await runExtensionEvent(
@@ -223,36 +306,34 @@ console.log(JSON.stringify({ success: true, data: { title: "Fixture", url: "abou
 					{ reason: "quit" },
 					harness.ctx,
 				);
-				const calls = (await readInvocationLog(log)) as Array<{
-					args: string[];
-					idleTimeout: string;
-					confirmActions: string | null;
-				}>;
+				const calls = await readInvocationLog(log);
 				assert.ok(calls.some((call) => call.args.includes("close")));
 				assert.ok(calls.every((call) => call.idleTimeout === "900000"));
 				assert.deepEqual(
-					calls.filter((call) => call.args.includes("open")).map((call) => call.confirmActions),
+					calls
+						.filter((call) => call.args.includes("open"))
+						.map((call) => readRecord(call).confirmActions),
 					["navigate", null, "click"],
 					"replacement starts a new policy lifecycle",
 				);
 				assert.ok(
 					calls
 						.filter((call) => call.args.includes(oldSession))
-						.every((call) => call.confirmActions === "navigate"),
+						.every((call) => readRecord(call).confirmActions === "navigate"),
 					"old-session cleanup and recovery retain its setting after failed replacement close",
 				);
 				assert.ok(
 					calls
-						.filter((call) => call.args.includes(String(fresh.details?.sessionName)))
-						.every((call) => call.confirmActions === null),
+						.filter((call) => call.args.includes(readString(fresh.details?.sessionName)))
+						.every((call) => readRecord(call).confirmActions === null),
 					"the replacement keeps its own unset setting",
 				);
 				assert.ok(
 					calls.some(
 						(call) =>
-							call.args.includes(String(offBranch.details?.sessionName)) &&
+							call.args.includes(readString(offBranch.details?.sessionName)) &&
 							call.args.includes("close") &&
-							call.confirmActions === "click",
+							readRecord(call).confirmActions === "click",
 					),
 					"shutdown cleanup retains the off-branch owner's setting",
 				);
@@ -290,27 +371,28 @@ console.log(JSON.stringify({ success: !(args.includes("close") && process.env.FA
 				HOME: root,
 				USERPROFILE: root,
 				PI_AGENT_BROWSER_SOCKET_DIR: join(root, "s"),
-				PATH: `${root}${delimiter}${process.env.PATH}`,
+				PATH: `${root}${delimiter}${process.env.PATH ?? ""}`,
 				PI_AGENT_BROWSER_MANAGED_SESSION_RESTORE: "0",
 			},
 			async () => {
 				const one = createExtensionHarness({ cwd: root, sessionId: "confirmation-owner" });
 				const prefix = ["--namespace", "Team Space", "--session", "selected"];
-				const check = async (harness: typeof one, args: string[], expected: string | null) => {
+				const check = async (
+					harness: Pick<typeof one, "tool" | "ctx">,
+					args: readonly string[],
+					expected: string | null,
+				) => {
 					await writeFile(log, "");
 					const result = await executeRegisteredTool(harness.tool, harness.ctx, { args });
-					const calls = (await readInvocationLog(log)) as Array<{
-						args: string[];
-						confirmActions: string | null;
-					}>;
+					const calls = await readInvocationLog(log);
 					const browserCalls = calls.filter(
 						(call) =>
 							!call.args.includes("--version") &&
 							!(call.args.includes("session") && call.args.includes("--config")),
 					);
-					assert.ok(browserCalls.length > 0, result.content[0]?.text);
+					assert.ok(browserCalls.length > 0, result.content[0].text);
 					assert.ok(
-						browserCalls.every((call) => call.confirmActions === expected),
+						browserCalls.every((call) => readRecord(call).confirmActions === expected),
 						JSON.stringify(browserCalls),
 					);
 					return result;
@@ -359,12 +441,20 @@ console.log(JSON.stringify({ success: !(args.includes("close") && process.env.FA
 					[...prefix, "--confirm-actions", "click", "connect"],
 					[...prefix, "--config", join(root, "missing.json"), "get", "title"],
 				]) {
+					// Complete this shared-session/configuration transition before the next scenario observes or restores it.
+					// oxlint-disable-next-line no-await-in-loop
 					const rejected = await executeRegisteredTool(resumed.tool, resumed.ctx, { args });
+					// The nonempty args fixture matrix exhaustively verifies each case; any failed assertion fails the test.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
 					assert.equal(
 						rejected.isError,
 						true,
+						// Observe the current fixture receipt before deciding whether the next poll or state transition may proceed.
+						// oxlint-disable-next-line no-await-in-loop
 						JSON.stringify({ args, result: rejected.details, calls: await readInvocationLog(log) }),
 					);
+					// Complete this shared-session/configuration transition before the next scenario observes or restores it.
+					// oxlint-disable-next-line no-await-in-loop
 					await check(resumed, [...prefix, "get", "title"], "navigate");
 				}
 				await executeRegisteredTool(resumed.tool, resumed.ctx, {
@@ -446,37 +536,37 @@ console.log(JSON.stringify({ success: !(args.includes("close") && process.env.FA
 					"navigate",
 				);
 				await writeFile(log, "");
-				const code = await executeRegisteredTool(
-					resumed.getTool("agent_browser_code")!,
-					resumed.ctx,
-					{
-						session: "selected",
-						namespace: "team-space",
-						code: 'emit((await browser({args:["get","title"]})).success);',
-					},
-				);
-				assert.equal(code.isError, false, code.content[0]?.text);
+				const codeTool = resumed.getTool("agent_browser_code");
+				assert.ok(codeTool);
+				const code = await executeRegisteredTool(codeTool, resumed.ctx, {
+					session: "selected",
+					namespace: "team-space",
+					code: 'emit((await browser({args:["get","title"]})).success);',
+				});
+				assert.equal(code.isError, false, code.content[0].text);
 				assert.ok(
-					(
-						(await readInvocationLog(log)) as Array<{ args: string[]; confirmActions: string }>
-					).every((call) => call.confirmActions === "navigate"),
+					(await readInvocationLog(log)).every(
+						(call) => readRecord(call).confirmActions === "navigate",
+					),
 				);
 				await writeFile(log, "");
+				const qaTool = resumed.getTool("agent_browser_qa");
+				assert.ok(qaTool);
 				const qa = await withPatchedEnv(
 					{ AGENT_BROWSER_SESSION: "selected", AGENT_BROWSER_NAMESPACE: "team-space" },
 					() =>
-						executeRegisteredTool(resumed.getTool("agent_browser_qa")!, resumed.ctx, {
+						executeRegisteredTool(qaTool, resumed.ctx, {
 							attached: true,
 							checkErrors: false,
 							checkConsole: false,
 							checkNetwork: false,
 						}),
 				);
-				assert.equal(qa.isError, false, qa.content[0]?.text);
+				assert.equal(qa.isError, false, qa.content[0].text);
 				assert.ok(
-					(
-						(await readInvocationLog(log)) as Array<{ args: string[]; confirmActions: string }>
-					).every((call) => call.confirmActions === "navigate"),
+					(await readInvocationLog(log)).every(
+						(call) => readRecord(call).confirmActions === "navigate",
+					),
 				);
 				await withPatchedEnv({ FAIL_CLOSE: "1" }, async () =>
 					assert.equal((await check(resumed, [...prefix, "close"], "navigate")).isError, true),
@@ -541,7 +631,7 @@ console.log(JSON.stringify({ success: true, data }));
 				HOME: root,
 				USERPROFILE: root,
 				PI_AGENT_BROWSER_SOCKET_DIR: join(root, "s"),
-				PATH: `${root}${delimiter}${process.env.PATH}`,
+				PATH: `${root}${delimiter}${process.env.PATH ?? ""}`,
 				PI_AGENT_BROWSER_MANAGED_SESSION_RESTORE: "0",
 			},
 			async () => {
@@ -563,14 +653,16 @@ console.log(JSON.stringify({ success: true, data }));
 				] as const) {
 					const harness = createExtensionHarness({ cwd: root });
 					const prefix = ["--session", "pending-batch"];
-					assert.equal(
-						(
-							await executeRegisteredTool(harness.tool, harness.ctx, {
-								args: [...prefix, "--confirm-actions", "navigate,url", "get", "url"],
-							})
-						).isError,
-						false,
-					);
+					// Complete this shared-session/configuration transition before the next scenario observes or restores it.
+					// oxlint-disable-next-line no-await-in-loop
+					const initialized = await executeRegisteredTool(harness.tool, harness.ctx, {
+						args: [...prefix, "--confirm-actions", "navigate,url", "get", "url"],
+					});
+					// The nonempty [rows, expected] fixture matrix exhaustively verifies each case; any failed assertion fails the test.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
+					assert.equal(initialized.isError, false);
+					// Complete this shared-session/configuration transition before the next scenario observes or restores it.
+					// oxlint-disable-next-line no-await-in-loop
 					const result = await withPatchedEnv(
 						{ GATE_URL: "1", BATCH_RESULTS: JSON.stringify(rows) },
 						() =>
@@ -579,31 +671,45 @@ console.log(JSON.stringify({ success: true, data }));
 								stdin: JSON.stringify(rows.map((row) => row.command)),
 							}),
 					);
+					// The nonempty [rows, expected] fixture matrix exhaustively verifies each case; any failed assertion fails the test.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
 					assert.equal(
 						result.details?.failureCategory,
 						"confirmation-required",
-						result.content[0]?.text,
+						result.content[0].text,
 					);
+					const target = result.details.sessionTabTarget;
+					// The nonempty [rows, expected] fixture matrix exhaustively verifies each case; any failed assertion fails the test.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
 					assert.equal(
-						(result.details?.sessionTabTarget as { url?: string } | undefined)?.url,
+						target === undefined ? undefined : readRecord(target).url,
 						expected,
 						JSON.stringify(rows),
 					);
+					// The nonempty [rows, expected] fixture matrix exhaustively verifies each case; any failed assertion fails the test.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
 					assert.equal(
-						result.details?.sessionTabTargetUnknown,
+						result.details.sessionTabTargetUnknown,
 						expected === undefined ? true : undefined,
 					);
 					const resumed = createExtensionHarness({
 						cwd: root,
 						branch: harness.ctx.sessionManager.getBranch().slice(),
 					});
+					// Complete this shared-session/configuration transition before the next scenario observes or restores it.
+					// oxlint-disable-next-line no-await-in-loop
 					await runExtensionEvent(resumed.handlers, "session_start", {}, resumed.ctx);
 					// No page observation: this result can only report replayed target state.
+					// Complete this shared-session/configuration transition before the next scenario observes or restores it.
+					// oxlint-disable-next-line no-await-in-loop
 					const replayed = await executeRegisteredTool(resumed.tool, resumed.ctx, {
 						args: [...prefix, "session", "info"],
 					});
+					const replayedTarget = replayed.details?.sessionTabTarget;
+					// The nonempty [rows, expected] fixture matrix exhaustively verifies each case; any failed assertion fails the test.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
 					assert.equal(
-						(replayed.details?.sessionTabTarget as { url?: string } | undefined)?.url,
+						replayedTarget === undefined ? undefined : readRecord(replayedTarget).url,
 						expected,
 					);
 				}
@@ -636,6 +742,7 @@ for (const [enabled, oppositeDefaults] of [
 					noAutoDialog: oppositeDefaults && !enabled,
 				}),
 			);
+			const oppositeValue = enabled ? "0" : "1";
 			const flags = [
 				"--config",
 				config,
@@ -653,8 +760,8 @@ for (const [enabled, oppositeDefaults] of [
 						HOME: root,
 						USERPROFILE: root,
 						AGENT_BROWSER_SOCKET_DIR: socketDir,
-						AGENT_BROWSER_DEBUG: oppositeDefaults ? (enabled ? "0" : "1") : undefined,
-						AGENT_BROWSER_NO_AUTO_DIALOG: oppositeDefaults ? (enabled ? "0" : "1") : undefined,
+						AGENT_BROWSER_DEBUG: oppositeDefaults ? oppositeValue : undefined,
+						AGENT_BROWSER_NO_AUTO_DIALOG: oppositeDefaults ? oppositeValue : undefined,
 					},
 					async () => {
 						const harness = createExtensionHarness({ cwd: root });
@@ -662,18 +769,15 @@ for (const [enabled, oppositeDefaults] of [
 							const opened = await executeRegisteredTool(harness.tool, harness.ctx, {
 								args: [...flags, "open", fixture.baseUrl],
 							});
-							assert.equal(opened.isError, false, opened.content[0]?.text);
+							assert.equal(opened.isError, false, opened.content[0].text);
 							const pidPath = join(socketDir, "booleans.pid");
 							const pid = await readFile(pidPath, "utf8");
 							const snapshot = await executeRegisteredTool(harness.tool, harness.ctx, {
 								args: [...flags, "snapshot", "-i"],
 							});
-							assert.equal(snapshot.isError, false, snapshot.content[0]?.text);
+							assert.equal(snapshot.isError, false, snapshot.content[0].text);
 							assert.match(JSON.stringify(snapshot.details?.data), /Mark ready|Name input/);
-							assert.equal(
-								(snapshot.details?.data as { origin?: string }).origin,
-								fixture.baseUrl + "/",
-							);
+							assert.equal(readRecord(snapshot.details?.data).origin, fixture.baseUrl + "/");
 							assert.equal(
 								await readFile(pidPath, "utf8"),
 								pid,
@@ -682,8 +786,8 @@ for (const [enabled, oppositeDefaults] of [
 							assert.equal(
 								await stat(join(socketDir, "booleans.log")).then(
 									() => true,
-									(error) => {
-										if (error.code === "ENOENT") {
+									(error: unknown) => {
+										if (hasErrorCode(error, "ENOENT")) {
 											return false;
 										}
 										throw error;
@@ -717,8 +821,8 @@ for (const [enabled, oppositeDefaults] of [
 							assert.equal(
 								await stat(join(socketDir, "inherited.log")).then(
 									() => true,
-									(error) => {
-										if (error.code === "ENOENT") {
+									(error: unknown) => {
+										if (hasErrorCode(error, "ENOENT")) {
 											return false;
 										}
 										throw error;
@@ -766,24 +870,24 @@ console.log(JSON.stringify({ success: true, data: { title: "Fixture", url: "http
 				HOME: root,
 				USERPROFILE: root,
 				PI_AGENT_BROWSER_SOCKET_DIR: join(root, "s"),
-				PATH: `${root}${delimiter}${process.env.PATH}`,
+				PATH: `${root}${delimiter}${process.env.PATH ?? ""}`,
 				PI_SUBAGENT_CHILD: undefined,
 				PI_SUBAGENT_ROOT_SESSION_ID: undefined,
 			},
 			async () => {
 				const one = createExtensionHarness({ cwd: root, sessionId: "root-one" });
 				const two = createExtensionHarness({ cwd: root, sessionId: "root-two" });
-				const read = (h: typeof one) =>
+				const read = (h: Pick<typeof one, "tool" | "ctx">) =>
 					executeRegisteredTool(h.tool, h.ctx, { args: ["get", "title"] });
 				const [a, b] = await Promise.all([read(one), read(two)]);
-				assert.equal(a.isError, false, a.content[0]?.text);
-				assert.equal(b.isError, false, b.content[0]?.text);
+				assert.equal(a.isError, false, a.content[0].text);
+				assert.equal(b.isError, false, b.content[0].text);
 				assert.equal(typeof a.details?.sessionName, "string");
 				assert.notEqual(a.details?.sessionName, b.details?.sessionName);
 				const followup = await executeRegisteredTool(one.tool, one.ctx, {
-					args: ["--session", String(a.details?.sessionName), "get", "title"],
+					args: ["--session", readString(a.details?.sessionName), "get", "title"],
 				});
-				assert.equal(followup.isError, false, followup.content[0]?.text);
+				assert.equal(followup.isError, false, followup.content[0].text);
 				await withPatchedEnv(
 					{ PI_SUBAGENT_CHILD: "1", PI_SUBAGENT_ROOT_SESSION_ID: "root-one" },
 					async () => {
@@ -808,20 +912,20 @@ console.log(JSON.stringify({ success: true, data: { title: "Fixture", url: "http
 				});
 				assert.equal(explicit.details?.sessionName, "unrelated");
 				for (const h of [one, two, resumed]) {
+					// Complete this shared-session/configuration transition before the next scenario observes or restores it.
+					// oxlint-disable-next-line no-await-in-loop
 					await runExtensionEvent(h.handlers, "session_shutdown", { reason: "quit" }, h.ctx);
 				}
-				const calls = (await readInvocationLog(log)) as Array<{
-					args: string[];
-					restore: string | null;
-					profile: string | null;
-				}>;
+				const calls = await readInvocationLog(log);
 				assert.ok(
 					calls.some((call) => call.args.includes("url")),
 					"real helper routing is covered",
 				);
 				const bootstraps = calls.filter(
 					(call) =>
-						call.args.includes("get") && call.args.includes("title") && call.profile === "Default",
+						call.args.includes("get") &&
+						call.args.includes("title") &&
+						readRecord(call).profile === "Default",
 				);
 				assert.equal(
 					bootstraps.length,
@@ -829,20 +933,26 @@ console.log(JSON.stringify({ success: true, data: { title: "Fixture", url: "http
 					"each root launches with its profile once; active daemons retain their own launch settings",
 				);
 				for (const call of calls) {
+					// Bootstrap call presence/count is asserted above; every emitted call must also retain its ownership and restore identity.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
 					assert.ok(
 						!call.args.includes("close"),
 						"neither parent nor child exit owns group teardown",
 					);
 					const name = call.args[call.args.indexOf("--session") + 1];
-					assert.equal(call.restore, name === "unrelated" ? null : name);
+					// Bootstrap call presence/count is asserted above; every emitted call must also retain its ownership and restore identity.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
+					assert.equal(readRecord(call).restore, name === "unrelated" ? null : name);
 					if (name === "unrelated") {
-						assert.equal(call.profile, null);
+						// This enumerated fixture branch (name === "unrelated") has variant-specific assertions; common assertions cover every case.
+						// oxlint-disable-next-line node-test/no-conditional-assertion
+						assert.equal(readRecord(call).profile, null);
 					}
 				}
 				const profiled = await executeRegisteredTool(one.tool, one.ctx, {
 					args: ["--profile", "Profile 1", "open", "https://fixture.test/"],
 				});
-				assert.equal(profiled.isError, false, profiled.content[0]?.text);
+				assert.equal(profiled.isError, false, profiled.content[0].text);
 				assert.equal(
 					profiled.details?.sessionName,
 					a.details?.sessionName,
@@ -884,7 +994,7 @@ console.log(JSON.stringify({ success: true, data: { session: "default", title: "
 				HOME: root,
 				USERPROFILE: root,
 				PI_AGENT_BROWSER_SOCKET_DIR: join(root, "s"),
-				PATH: `${root}${delimiter}${process.env.PATH}`,
+				PATH: `${root}${delimiter}${process.env.PATH ?? ""}`,
 				PI_AGENT_BROWSER_CONFIG: packageConfig,
 				PI_SUBAGENT_CHILD: undefined,
 				PI_SUBAGENT_ROOT_SESSION_ID: undefined,
@@ -958,12 +1068,25 @@ console.log(JSON.stringify({ success: true, data: { session: "default", title: "
 						env: {},
 					},
 					{
+						name: "caller native Chrome config launch args",
+						args: [],
+						config: {
+							profile: "Caller",
+							executablePath: "/caller/chrome",
+							args: "--caller-launch-arg",
+						},
+						env: {},
+						preserveNativeArgs: true,
+					},
+					{
 						name: "unrelated explicit Chrome session",
 						args: ["--session", "unrelated"],
 						config: {},
 						env: {},
 					},
 				]) {
+					// Complete this shared-session/configuration transition before the next scenario observes or restores it.
+					// oxlint-disable-next-line no-await-in-loop
 					await t.test(scenario.name, async () => {
 						await writeFile(nativeConfig, JSON.stringify(scenario.config));
 						await writeFile(log, "");
@@ -979,46 +1102,72 @@ console.log(JSON.stringify({ success: true, data: { session: "default", title: "
 								const result = await executeRegisteredTool(harness.tool, harness.ctx, {
 									args: [...scenario.args, "open", "https://fixture.test/"],
 								});
-								assert.equal(result.isError, false, result.content[0]?.text);
-								const calls = (await readInvocationLog(log)) as Array<{
-									args: string[];
-									profile: string | null;
-									executablePath: string | null;
-									engine: string | null;
-									config: unknown;
-								}>;
+								assert.equal(result.isError, false, result.content[0].text);
+								const saved = await executeRegisteredTool(harness.tool, harness.ctx, {
+									args: [
+										...scenario.args,
+										"auth",
+										"save",
+										"fixture",
+										"--url",
+										"https://fixture.test/",
+									],
+								});
+								assert.equal(saved.isError, false, saved.content[0].text);
+								const followup = await executeRegisteredTool(harness.tool, harness.ctx, {
+									args: [...scenario.args, "get", "title"],
+								});
+								assert.equal(followup.isError, false, followup.content[0].text);
+								const calls = await readInvocationLog(log);
 								const main = calls.find((call) => call.args.includes("open"));
 								assert.ok(main, "the requested browser call reached upstream");
+								let expectedProfile: string | null = null;
+								let expectedExecutable: string | null = null;
+								if (scenario.defaults === true) {
+									expectedProfile = "Default";
+									expectedExecutable = "/wrapper/chrome";
+								} else if (scenario.caller === true) {
+									expectedProfile = "Caller";
+									expectedExecutable = "/caller/browser";
+								}
+								assert.equal(readRecord(main).profile, expectedProfile);
+								assert.equal(readRecord(main).executablePath, expectedExecutable);
 								assert.equal(
-									main.profile,
-									scenario.defaults ? "Default" : scenario.caller ? "Caller" : null,
-								);
-								assert.equal(
-									main.executablePath,
-									scenario.defaults
-										? "/wrapper/chrome"
-										: scenario.caller
-											? "/caller/browser"
-											: null,
-								);
-								assert.equal(
-									main.engine,
+									readRecord(main).engine,
 									scenario.env.AGENT_BROWSER_ENGINE ?? null,
 									"caller engine environment is unchanged",
 								);
 								assert.deepEqual(
-									main.config,
+									readRecord(main).config,
 									scenario.config,
 									"native configuration remains unchanged",
 								);
+								if (scenario.preserveNativeArgs === true) {
+									// This native-config variant checks every browser, local command and helper invocation.
+									// oxlint-disable-next-line node-test/no-conditional-assertion
+									assert.ok(
+										calls.every(
+											(call) =>
+												!call.args.includes("--args") &&
+												JSON.stringify(readRecord(call).config) === JSON.stringify(scenario.config),
+										),
+										"automatic args must not change the native-config launch hash across command families",
+									);
+								}
 								assert.deepEqual(
 									main.args.slice(-scenario.args.length - 2),
 									[...scenario.args, "open", "https://fixture.test/"],
 									"caller argv remains unchanged",
 								);
-								if (!scenario.defaults && !scenario.caller) {
+								if (scenario.defaults !== true && scenario.caller !== true) {
+									// This enumerated fixture branch (scenario.defaults !== true && scenario.caller !== true) has variant-specific assertions; common assertions cover every case.
+									// oxlint-disable-next-line node-test/no-conditional-assertion
 									assert.ok(
-										calls.every((call) => call.profile === null && call.executablePath === null),
+										calls.every(
+											(call) =>
+												readRecord(call).profile === null &&
+												readRecord(call).executablePath === null,
+										),
 										"helpers do not receive wrapper Chrome defaults either",
 									);
 								}
@@ -1070,7 +1219,7 @@ test(
 						const opened = await executeRegisteredTool(parent.tool, parent.ctx, {
 							args: ["--profile", profile, "open", fixture.baseUrl],
 						});
-						assert.equal(opened.isError, false, opened.content[0]?.text);
+						assert.equal(opened.isError, false, opened.content[0].text);
 						const name = opened.details?.sessionName;
 						assert.ok(typeof name === "string" && name.length > 0);
 						const pidPath = join(root, "s", `${name}.pid`);
@@ -1079,7 +1228,7 @@ test(
 							args: ["eval", "--stdin"],
 							stdin: `new Promise((resolve,reject)=>{const r=indexedDB.open('root-profile-marker',1);r.onupgradeneeded=()=>r.result.createObjectStore('auth');r.onsuccess=()=>{const db=r.result;const t=db.transaction('auth','readwrite');t.objectStore('auth').put('kept','marker');t.oncomplete=()=>{db.close();resolve(true)}};r.onerror=()=>reject(r.error)})`,
 						});
-						assert.equal(marked.isError, false, marked.content[0]?.text);
+						assert.equal(marked.isError, false, marked.content[0].text);
 						await withPatchedEnv(
 							{ PI_SUBAGENT_CHILD: "1", PI_SUBAGENT_ROOT_SESSION_ID: "persistent-root" },
 							async () => {
@@ -1088,17 +1237,17 @@ test(
 									const shared = await executeRegisteredTool(child.tool, child.ctx, {
 										args: ["get", "title"],
 									});
-									assert.equal(shared.isError, false, shared.content[0]?.text);
+									assert.equal(shared.isError, false, shared.content[0].text);
 									assert.equal(shared.details?.sessionName, name);
 									const result = await executeRegisteredTool(child.tool, child.ctx, {
 										args: ["--session", name, "get", "title"],
 									});
-									assert.equal(result.isError, false, result.content[0]?.text);
+									assert.equal(result.isError, false, result.content[0].text);
 									assert.equal(result.details?.sessionName, name);
 									const qa = await executeRegisteredTool(child.tool, child.ctx, {
 										qa: { attached: true, expectedText: "Agent Browser Contract Fixture" },
 									});
-									assert.equal(qa.isError, false, qa.content[0]?.text);
+									assert.equal(qa.isError, false, qa.content[0].text);
 								} finally {
 									await runExtensionEvent(
 										child.handlers,
@@ -1119,15 +1268,15 @@ test(
 						const reopened = await executeRegisteredTool(resumed.tool, resumed.ctx, {
 							args: ["--profile", profile, "open", fixture.baseUrl],
 						});
-						assert.equal(reopened.isError, false, reopened.content[0]?.text);
+						assert.equal(reopened.isError, false, reopened.content[0].text);
 						assert.equal(reopened.details?.sessionName, name);
 						assert.notEqual(await readFile(pidPath, "utf8"), pid);
 						const retained = await executeRegisteredTool(resumed.tool, resumed.ctx, {
 							args: ["eval", "--stdin"],
 							stdin: `new Promise((resolve,reject)=>{const r=indexedDB.open('root-profile-marker');r.onsuccess=()=>{const db=r.result;const t=db.transaction('auth');const get=t.objectStore('auth').get('marker');get.onsuccess=()=>{db.close();resolve(get.result)}};r.onerror=()=>reject(r.error)})`,
 						});
-						assert.equal(retained.isError, false, retained.content[0]?.text);
-						assert.equal((retained.details?.data as { result?: unknown })?.result, "kept");
+						assert.equal(retained.isError, false, retained.content[0].text);
+						assert.equal(readRecord(retained.details?.data).result, "kept");
 					} finally {
 						await executeRegisteredTool(parent.tool, parent.ctx, { args: ["close"] });
 					}
@@ -1164,15 +1313,15 @@ test(
 				},
 				async () => {
 					const harness = createExtensionHarness({ cwd: root });
-					const inspect = async (args: string[], session: string, namespace?: string) => {
+					const inspect = async (args: readonly string[], session: string, namespace?: string) => {
 						const result = await executeRegisteredTool(harness.tool, harness.ctx, {
 							args: [...args, "session"],
 						});
-						assert.equal(result.isError, false, result.content[0]?.text);
+						assert.equal(result.isError, false, result.content[0].text);
 						assert.equal(result.details?.sessionName, session);
-						assert.equal((result.details?.data as { session?: string })?.session, session);
-						assert.equal(result.details?.namespace, namespace);
-						assert.equal(result.details?.usedImplicitSession, false);
+						assert.equal(readRecord(result.details.data).session, session);
+						assert.equal(result.details.namespace, namespace);
+						assert.equal(result.details.usedImplicitSession, false);
 					};
 					await inspect([], "project", "global-space");
 					await withPatchedEnv({ AGENT_BROWSER_SESSION: "--shared" }, () =>
@@ -1252,14 +1401,14 @@ test(
 						const opened = await executeRegisteredTool(one.tool, one.ctx, {
 							args: ["open", fixture.baseUrl],
 						});
-						assert.equal(opened.isError, false, opened.content[0]?.text);
+						assert.equal(opened.isError, false, opened.content[0].text);
 						assert.equal(opened.details?.sessionName, "shared");
-						assert.equal(opened.details?.usedImplicitSession, false);
+						assert.equal(opened.details.usedImplicitSession, false);
 						const marked = await executeRegisteredTool(one.tool, one.ctx, {
 							args: ["eval", "--stdin"],
 							stdin: 'localStorage.setItem("fixture-marker", "kept"); "marked"',
 						});
-						assert.equal(marked.isError, false, marked.content[0]?.text);
+						assert.equal(marked.isError, false, marked.content[0].text);
 						const pidPath = join(socketDir, "namespaces", "team", "run", "shared.pid");
 						const pid = await readFile(pidPath, "utf8");
 						await runExtensionEvent(one.handlers, "session_shutdown", { reason: "quit" }, one.ctx);
@@ -1269,73 +1418,77 @@ test(
 							args: ["eval", "--stdin"],
 							stdin: 'localStorage.getItem("fixture-marker")',
 						});
-						assert.equal(reused.isError, false, reused.content[0]?.text);
+						assert.equal(reused.isError, false, reused.content[0].text);
 						assert.equal(reused.details?.sessionName, "shared");
-						assert.match(JSON.stringify(reused.details?.data), /kept/);
+						assert.match(JSON.stringify(reused.details.data), /kept/);
 						const fresh = await executeRegisteredTool(two.tool, two.ctx, {
 							args: ["get", "title"],
 							sessionMode: "fresh",
 						});
-						assert.equal(fresh.isError, false, fresh.content[0]?.text);
+						assert.equal(fresh.isError, false, fresh.content[0].text);
 						assert.equal(
 							fresh.details?.sessionName,
 							"shared",
 							"configured native session wins just like explicit --session",
 						);
-						assert.equal(fresh.details?.managedSessionOutcome, undefined);
+						assert.equal(fresh.details.managedSessionOutcome, undefined);
 						assert.equal(
 							await readFile(pidPath, "utf8"),
 							pid,
 							"fresh must not restart the configured shared browser",
 						);
-						const qa = await executeRegisteredTool(two.getTool("agent_browser_qa")!, two.ctx, {
+						const qaTool = two.getTool("agent_browser_qa");
+						assert.ok(qaTool);
+						const qa = await executeRegisteredTool(qaTool, two.ctx, {
 							attached: true,
 							expectedText: "Agent Browser Contract Fixture",
 						});
-						assert.equal(qa.isError, false, qa.content[0]?.text);
+						assert.equal(qa.isError, false, qa.content[0].text);
 						assert.equal(qa.details?.sessionName, "shared");
-						const semantic = await executeRegisteredTool(
-							two.getTool("agent_browser_action")!,
-							two.ctx,
-							{
-								action: "fill",
-								locator: "role",
-								value: "textbox",
-								name: "Name",
-								text: "shared value",
-							},
-						);
-						assert.equal(semantic.isError, false, semantic.content[0]?.text);
+						const actionTool = two.getTool("agent_browser_action");
+						assert.ok(actionTool);
+						const semantic = await executeRegisteredTool(actionTool, two.ctx, {
+							action: "fill",
+							locator: "role",
+							value: "textbox",
+							name: "Name",
+							text: "shared value",
+						});
+						assert.equal(semantic.isError, false, semantic.content[0].text);
 						assert.equal(semantic.details?.sessionName, "shared");
-						assert.equal(semantic.details?.namespace, "team");
+						assert.equal(semantic.details.namespace, "team");
 						assert.ok(
-							(semantic.details?.effectiveArgs as string[]).some((arg) => /^@e\d+$/.test(arg)),
+							readArray(semantic.details.effectiveArgs)
+								.map(readString)
+								.some((arg) => /^@e\d+$/.test(arg)),
 							"semantic re-planning uses a live ref and retains native defaults",
 						);
 						const batch = await executeRegisteredTool(two.tool, two.ctx, {
 							args: ["batch", "--bail"],
 							stdin: JSON.stringify([["wait", "--text", "Agent Browser Contract Fixture"]]),
 						});
-						assert.equal(batch.isError, false, batch.content[0]?.text);
+						assert.equal(batch.isError, false, batch.content[0].text);
 						assert.equal(batch.details?.sessionName, "shared");
-						const lookup = await executeRegisteredTool(
-							two.getTool("agent_browser_source")!,
-							two.ctx,
-							{ selector: "#name-input" },
-						);
-						assert.equal(lookup.isError, false, lookup.content[0]?.text);
+						const sourceTool = two.getTool("agent_browser_source");
+						assert.ok(sourceTool);
+						const lookup = await executeRegisteredTool(sourceTool, two.ctx, {
+							selector: "#name-input",
+						});
+						assert.equal(lookup.isError, false, lookup.content[0].text);
 						assert.equal(lookup.details?.sessionName, "shared");
-						const network = await executeRegisteredTool(
-							two.getTool("agent_browser_network_source")!,
-							two.ctx,
-							{ filter: "fixture" },
-						);
-						assert.equal(network.isError, false, network.content[0]?.text);
+						const networkSourceTool = two.getTool("agent_browser_network_source");
+						assert.ok(networkSourceTool);
+						const network = await executeRegisteredTool(networkSourceTool, two.ctx, {
+							filter: "fixture",
+						});
+						assert.equal(network.isError, false, network.content[0].text);
 						assert.equal(network.details?.sessionName, "shared");
-						const code = await executeRegisteredTool(two.getTool("agent_browser_code")!, two.ctx, {
+						const codeTool = two.getTool("agent_browser_code");
+						assert.ok(codeTool);
+						const code = await executeRegisteredTool(codeTool, two.ctx, {
 							code: `const marker = await browser({args:["eval","--stdin"],stdin:'localStorage.getItem("fixture-marker")'}); emit({success:marker.success, data:marker.data});`,
 						});
-						assert.equal(code.isError, false, code.content[0]?.text);
+						assert.equal(code.isError, false, code.content[0].text);
 						assert.match(JSON.stringify(code.details?.data), /kept/);
 						assert.equal(code.details?.sessionName, "shared");
 						assert.equal(
@@ -1390,7 +1543,7 @@ console.log(JSON.stringify({ success: true, data }));
 				HOME: root,
 				USERPROFILE: root,
 				PI_AGENT_BROWSER_SOCKET_DIR: join(root, "s"),
-				PATH: `${root}${delimiter}${process.env.PATH}`,
+				PATH: `${root}${delimiter}${process.env.PATH ?? ""}`,
 				PI_SUBAGENT_CHILD: undefined,
 				PI_SUBAGENT_ROOT_SESSION_ID: undefined,
 			},
@@ -1399,27 +1552,43 @@ console.log(JSON.stringify({ success: true, data }));
 				const opened = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: ["open", "https://fixture.test/"],
 				});
-				assert.equal(opened.isError, false, opened.content[0]?.text);
-				const session = String(opened.details?.sessionName);
+				assert.equal(opened.isError, false, opened.content[0].text);
+				const session = readString(opened.details?.sessionName);
 				assert.match(session, /^pi-root-/);
 				for (const action of [
 					{ action: "click", locator: "role", value: "button", name: "Save" },
 					{ action: "select", locator: "label", value: "Flavor", values: ["vanilla"] },
 				]) {
+					// Complete this shared-session/configuration transition before the next scenario observes or restores it.
+					// oxlint-disable-next-line no-await-in-loop
 					await writeFile(log, "");
-					const result = await executeRegisteredTool(
-						harness.getTool("agent_browser_action")!,
-						harness.ctx,
-						action,
-					);
-					assert.equal(result.isError, false, result.content[0]?.text);
+					const actionTool = harness.getTool("agent_browser_action");
+					// The nonempty action fixture matrix exhaustively verifies each case; any failed assertion fails the test.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
+					assert.ok(actionTool);
+					// Complete this shared-session/configuration transition before the next scenario observes or restores it.
+					// oxlint-disable-next-line no-await-in-loop
+					const result = await executeRegisteredTool(actionTool, harness.ctx, action);
+					// The nonempty action fixture matrix exhaustively verifies each case; any failed assertion fails the test.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
+					assert.equal(result.isError, false, result.content[0].text);
+					// The nonempty action fixture matrix exhaustively verifies each case; any failed assertion fails the test.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
 					assert.equal(result.details?.sessionName, session);
-					assert.equal(result.details?.usedImplicitSession, false);
-					const calls = (await readInvocationLog(log)) as Array<{ args: string[] }>;
+					// The nonempty action fixture matrix exhaustively verifies each case; any failed assertion fails the test.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
+					assert.equal(result.details.usedImplicitSession, false);
+					// Observe the current fixture receipt before deciding whether the next poll or state transition may proceed.
+					// oxlint-disable-next-line no-await-in-loop
+					const calls = await readInvocationLog(log);
+					// The nonempty action fixture matrix exhaustively verifies each case; any failed assertion fails the test.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
 					assert.ok(
 						calls.some((call) => call.args.includes("snapshot")),
 						"resolving snapshot ran",
 					);
+					// The nonempty action fixture matrix exhaustively verifies each case; any failed assertion fails the test.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
 					assert.ok(
 						calls.some(
 							(call) =>
@@ -1428,6 +1597,8 @@ console.log(JSON.stringify({ success: true, data }));
 						),
 						"resolved mutation ran",
 					);
+					// The nonempty action fixture matrix exhaustively verifies each case; any failed assertion fails the test.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
 					assert.ok(
 						calls.every((call) => call.args[call.args.indexOf("--session") + 1] === session),
 						"helpers and mutation use the same root identity",

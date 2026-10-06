@@ -3,6 +3,7 @@ import { mkdtemp, readFile, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { readRecord, readArray, readString } from "./helpers/assertions.js";
 import { setTimeout as delay } from "node:timers/promises";
 import {
 	createExtensionHarness,
@@ -60,7 +61,11 @@ test("canonical JSON preserves array-valued page and code output", async () => {
 		succeeded: true,
 	});
 	assert.deepEqual(
-		JSON.parse(rendered.content.find((part) => part.type === "text")!.text).data,
+		readRecord(
+			JSON.parse(
+				readString(readRecord(rendered.content.find((part) => part.type === "text")).text),
+			),
+		).data,
 		data,
 	);
 	assert.deepEqual(rendered.structuredContent, { success: true, resultCategory: "success", data });
@@ -78,7 +83,7 @@ test("JSON observations retain exact recovery, failure category and artifact ver
 		details: { artifactVerification: verification },
 		succeeded: false,
 	});
-	const payload = JSON.parse(content[0].type === "text" ? content[0].text : "");
+	const payload = readRecord(JSON.parse(content[0].type === "text" ? content[0].text : ""));
 	assert.equal(payload.success, false);
 	assert.equal(payload.failureCategory, "selector-not-found");
 	assert.deepEqual(payload.nextActions, actions);
@@ -102,6 +107,8 @@ test("code observations retain identity, un-emitted failures, counters and opaqu
 	};
 	const observation = projectAgentBrowserObservation(fields, false);
 	for (const [key, value] of Object.entries(fields)) {
+		// The fixed observation/mutation variants require their own payload/target assertions; every variant also has unconditional outcome checks.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.deepEqual(observation[key], value);
 	}
 });
@@ -114,7 +121,7 @@ test("exact string redaction cannot corrupt JSON booleans or structural tokens",
 		userRequestedJson: true,
 		presentation: { content: [], summary: "done", data: { value: "true" } },
 	});
-	const payload = JSON.parse(content[0].type === "text" ? content[0].text : "");
+	const payload = readRecord(JSON.parse(content[0].type === "text" ? content[0].text : ""));
 	assert.equal(payload.success, true);
 	assert.deepEqual(payload.data, { value: "[REDACTED]" });
 });
@@ -144,8 +151,9 @@ test("prose retains full action payloads and projection excludes ownership state
 		json: false,
 		succeeded: false,
 	});
-	const text = rendered.content[0].type === "text" ? rendered.content[0].text : "";
-	const metadata = JSON.parse(text.split("Observation: ")[1]);
+	const text =
+		rendered.content[0].type === "text" ? readString(readRecord(rendered.content[0]).text) : "";
+	const metadata = readRecord(JSON.parse(text.split("Observation: ")[1]));
 	assert.deepEqual(metadata.nextActions, actions);
 	assert.deepEqual(metadata.artifactVerification, verification);
 	assert.doesNotMatch(text, /use details.nextActions|secret|unrelated replay/);
@@ -162,6 +170,8 @@ test("oversized JSON and prose spill complete redacted recovery and data to a re
 		];
 		for (const json of [true, false]) {
 			const requestedActions = json ? nextActions : actions;
+			// Finish each observation/cancellation lifecycle before reusing its shared artifact store or dispatch marker.
+			// oxlint-disable-next-line no-await-in-loop
 			const rendered = await renderAgentBrowserObservation({
 				content: [{ type: "text", text: "Brief preview." }],
 				details: {
@@ -174,28 +184,53 @@ test("oversized JSON and prose spill complete redacted recovery and data to a re
 				succeeded: false,
 				persistentArtifactStore: { sessionDir: dir, sessionId: "bounded" },
 			});
-			const text = rendered.content[0].type === "text" ? rendered.content[0].text : "";
+			const text =
+				rendered.content[0].type === "text" ? readString(readRecord(rendered.content[0]).text) : "";
+			// The fixed observation/mutation variants require their own payload/target assertions; every variant also has unconditional outcome checks.
+			// oxlint-disable-next-line node-test/no-conditional-assertion
 			assert.ok(text.length <= OBSERVATION_INLINE_MAX_CHARS);
-			const payload = JSON.parse(json ? text : text.slice(text.indexOf("{")));
+			const payload = readRecord(JSON.parse(json ? text : text.slice(text.indexOf("{"))));
+			// The fixed observation/mutation variants require their own payload/target assertions; every variant also has unconditional outcome checks.
+			// oxlint-disable-next-line node-test/no-conditional-assertion
 			assert.deepEqual(
 				rendered.structuredContent,
 				payload,
 				"native callers receive the same bounded complete-spill envelope",
 			);
+			// The fixed observation/mutation variants require their own payload/target assertions; every variant also has unconditional outcome checks.
+			// oxlint-disable-next-line node-test/no-conditional-assertion
 			assert.equal(payload.success, false);
+			// The fixed observation/mutation variants require their own payload/target assertions; every variant also has unconditional outcome checks.
+			// oxlint-disable-next-line node-test/no-conditional-assertion
 			assert.equal(payload.failureCategory, "timeout");
+			// The fixed observation/mutation variants require their own payload/target assertions; every variant also has unconditional outcome checks.
+			// oxlint-disable-next-line node-test/no-conditional-assertion
 			assert.deepEqual(payload.artifactVerification, verification);
+			// The fixed observation/mutation variants require their own payload/target assertions; every variant also has unconditional outcome checks.
+			// oxlint-disable-next-line node-test/no-conditional-assertion
 			assert.deepEqual(
 				payload.nextActions,
 				json ? undefined : actions,
 				"keep exact actions or omit oversized actions; never truncate them",
 			);
-			const fullText = await readFile(payload.observationPath, "utf8");
-			const full = JSON.parse(fullText);
+			// Finish each observation/cancellation lifecycle before reusing its shared artifact store or dispatch marker.
+			// oxlint-disable-next-line no-await-in-loop
+			const fullText = await readFile(readString(payload.observationPath), "utf8");
+			const full = readRecord(JSON.parse(readString(fullText)));
+			// The fixed observation/mutation variants require their own payload/target assertions; every variant also has unconditional outcome checks.
+			// oxlint-disable-next-line node-test/no-conditional-assertion
 			assert.deepEqual(full.nextActions, requestedActions);
-			assert.equal(full.data.requested.length, 40_000);
-			assert.equal(full.data.password, "[REDACTED]");
-			assert.doesNotMatch(fullText, /sensitive-value/);
+			// The fixed observation/mutation variants require their own payload/target assertions; every variant also has unconditional outcome checks.
+			// oxlint-disable-next-line node-test/no-conditional-assertion
+			assert.equal(readString(readRecord(full.data).requested).length, 40_000);
+			// The fixed observation/mutation variants require their own payload/target assertions; every variant also has unconditional outcome checks.
+			// oxlint-disable-next-line node-test/no-conditional-assertion
+			assert.equal(readRecord(full.data).password, "[REDACTED]");
+			// The fixed observation/mutation variants require their own payload/target assertions; every variant also has unconditional outcome checks.
+			// oxlint-disable-next-line node-test/no-conditional-assertion
+			assert.doesNotMatch(readString(fullText), /sensitive-value/);
+			// The fixed observation/mutation variants require their own payload/target assertions; every variant also has unconditional outcome checks.
+			// oxlint-disable-next-line node-test/no-conditional-assertion
 			assert.equal(
 				rendered.artifactManifest?.entries.find((entry) => entry.path === payload.observationPath)
 					?.retentionState,
@@ -211,9 +246,13 @@ test("oversized JSON and prose spill complete redacted recovery and data to a re
 			succeeded: true,
 			persistentArtifactStore: { sessionDir: file, sessionId: "failed" },
 		});
-		const failure = JSON.parse(failed.content[0].type === "text" ? failed.content[0].text : "");
+		const failure = readRecord(
+			JSON.parse(
+				failed.content[0].type === "text" ? readString(readRecord(failed.content[0]).text) : "",
+			),
+		);
 		assert.deepEqual(failed.structuredContent, failure);
-		assert.ok(failure.observationUnavailable);
+		assert.ok(readString(failure.observationUnavailable).length > 0);
 		assert.equal(failure.observationPath, undefined);
 		assert.deepEqual(failure.nextActions, actions);
 	} finally {
@@ -261,16 +300,22 @@ test("code observations preserve full snapshot/batch data without model compacti
 		assert.equal(batch.fullOutputPath, undefined);
 		assert.deepEqual(batch.batchSteps?.[0].data, data);
 		assert.deepEqual(batch.imageObservations?.[0].pixels, { width: 1, height: 1 });
-		assert.equal(batch.imageObservations?.[0].geometry.status, "unknown");
+		assert.equal(batch.imageObservations[0].geometry.status, "unknown");
 		assert.equal(batch.artifactVerification?.verified, true);
 		for (const modelVisible of [false, true]) {
+			// Finish each observation/cancellation lifecycle before reusing its shared artifact store or dispatch marker.
+			// oxlint-disable-next-line no-await-in-loop
 			const unchanged = await buildToolPresentation({
 				modelVisible,
 				commandInfo: { command: "screenshot" },
 				cwd: dir,
 				envelope: { success: true, data: { changed: false, path } },
 			});
+			// The fixed observation/mutation variants require their own payload/target assertions; every variant also has unconditional outcome checks.
+			// oxlint-disable-next-line node-test/no-conditional-assertion
 			assert.equal(unchanged.imageObservations, undefined);
+			// The fixed observation/mutation variants require their own payload/target assertions; every variant also has unconditional outcome checks.
+			// oxlint-disable-next-line node-test/no-conditional-assertion
 			assert.equal(
 				unchanged.content.some((part) => part.type === "image"),
 				false,
@@ -322,11 +367,14 @@ test("code-mode snapshot filters retain full filtered data without an early spil
 				sessionPageStateUpdate: page.beginUpdate(),
 			});
 			assert.ok(result);
-			const details = result.result.details as Record<string, unknown>;
+			const details = readRecord(result.result.details);
 			assert.deepEqual(result.result.content, []);
 			assert.equal(details.fullOutputPath, undefined);
-			assert.ok((details.data as { snapshot: string }).snapshot.length > 60_000);
-			assert.ok(projectAgentBrowserObservation(details, true).snapshotFilter);
+			assert.ok(readString(readRecord(details.data).snapshot).length > 60_000);
+			assert.notEqual(
+				readRecord(projectAgentBrowserObservation(details, true).snapshotFilter),
+				undefined,
+			);
 		});
 	} finally {
 		await rm(dir, { recursive: true, force: true });
@@ -361,12 +409,22 @@ else process.stdout.write(JSON.stringify({ success:true, data:{ url:'https://exa
 					["get", "text", "#abort"],
 					["find", "text", "click", "text"],
 				]) {
+					// Finish each observation/cancellation lifecycle before reusing its shared artifact store or dispatch marker.
+					// oxlint-disable-next-line no-await-in-loop
 					await rm(marker, { force: true });
 					const h = createExtensionHarness({ cwd: dir });
+					// Finish each observation/cancellation lifecycle before reusing its shared artifact store or dispatch marker.
+					// oxlint-disable-next-line no-await-in-loop
 					await runExtensionEvent(h.handlers, "session_start", { reason: "new" }, h.ctx);
+					// Finish each observation/cancellation lifecycle before reusing its shared artifact store or dispatch marker.
+					// oxlint-disable-next-line no-await-in-loop
 					await executeRegisteredTool(h.tool, h.ctx, { args: ["open", "https://example.test/"] });
+					// Finish each observation/cancellation lifecycle before reusing its shared artifact store or dispatch marker.
+					// oxlint-disable-next-line no-await-in-loop
 					const snapshot = await executeRegisteredTool(h.tool, h.ctx, { args: ["snapshot", "-i"] });
-					assert.ok(snapshot.details?.refSnapshot);
+					// The fixed observation/mutation variants require their own payload/target assertions; every variant also has unconditional outcome checks.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
+					assert.notEqual(readRecord(readRecord(snapshot.details).refSnapshot), undefined);
 					const controller = new AbortController();
 					const pending = executeRegisteredTool(
 						h.tool,
@@ -381,6 +439,8 @@ else process.stdout.write(JSON.stringify({ success:true, data:{ url:'https://exa
 						let dispatched = false;
 						for (let attempts = 0; attempts < 200; attempts++) {
 							if (
+								// Poll the observed dispatch/exit state before waiting again; parallel polls would race cancellation.
+								// oxlint-disable-next-line no-await-in-loop
 								await readFile(marker, "utf8").then(
 									() => true,
 									() => false,
@@ -389,35 +449,66 @@ else process.stdout.write(JSON.stringify({ success:true, data:{ url:'https://exa
 								dispatched = true;
 								break;
 							}
+							// Poll the observed dispatch/exit state before waiting again; parallel polls would race cancellation.
+							// oxlint-disable-next-line no-await-in-loop
 							await delay(10);
 						}
+						// The fixed observation/mutation variants require their own payload/target assertions; every variant also has unconditional outcome checks.
+						// oxlint-disable-next-line node-test/no-conditional-assertion
 						assert.equal(dispatched, true, `${args.join(" ")} must reach native dispatch`);
 					} finally {
 						controller.abort();
 					}
+					// Poll the observed dispatch/exit state before waiting again; parallel polls would race cancellation.
+					// oxlint-disable-next-line no-await-in-loop
 					const result = await pending;
+					// The fixed observation/mutation variants require their own payload/target assertions; every variant also has unconditional outcome checks.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
 					assert.equal(result.isError, true);
-					assert.equal(result.details?.failureCategory, "aborted");
+					// The fixed observation/mutation variants require their own payload/target assertions; every variant also has unconditional outcome checks.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
+					assert.equal(readRecord(result.details).failureCategory, "aborted");
 					if (args[0] === "get" || args.at(-1) === "text") {
-						assert.equal(result.details?.sessionTabTargetUnknown, undefined);
-						assert.equal(result.details?.refSnapshot, undefined);
+						// The fixed observation/mutation variants require their own payload/target assertions; every variant also has unconditional outcome checks.
+						// oxlint-disable-next-line node-test/no-conditional-assertion
+						assert.equal(readRecord(result.details).sessionTabTargetUnknown, undefined);
+						// The fixed observation/mutation variants require their own payload/target assertions; every variant also has unconditional outcome checks.
+						// oxlint-disable-next-line node-test/no-conditional-assertion
+						assert.equal(readRecord(result.details).refSnapshot, undefined);
+						// The fixed observation/mutation variants require their own payload/target assertions; every variant also has unconditional outcome checks.
+						// oxlint-disable-next-line node-test/no-conditional-assertion
 						assert.deepEqual(
 							SessionPageState.fromBranch(h.ctx.sessionManager.getBranch()).get(
-								String(result.details?.sessionName),
+								readString(readRecord(result.details).sessionName),
 							).refSnapshot,
-							snapshot.details?.refSnapshot,
+							readRecord(snapshot.details).refSnapshot,
 						);
 					} else {
-						assert.equal(result.details?.sessionTabTargetUnknown, true, args.join(" "));
-						assert.equal(result.details?.refSnapshot, undefined);
+						// The fixed observation/mutation variants require their own payload/target assertions; every variant also has unconditional outcome checks.
+						// oxlint-disable-next-line node-test/no-conditional-assertion
+						assert.equal(readRecord(result.details).sessionTabTargetUnknown, true, args.join(" "));
+						// The fixed observation/mutation variants require their own payload/target assertions; every variant also has unconditional outcome checks.
+						// oxlint-disable-next-line node-test/no-conditional-assertion
+						assert.equal(readRecord(result.details).refSnapshot, undefined);
+						// The fixed observation/mutation variants require their own payload/target assertions; every variant also has unconditional outcome checks.
+						// oxlint-disable-next-line node-test/no-conditional-assertion
 						assert.ok(
-							(result.details?.nextActions as AgentBrowserNextAction[]).some(
-								(action) => action.id === "verify-page-target-after-interruption",
+							readArray(readRecord(result.details).nextActions).some(
+								(action) => readRecord(action).id === "verify-page-target-after-interruption",
 							),
 						);
+						// Finish each observation/cancellation lifecycle before reusing its shared artifact store or dispatch marker.
+						// oxlint-disable-next-line no-await-in-loop
 						const rejected = await executeRegisteredTool(h.tool, h.ctx, { args: ["click", "@e1"] });
+						// The fixed observation/mutation variants require their own payload/target assertions; every variant also has unconditional outcome checks.
+						// oxlint-disable-next-line node-test/no-conditional-assertion
 						assert.equal(rejected.isError, true);
-						assert.match(rejected.content[0].text ?? "", /get url|unknown|verify/i);
+						// The fixed observation/mutation variants require their own payload/target assertions; every variant also has unconditional outcome checks.
+						// oxlint-disable-next-line node-test/no-conditional-assertion
+						assert.match(
+							readString(readRecord(rejected.content[0]).text),
+							/get url|unknown|verify/i,
+						);
 					}
 				}
 			},
@@ -470,6 +561,8 @@ test("geometry uses measured DPR and refuses scroll/frame/change or dimension gu
 		{ ...sample, scroll: { x: 0, y: 100 } },
 		{ ...sample, element: undefined },
 	]) {
+		// The fixed observation/mutation variants require their own payload/target assertions; every variant also has unconditional outcome checks.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.equal(
 			buildScreenshotGeometry({
 				capture: "element",
@@ -512,24 +605,21 @@ test("compaction keeps an inline diagnostic when summary is deduped against a la
 			succeeded: false,
 			persistentArtifactStore: { sessionDir: dir, sessionId: "dedupe" },
 		});
-		const compact = compacted.structuredContent as {
-			summary?: string;
-			error?: string;
-			compacted?: boolean;
-			observationPath?: string;
-		};
+		const compact = readRecord(compacted.structuredContent);
 		assert.equal(compact.compacted, true);
 		assert.equal(
 			compact.error,
 			undefined,
 			"oversized error itself stays out of the compact object",
 		);
-		assert.equal(compact.summary?.length, 700);
+		assert.equal(readString(compact.summary).length, 700);
 		assert.ok(
 			compact.summary === "E".repeat(699) + "…",
 			"700-character error truncation survives the dedupe",
 		);
-		const full = JSON.parse(await readFile(compact.observationPath as string, "utf8"));
+		const full = readRecord(
+			JSON.parse(await readFile(readString(compact.observationPath), "utf8")),
+		);
 		assert.equal(full.error, largeError);
 		const preserved = await renderAgentBrowserObservation({
 			content: [{ type: "text", text: "Formatted caller output." }],
@@ -539,10 +629,11 @@ test("compaction keeps an inline diagnostic when summary is deduped against a la
 			preserveContent: true,
 			persistentArtifactStore: { sessionDir: dir, sessionId: "preserve" },
 		});
-		const preservedText = preserved.content[0].type === "text" ? preserved.content[0].text : "";
+		const preservedText =
+			preserved.content[0].type === "text" ? readString(readRecord(preserved.content[0]).text) : "";
 		assert.equal(preservedText, "Formatted caller output.");
 		assert.doesNotMatch(preservedText, /Browser observation compacted/);
-		assert.equal((preserved.structuredContent as { compacted?: boolean }).compacted, true);
+		assert.equal(readRecord(preserved.structuredContent).compacted, true);
 	} finally {
 		await rm(dir, { recursive: true, force: true });
 	}

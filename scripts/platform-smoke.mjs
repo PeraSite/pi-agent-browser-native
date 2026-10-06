@@ -77,32 +77,23 @@ export function parseArgs(argv = process.argv.slice(2)) {
 	const parsed = { command: null, target: null, suite: null };
 	for (let index = 0; index < argv.length; index += 1) {
 		const arg = argv[index];
-		if (arg === "--help" || arg === "-h") {
+		if (["--help", "-h"].includes(arg)) {
 			parsed.command = "help";
 			return parsed;
 		}
-		if (arg === "doctor" || arg === "run") {
+		if (["doctor", "run"].includes(arg)) {
 			if (parsed.command) {
 				throw new Error(`multiple commands provided: ${parsed.command}, ${arg}`);
 			}
 			parsed.command = arg;
 			continue;
 		}
-		if (arg === "--target") {
+		if (arg === "--target" || arg === "--suite") {
 			const value = argv[index + 1];
 			if (!value || value.startsWith("-")) {
-				throw new Error("--target requires a value");
+				throw new Error(`${arg} requires a value`);
 			}
-			parsed.target = value;
-			index += 1;
-			continue;
-		}
-		if (arg === "--suite") {
-			const value = argv[index + 1];
-			if (!value || value.startsWith("-")) {
-				throw new Error("--suite requires a value");
-			}
-			parsed.suite = value;
+			parsed[arg.slice(2)] = value;
 			index += 1;
 			continue;
 		}
@@ -116,6 +107,36 @@ function validateNames(kind, names, allowed) {
 	if (invalid.length > 0) {
 		throw new Error(`unknown ${kind}: ${invalid.join(", ")}`);
 	}
+}
+
+async function runTargets(args) {
+	const { runTargetSuites } = await import("./platform-smoke/targets.mjs");
+	const targets = args.target
+		? args.target
+				.split(",")
+				.map((name) => name.trim())
+				.filter(Boolean)
+		: config.requiredTargets;
+	const suites = args.suite ? [args.suite] : config.requiredSuites;
+	validateNames("target", targets, config.requiredTargets);
+	validateNames("suite", suites, config.requiredSuites);
+	const results = await Promise.all(
+		targets.map(async (targetName) => {
+			console.log(`\n=== Target: ${targetName} ===`);
+			return { targetName, result: await runTargetSuites(config, targetName, suites) };
+		}),
+	);
+	const failed = results.filter(({ result }) => !result.ok);
+	if (failed.length > 0) {
+		console.error(
+			`\nPlatform smoke failed for ${failed.map(({ targetName }) => targetName).join(", ")}. See ${config.artifactRoot}.`,
+		);
+		return 1;
+	}
+	console.log(
+		`\nPlatform smoke passed for ${results.map(({ targetName }) => targetName).join(", ")}.`,
+	);
+	return 0;
 }
 
 export async function main(argv = process.argv.slice(2)) {
@@ -135,46 +156,19 @@ export async function main(argv = process.argv.slice(2)) {
 	}
 
 	if (args.command === "run") {
-		const { runTargetSuites } = await import("./platform-smoke/targets.mjs");
-		const targets = args.target
-			? args.target
-					.split(",")
-					.map((name) => name.trim())
-					.filter(Boolean)
-			: config.requiredTargets;
-		const suites = args.suite ? [args.suite] : config.requiredSuites;
-		validateNames("target", targets, config.requiredTargets);
-		validateNames("suite", suites, config.requiredSuites);
-		const runs = targets.map(async (targetName) => {
-			console.log(`\n=== Target: ${targetName} ===`);
-			const result = await runTargetSuites(config, targetName, suites);
-			return { targetName, result };
-		});
-		const results = await Promise.all(runs);
-		const failed = results.filter(({ result }) => !result.ok);
-		if (failed.length > 0) {
-			console.error(
-				`\nPlatform smoke failed for ${failed.map(({ targetName }) => targetName).join(", ")}. See ${config.artifactRoot}.`,
-			);
-			return 1;
-		}
-		console.log(
-			`\nPlatform smoke passed for ${results.map(({ targetName }) => targetName).join(", ")}.`,
-		);
-		return 0;
+		return runTargets(args);
 	}
 
 	throw new Error(`unknown command: ${args.command}`);
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-	main().then(
-		(exitCode) => {
+	main()
+		.then((exitCode) => {
 			process.exitCode = exitCode;
-		},
-		(error) => {
+		})
+		.catch((error) => {
 			console.error(error instanceof Error ? error.message : String(error));
 			process.exitCode = 1;
-		},
-	);
+		});
 }

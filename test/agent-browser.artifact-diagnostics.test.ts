@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readRecord, readArray, readString } from "./helpers/assertions.js";
 import { mkdtemp, open, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
@@ -6,7 +7,7 @@ import test from "node:test";
 
 import { getExplicitArtifactDestination } from "../extensions/agent-browser/lib/orchestration/browser-run/artifact-paths.js";
 import { prepareAgentBrowserArgs } from "../extensions/agent-browser/lib/orchestration/browser-run/prepare.js";
-import type { FileArtifactMetadata } from "../extensions/agent-browser/lib/results/contracts.js";
+
 import { buildToolPresentation } from "../extensions/agent-browser/lib/results/presentation.js";
 import {
 	createExtensionHarness,
@@ -36,7 +37,7 @@ const pageUrl = "https://artifact.example.test/current";
 async function withFixture(
 	run: (
 		root: string,
-		harness: ReturnType<typeof createExtensionHarness>,
+		harness: Readonly<Pick<ReturnType<typeof createExtensionHarness>, "tool" | "ctx">>,
 		log: string,
 	) => Promise<void>,
 ): Promise<void> {
@@ -118,22 +119,24 @@ for (const command of ["screenshot", "download"]) {
 						command === "screenshot"
 							? [command, "not-a-directory/out.png"]
 							: [command, "#download", "not-a-directory/out.txt"];
-					const params =
-						mode === "direct"
-							? { args: ["--json", ...step] }
-							: mode === "stdin"
-								? { args: ["batch"], stdin: JSON.stringify([step]) }
-								: { args: ["batch", step.join(" ")] };
+					let params: { readonly args: readonly string[]; readonly stdin?: string };
+					if (mode === "direct") {
+						params = { args: ["--json", ...step] };
+					} else if (mode === "stdin") {
+						params = { args: ["batch"], stdin: JSON.stringify([step]) };
+					} else {
+						params = { args: ["batch", step.join(" ")] };
+					}
 					const result = await executeRegisteredTool(harness.tool, harness.ctx, params);
 					assert.equal(result.isError, true);
-					assert.equal(result.details?.failureCategory, "validation-error");
-					assert.equal(result.details?.agentBrowserStarted, false);
-					assert.ok(String(result.details?.validationError).includes(parent));
+					assert.equal(readRecord(result.details).failureCategory, "validation-error");
+					assert.equal(readRecord(result.details).agentBrowserStarted, false);
+					assert.ok(readString(readRecord(result.details).validationError).includes(parent));
 					assert.match(result.content[0]?.text ?? "", /writable.*director/i);
 					assert.deepEqual(
-						(result.details?.nextActions as Array<{ artifactPath?: string; id: string }>).map(
-							({ artifactPath, id }) => ({ artifactPath, id }),
-						),
+						readArray(readRecord(result.details).nextActions)
+							.map(readRecord)
+							.map(({ artifactPath, id }) => ({ artifactPath, id })),
 						[{ artifactPath: parent, id: "verify-artifact-path" }],
 					);
 					assert.deepEqual(await readInvocationLog(log), []);
@@ -154,7 +157,7 @@ test(
 			const result = await executeRegisteredTool(harness.tool, harness.ctx, {
 				args: ["screenshot", join(parent, "out.png")],
 			});
-			assert.equal(result.details?.failureCategory, "validation-error");
+			assert.equal(readRecord(result.details).failureCategory, "validation-error");
 			assert.doesNotMatch(JSON.stringify(result), /directory-secret/);
 			assert.deepEqual(await readInvocationLog(log), []);
 			assert.equal(await readFile(parent, "utf8"), "existing file");
@@ -178,7 +181,7 @@ test(
 				controller.signal,
 			);
 			assert.equal(result.isError, true);
-			assert.equal(result.details?.failureCategory, "aborted");
+			assert.equal(readRecord(result.details).failureCategory, "aborted");
 			assert.match(result.content[0]?.text ?? "", /Cancelled artifact request/);
 			assert.deepEqual(await readInvocationLog(log), []);
 		});
@@ -210,7 +213,7 @@ test(
 			await assert.rejects(readFile(join(root, "ignored")), { code: "ENOENT" });
 			const invocation = (await readInvocationLog(log)).find(({ args }) => args.includes("batch"));
 			assert.deepEqual(invocation?.args.slice(-3), ["batch", "--bail", raw]);
-			assert.equal(invocation?.stdin, stdin);
+			assert.equal(invocation.stdin, stdin);
 		});
 	},
 );
@@ -247,9 +250,13 @@ for (const [name, bytes, mediaType] of [
 			assert.equal(result.artifactManifest?.entries[0]?.mediaType, mediaType);
 			const image = result.content.find((item) => item.type === "image");
 			assert.equal(image?.mimeType, mediaType);
-			if (mediaType) {
+			if (mediaType !== undefined) {
+				// Image-bearing fixtures must retain exact bytes; every fixture checks MIME and classification above.
+				// oxlint-disable-next-line node-test/no-conditional-assertion
 				assert.deepEqual(Buffer.from(image?.data ?? "", "base64"), bytes);
 			} else {
+				// The unknown-media fixture must not invent a MIME label; common outcomes are asserted above.
+				// oxlint-disable-next-line node-test/no-conditional-assertion
 				assert.doesNotMatch(
 					result.content[0]?.type === "text" ? result.content[0].text : "",
 					/Media type:/,
@@ -304,7 +311,7 @@ test("direct artifacts recover requested paths across native outer global flags"
 			envelope: { success: true, data: { path } },
 		});
 		assert.equal(result.artifacts?.[0]?.requestedPath, "./file.txt");
-		assert.equal(result.artifacts?.[0]?.absolutePath, path);
+		assert.equal(readRecord(readArray(result.artifacts)[0]).absolutePath, path);
 		assert.match(
 			result.content[0]?.type === "text" ? result.content[0].text : "",
 			/Requested path: \.\/file\.txt/,
@@ -333,8 +340,15 @@ for (const [command, path] of [
 				},
 			});
 			assert.equal(result.batchSteps?.[0]?.artifacts?.[0]?.requestedPath, path);
-			assert.equal(result.batchSteps?.[0]?.artifacts?.[0]?.absolutePath, absolutePath);
-			assert.equal(result.batchSteps?.[0]?.artifactVerification?.verifiedCount, 1);
+			assert.equal(
+				readRecord(readArray(readRecord(readArray(result.batchSteps)[0]).artifacts)[0])
+					.absolutePath,
+				absolutePath,
+			);
+			assert.equal(
+				readRecord(readRecord(readArray(result.batchSteps)[0]).artifactVerification).verifiedCount,
+				1,
+			);
 		} finally {
 			await rm(root, { recursive: true, force: true });
 		}
@@ -368,12 +382,25 @@ for (const [command, path] of [
 					{ args: ["batch"], stdin: JSON.stringify([command]) },
 					{ args: ["batch", command.join(" ")] },
 				]) {
+					// Preflight checks share native fixture state and retain fail-before-dispatch ordering.
+					// oxlint-disable-next-line no-await-in-loop
 					const result = await executeRegisteredTool(harness.tool, harness.ctx, {
 						...params,
 						outputPath: path,
 					});
-					assert.equal(result.details?.failureCategory, "validation-error", JSON.stringify(result));
-					assert.ok(result.content[0]?.text?.includes(`same destination as artifact path ${path}`));
+					// Both fixed raw/stdin batch variants must reject artifact/output destination collisions.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
+					assert.equal(
+						readRecord(result.details).failureCategory,
+						"validation-error",
+						JSON.stringify(result),
+					);
+					// Both batch variants must identify the actual colliding destination.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
+					assert.equal(
+						result.content[0]?.text?.includes(`same destination as artifact path ${path}`),
+						true,
+					);
 				}
 			});
 		},
@@ -392,6 +419,8 @@ test("recording destinations follow FPS operands without consuming literal or ig
 		[["--fps", "30"], "--fps"],
 	] as const) {
 		for (const subcommand of ["start", "restart"]) {
+			// Every fixed FPS/operand fixture is checked for both recording subcommands.
+			// oxlint-disable-next-line node-test/no-conditional-assertion
 			assert.equal(getExplicitArtifactDestination(["record", subcommand, ...operands]), expected);
 		}
 	}
@@ -410,20 +439,22 @@ for (const subcommand of ["start", "restart"]) {
 					if (mode === "raw") {
 						await writeFile(join(root, "raw-steps.json"), JSON.stringify([step]));
 					}
-					const params =
-						mode === "direct"
-							? { args: step }
-							: mode === "stdin"
-								? { args: ["batch"], stdin: JSON.stringify([step]) }
-								: { args: ["batch", step.map((value) => JSON.stringify(value)).join(" ")] };
+					let params: { readonly args: readonly string[]; readonly stdin?: string };
+					if (mode === "direct") {
+						params = { args: step };
+					} else if (mode === "stdin") {
+						params = { args: ["batch"], stdin: JSON.stringify([step]) };
+					} else {
+						params = { args: ["batch", step.map((value) => JSON.stringify(value)).join(" ")] };
+					}
 					const result = await executeRegisteredTool(harness.tool, harness.ctx, {
 						...params,
 						outputPath: path,
 					});
 					assert.equal(result.isError, true);
-					assert.equal(result.details?.failureCategory, "validation-error");
+					assert.equal(readRecord(result.details).failureCategory, "validation-error");
 					assert.match(result.content[0]?.text ?? "", /same destination as artifact path/);
-					assert.equal(result.details?.exitCode, undefined);
+					assert.equal(readRecord(result.details).exitCode, undefined);
 					assert.deepEqual(await readInvocationLog(log), []);
 					await assert.rejects(stat(path), { code: "ENOENT" });
 				});
@@ -468,7 +499,7 @@ for (const bail of [false, true]) {
 					stdin: JSON.stringify(steps),
 				});
 				assert.equal(result.isError, bail, result.content[0]?.text);
-				const rows = result.details?.batchSteps as Array<{ artifacts?: FileArtifactMetadata[] }>;
+				const rows = readArray(readRecord(result.details).batchSteps).map(readRecord);
 				assert.equal(rows.length, bail ? 2 : 4);
 				assert.equal(rows[1].artifacts, undefined, "nonscreenshot rows keep their placeholder");
 				for (const [index, name] of bail
@@ -478,9 +509,18 @@ for (const bail of [false, true]) {
 							[2, "second.png"],
 							[3, "third.png"],
 						] as const)) {
-					assert.equal(rows[index].artifacts?.[0]?.requestedPath, name);
-					assert.equal(rows[index].artifacts?.[0]?.absolutePath, join(root, name));
-					assert.equal(rows[index].artifacts?.[0]?.status, "saved");
+					// Every expected screenshot row must retain its request; row count is asserted above.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
+					assert.equal(readRecord(readArray(rows[index].artifacts)[0]).requestedPath, name);
+					// Every expected screenshot row must resolve into this fixture's artifact directory.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
+					assert.equal(
+						readRecord(readArray(rows[index].artifacts)[0]).absolutePath,
+						join(root, name),
+					);
+					// Every expected screenshot row must report saved, including the bail-truncated variant.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
+					assert.equal(readRecord(readArray(rows[index].artifacts)[0]).status, "saved");
 				}
 				const invocation = (await readInvocationLog(log)).find((row) => row.args.includes("batch"));
 				assert.deepEqual(
@@ -502,6 +542,8 @@ test(
 			const lexicalRoot =
 				process.platform === "darwin" ? canonicalRoot.replace(/^\/private\/tmp\//, "/tmp/") : root;
 			if (process.platform === "darwin") {
+				// Only native macOS has this /tmp alias precondition; artifact outcomes run on every platform.
+				// oxlint-disable-next-line node-test/no-conditional-assertion
 				assert.notEqual(lexicalRoot, canonicalRoot, "exercise the native /tmp alias");
 			}
 			// Native screenshot's two-operand form disambiguates a non-image extension on Windows.
@@ -512,28 +554,48 @@ test(
 				["download", "#download", "download.txt"],
 				["network", "har", "stop", "network.har"],
 			]) {
-				const requestedPath = join(lexicalRoot, step.at(-1)!);
+				const requestedPath = join(lexicalRoot, readString(step.at(-1)));
 				const args = [...step.slice(0, -1), requestedPath];
+				// The next native command reuses the session only after this artifact is verified.
+				// oxlint-disable-next-line no-await-in-loop
 				const result = await executeRegisteredTool(harness.tool, harness.ctx, { args });
+				// Every fixed artifact-command variant must succeed before its path checks.
+				// oxlint-disable-next-line node-test/no-conditional-assertion
 				assert.equal(result.isError, false, result.content[0]?.text);
-				const artifact = (result.details?.artifacts as FileArtifactMetadata[])[0];
+				const artifact = readRecord(readArray(readRecord(result.details).artifacts)[0]);
+				// Every fixed artifact command must retain its exact lexical caller path.
+				// oxlint-disable-next-line node-test/no-conditional-assertion
 				assert.equal(artifact.requestedPath, requestedPath);
 				const reportedPath =
 					step[0] === "download" || requestedPath.includes("canonical")
-						? await realpath(requestedPath)
+						? // Resolve the artifact produced by the preceding native command before its assertions.
+							// oxlint-disable-next-line no-await-in-loop
+							await realpath(requestedPath)
 						: requestedPath;
+				// Every fixed artifact command must retain the independently observed native path.
+				// oxlint-disable-next-line node-test/no-conditional-assertion
 				assert.ok(
 					[artifact.absolutePath, artifact.tempPath].includes(reportedPath),
 					JSON.stringify({ artifact, reportedPath, args }),
 				);
+				// Every fixed artifact command must make its caller path visible.
+				// oxlint-disable-next-line node-test/no-conditional-assertion
 				assert.ok((result.content[0]?.text ?? "").includes(`Requested path: ${requestedPath}`));
+				// Every fixed artifact command must make its native reported path visible.
+				// oxlint-disable-next-line node-test/no-conditional-assertion
 				assert.ok((result.content[0]?.text ?? "").includes(reportedPath));
 				if (step[0] === "screenshot") {
+					// The screenshot variants additionally require an image attachment; common paths are checked above.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
 					assert.match(JSON.stringify(result.content), /"mimeType":"image\/png"/);
 				}
+				// Read the log before another native command can become its last matching row.
+				// oxlint-disable-next-line no-await-in-loop
 				const invocation = (await readInvocationLog(log))
 					.reverse()
 					.find((row) => row.args.includes(step[0]));
+				// Every fixed artifact command must preserve its actual upstream argv.
+				// oxlint-disable-next-line node-test/no-conditional-assertion
 				assert.deepEqual(invocation?.args.slice(-args.length), args);
 			}
 		});
@@ -570,22 +632,25 @@ for (const batch of [false, true]) {
 						harness.ctx,
 						batch ? { args: ["batch", "--bail"], stdin: JSON.stringify([step]) } : { args: step },
 					);
-					assert.equal(result.isError, fails, result.content[0]?.text);
+					const text = readString(readRecord(result.content[0]).text);
+					assert.equal(result.isError, fails, text);
 					const transitions = subcommand === "start" || withUrl;
-					assert.equal(
-						(result.content[0]?.text?.match(/Page state:/g) ?? []).length,
-						transitions ? 1 : 0,
-					);
+					assert.equal((text.match(/Page state:/g) ?? []).length, transitions ? 1 : 0);
 					if (transitions) {
-						assert.match(result.content[0]?.text ?? "", /conservatively.*fresh snapshot/i);
-						const invalidation = result.details?.refSnapshotInvalidation as {
-							reason?: string;
-							summary?: string;
-						};
-						assert.equal(invalidation?.reason, "page-transition");
-						assert.match(invalidation.summary ?? "", /conservatively/);
+						// Transitioning recording fixtures require conservative ref invalidation; all variants check page-state count above.
+						// oxlint-disable-next-line node-test/no-conditional-assertion
+						assert.match(text, /conservatively.*fresh snapshot/i);
+						const invalidation = readRecord(readRecord(result.details).refSnapshotInvalidation);
+						// Each declared transitioning recording fixture must retain structured invalidation.
+						// oxlint-disable-next-line node-test/no-conditional-assertion
+						assert.equal(invalidation.reason, "page-transition");
+						// Each transitioning fixture must distinguish conservative invalidation from observed navigation.
+						// oxlint-disable-next-line node-test/no-conditional-assertion
+						assert.match(readString(invalidation.summary), /conservatively/);
+						// Each transitioning fixture must avoid claiming unobserved page replacement.
+						// oxlint-disable-next-line node-test/no-conditional-assertion
 						assert.doesNotMatch(
-							`${result.content[0]?.text}\n${invalidation.summary}`,
+							`${text}\n${readString(invalidation.summary)}`,
 							/replaced or navigated|fresh active page|state may not carry over/,
 						);
 					}
@@ -594,6 +659,8 @@ for (const batch of [false, true]) {
 					});
 					assert.equal(read.isError, transitions, read.content[0]?.text);
 					if (transitions) {
+						// Transitioning fixtures must classify the guarded follow-up; all variants check its error flag above.
+						// oxlint-disable-next-line node-test/no-conditional-assertion
 						assert.equal(read.details?.failureCategory, "stale-ref");
 					}
 				});
@@ -610,18 +677,18 @@ test(
 			const result = await executeRegisteredTool(harness.tool, harness.ctx, {
 				args: ["--json", "record", "start", "fail.webm"],
 			});
-			const json = JSON.parse(result.content[0]?.text ?? "");
+			const json = readRecord(JSON.parse(result.content[0]?.text ?? ""));
 			assert.equal(json.success, false);
-			assert.match(json.error, /Recording already active/);
-			assert.equal(json.warnings?.length, 1);
-			assert.match(json.warnings[0], /Page state:.*fresh snapshot/);
+			assert.match(readString(json.error), /Recording already active/);
+			assert.equal(readArray(json.warnings).length, 1);
+			assert.match(readString(readArray(json.warnings)[0]), /Page state:.*fresh snapshot/);
 			const restarted = await executeRegisteredTool(harness.tool, harness.ctx, {
 				args: ["--json", "record", "restart", "json-ok.webm", pageUrl],
 			});
-			const success = JSON.parse(restarted.content[0]?.text ?? "");
+			const success = readRecord(JSON.parse(restarted.content[0]?.text ?? ""));
 			assert.equal(success.success, true);
-			assert.equal(success.warnings?.length, 1);
-			assert.match(success.warnings[0], /Page state:.*fresh snapshot/);
+			assert.equal(readArray(success.warnings).length, 1);
+			assert.match(readString(readArray(success.warnings)[0]), /Page state:.*fresh snapshot/);
 		});
 	},
 );
@@ -635,9 +702,9 @@ test(
 				args: ["batch"],
 				stdin: JSON.stringify([["record", "start", "unparseable.webm"]]),
 			});
-			assert.equal(result.details?.failureCategory, "parse-failure");
+			assert.equal(readRecord(result.details).failureCategory, "parse-failure");
 			assert.equal(
-				(result.details?.refSnapshotInvalidation as { reason?: string })?.reason,
+				readRecord(readRecord(result.details).refSnapshotInvalidation).reason,
 				"page-transition",
 			);
 			assert.doesNotMatch(result.content[0]?.text ?? "", /Page state:/);
@@ -656,7 +723,7 @@ test(
 			});
 			assert.equal(result.isError, true);
 			assert.equal(
-				(result.details?.batchSteps as Array<{ command?: string[] }>)[0]?.command,
+				readRecord(readArray(readRecord(result.details).batchSteps)[0]).command,
 				undefined,
 			);
 			assert.doesNotMatch(result.content[0]?.text ?? "", /Page state:/);
@@ -677,7 +744,7 @@ test(
 				]),
 			});
 			assert.equal(bailed.isError, true);
-			assert.equal((bailed.details?.batchSteps as unknown[]).length, 1);
+			assert.equal(readArray(bailed.details?.batchSteps).length, 1);
 			assert.doesNotMatch(bailed.content[0]?.text ?? "", /Page state:/);
 			const before = await readInvocationLog(log);
 			const blocked = await executeRegisteredTool(harness.tool, harness.ctx, {

@@ -39,6 +39,8 @@ test("covered-click inspection follows the actual direct, semantic, and raw find
 	assert.equal(errorText, coveredClick);
 	for (const args of clickCommands) {
 		for (const input of [{ errorText }, { envelope: { data: coveredClick, success: false } }]) {
+			// Evaluate and assert each recovery variant before the next case.
+			// oxlint-disable-next-line no-await-in-loop
 			const presentation = await buildToolPresentation({
 				args,
 				commandInfo: parseCommandInfo(args),
@@ -46,7 +48,11 @@ test("covered-click inspection follows the actual direct, semantic, and raw find
 				sessionName: "work",
 				...input,
 			});
+			// Each fixed click/envelope variant must retain the same failure classification.
+			// oxlint-disable-next-line node-test/no-conditional-assertion
 			assert.equal(presentation.failureCategory, "upstream-error");
+			// Every click/envelope fixture must expose the complete executable recovery.
+			// oxlint-disable-next-line node-test/no-conditional-assertion
 			assert.deepEqual(
 				presentation.nextActions?.map(({ id, params }) => ({ id, params })),
 				[
@@ -81,6 +87,8 @@ test("covered-click inspection follows the actual direct, semantic, and raw find
 
 test("covered-click data error envelopes reach presentation without losing the upstream error", () => {
 	for (const data of [coveredClick, { error: { message: coveredClick } }]) {
+		// Both fixed data-error envelopes must retain the native error text.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.equal(
 			getAgentBrowserErrorText({
 				aborted: false,
@@ -91,6 +99,8 @@ test("covered-click data error envelopes reach presentation without losing the u
 			}),
 			coveredClick,
 		);
+		// Both fixed data-error envelopes must retain the native error text.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.equal(
 			getAgentBrowserErrorText({
 				aborted: false,
@@ -122,7 +132,11 @@ test("failed batch rows preserve exact namespace/session on overlay inspection",
 			plainTextInspection: false,
 			stderr: "",
 		});
+		// Each fixed namespace variant must defer failure evidence to the batch rows.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.equal(errorText, undefined, "an empty outer error must not hide failed batch rows");
+		// Evaluate and assert each recovery variant before the next case.
+		// oxlint-disable-next-line no-await-in-loop
 		const presentation = await buildToolPresentation({
 			commandInfo: { command: "batch" },
 			cwd: process.cwd(),
@@ -132,7 +146,11 @@ test("failed batch rows preserve exact namespace/session on overlay inspection",
 			errorText,
 		});
 		for (const row of [presentation, ...(presentation.batchSteps ?? [])]) {
+			// The outer result and every emitted batch row must retain the failure category.
+			// oxlint-disable-next-line node-test/no-conditional-assertion
 			assert.equal(row.failureCategory, "upstream-error");
+			// The outer result and every emitted batch row must retain namespace-scoped recovery.
+			// oxlint-disable-next-line node-test/no-conditional-assertion
 			assert.deepEqual(
 				row.nextActions?.map(({ id, params }) => ({ id, params })),
 				[
@@ -157,13 +175,19 @@ test("generic errors and non-click actions do not get overlay click recovery", a
 		[["find", "text", "Target", "fill", "click"], coveredClick],
 		[["find", "role", "button", "--name", "click"], coveredClick],
 	] as const) {
+		// Evaluate and assert each recovery variant before the next case.
+		// oxlint-disable-next-line no-await-in-loop
 		const presentation = await buildToolPresentation({
 			args: [...args],
 			commandInfo: parseCommandInfo([...args]),
 			cwd: process.cwd(),
 			errorText,
 		});
+		// Every fixed non-click command must retain its ordinary upstream failure category.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.equal(presentation.failureCategory, "upstream-error");
+		// Every non-click fixture must avoid inventing click-specific recovery.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.equal(presentation.nextActions, undefined, args.join(" "));
 	}
 });

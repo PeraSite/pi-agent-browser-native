@@ -1,5 +1,6 @@
 import { isOpenNavigationCommand } from "../../command-taxonomy.js";
-import { getStartupScopedFlags, type CommandInfo } from "../../runtime.js";
+import { getStartupScopedFlags } from "../../runtime.js";
+import type { CommandInfo } from "../../argv-descriptor.js";
 import type { AgentBrowserNextAction } from "../contracts.js";
 import { buildNextToolAction } from "../next-actions.js";
 
@@ -15,12 +16,15 @@ function looksLikeBrowserProfileConfigError(errorText: string): boolean {
 	);
 }
 
-function isLaunchOrSetupContext(args: string[] | undefined, commandInfo: CommandInfo): boolean {
+function isLaunchOrSetupContext(
+	args: readonly string[] | undefined,
+	commandInfo: CommandInfo,
+): boolean {
 	const command = commandInfo.command;
 	if (command === "profiles" || command === "doctor") {
 		return true;
 	}
-	if (command && isOpenNavigationCommand(command)) {
+	if (command !== undefined && command.length > 0 && isOpenNavigationCommand(command)) {
 		return true;
 	}
 	return (args ? getStartupScopedFlags(args) : []).length > 0;
@@ -53,14 +57,14 @@ function buildBrowserProfileConfigActions(commandInfo: CommandInfo): AgentBrowse
 }
 
 export interface BrowserProfileConfigRecovery {
-	actions?: AgentBrowserNextAction[];
-	hint: string;
+	readonly actions?: readonly AgentBrowserNextAction[];
+	readonly hint: string;
 }
 
 export function buildBrowserProfileConfigRecovery(options: {
-	args?: string[];
-	commandInfo: CommandInfo;
-	errorText: string;
+	readonly args?: readonly string[];
+	readonly commandInfo: CommandInfo;
+	readonly errorText: string;
 }): BrowserProfileConfigRecovery | undefined {
 	if (!looksLikeBrowserProfileConfigError(options.errorText)) {
 		return undefined;

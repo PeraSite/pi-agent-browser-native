@@ -1,6 +1,10 @@
-import { redactSensitiveValue } from "../runtime.js";
-import type { PersistentSessionArtifactEviction, PersistentSessionArtifactStore } from "../temp.js";
-import { writePersistentSessionArtifactFile, writeSecureTempFile } from "../temp.js";
+import { redactSensitiveValue } from "../runtime-redaction.js";
+import {
+	type PersistentSessionArtifactEviction,
+	type PersistentSessionArtifactStore,
+	writePersistentSessionArtifactFile,
+	writeSecureTempFile,
+} from "../temp.js";
 import {
 	buildEvictedSessionArtifactEntries,
 	formatSessionArtifactRetentionSummary,
@@ -11,14 +15,14 @@ import type { SessionArtifactManifest, SessionArtifactManifestEntry } from "./co
 const SNAPSHOT_SPILL_FILE_PREFIX = "pi-agent-browser-snapshot";
 
 export interface SnapshotSpillWriteResult {
-	evictedArtifacts: PersistentSessionArtifactEviction[];
-	path: string;
-	storageScope: "persistent-session" | "process-temp";
+	readonly evictedArtifacts: readonly Readonly<PersistentSessionArtifactEviction>[];
+	readonly path: string;
+	readonly storageScope: "persistent-session" | "process-temp";
 }
 
 export async function writeSnapshotSpillFile(
-	data: Record<string, unknown>,
-	persistentArtifactStore: PersistentSessionArtifactStore | undefined,
+	data: Readonly<Record<string, unknown>>,
+	persistentArtifactStore: Readonly<PersistentSessionArtifactStore> | undefined,
 ): Promise<SnapshotSpillWriteResult> {
 	const options = {
 		content: JSON.stringify(redactSensitiveValue(data), null, 2),
@@ -40,12 +44,16 @@ export async function writeSnapshotSpillFile(
 }
 
 export function applySnapshotArtifactManifest(options: {
-	baseManifest?: SessionArtifactManifest;
-	command?: string;
-	fullOutputPath?: string;
-	spill?: SnapshotSpillWriteResult;
+	readonly baseManifest?: SessionArtifactManifest;
+	readonly command?: string;
+	readonly fullOutputPath?: string;
+	readonly spill?: SnapshotSpillWriteResult;
 }): { artifactManifest?: SessionArtifactManifest; artifactRetentionSummary?: string } {
-	if (!options.fullOutputPath || !options.spill) {
+	if (
+		options.fullOutputPath === undefined ||
+		options.fullOutputPath.length === 0 ||
+		!options.spill
+	) {
 		return {};
 	}
 	const nowMs = Date.now();

@@ -13,7 +13,9 @@ const child = spawn(process.env.PIAB_ORDER_NATIVE, args, {
 	stdio: ["pipe", "pipe", "pipe"],
 });
 process.stdin.pipe(child.stdin);
-child.stdin.on("error", () => {});
+child.stdin.on("error", () => {
+	// Native stdin can close after exit; child error/close owns the result.
+});
 const stdout = [],
 	stderr = [];
 child.stdout.on("data", (chunk) => stdout.push(chunk));
@@ -46,6 +48,8 @@ child.on("close", async (code, signal) => {
 		writeFileSync(join(root, "held.json"), JSON.stringify(row));
 		const deadline = Date.now() + 12_000;
 		while (!existsSync(join(root, "release")) && Date.now() < deadline) {
+			// Poll release only after the previous delay; this is a deliberate delivery barrier.
+			// oxlint-disable-next-line no-await-in-loop
 			await new Promise((resolve) => setTimeout(resolve, 10));
 		}
 		log({

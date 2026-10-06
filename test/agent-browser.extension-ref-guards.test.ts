@@ -1,3 +1,4 @@
+import { readArray, readRecord, readString } from "./helpers/assertions.js";
 /**
  * Purpose: Verify extension entrypoint page-scoped ref guards and session target restoration.
  * Responsibilities: Assert stale-ref preflight, batch invalidation latches, no-active-page recovery, snapshot ref recording, and diagnostic URL filtering.
@@ -64,11 +65,9 @@ if (args.includes("snapshot")) {
 				const snapshot = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: ["snapshot", "-i"],
 				});
+				const snapshotDetails = readRecord(snapshot.details);
 				assert.equal(snapshot.isError, false);
-				assert.deepEqual(
-					(snapshot.details?.refSnapshot as { refIds?: string[] } | undefined)?.refIds,
-					["e1"],
-				);
+				assert.deepEqual(readRecord(snapshotDetails.refSnapshot ?? {}).refIds, ["e1"]);
 
 				const currentClick = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: ["click", "@e1"],
@@ -83,22 +82,23 @@ if (args.includes("snapshot")) {
 				const staleClick = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: ["click", "@e1"],
 				});
+				const staleClickDetails = readRecord(staleClick.details);
 				assert.equal(staleClick.isError, true);
-				assert.equal(staleClick.details?.failureCategory, "stale-ref");
+				assert.equal(staleClickDetails.failureCategory, "stale-ref");
 				assert.match(
-					(staleClick.content[0] as { text: string }).text,
+					readString(readRecord(staleClick.content[0]).text),
 					/came from a snapshot for https:\/\/first\.example\//,
 				);
 				assert.match(
-					(staleClick.content[0] as { text: string }).text,
+					readString(readRecord(staleClick.content[0]).text),
 					/current session target is https:\/\/second\.example\//,
 				);
-				const nextActions = staleClick.details?.nextActions as
-					| Array<{ params?: { args?: string[] } }>
-					| undefined;
-				assert.deepEqual(nextActions?.[0]?.params?.args, [
+				const nextActions = readArray(staleClickDetails.nextActions ?? []).map((value) =>
+					readRecord(value),
+				);
+				assert.deepEqual(readRecord(nextActions[0].params).args, [
 					"--session",
-					staleClick.details?.sessionName as string,
+					readString(staleClickDetails.sessionName),
 					"snapshot",
 					"-i",
 				]);
@@ -152,19 +152,18 @@ if (args.includes("snapshot")) {
 				const snapshot = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: ["snapshot", "-i"],
 				});
+				const snapshotDetails = readRecord(snapshot.details);
 				assert.equal(snapshot.isError, false);
-				assert.deepEqual(
-					(snapshot.details?.refSnapshot as { refIds?: string[] } | undefined)?.refIds,
-					["e1"],
-				);
+				assert.deepEqual(readRecord(snapshotDetails.refSnapshot ?? {}).refIds, ["e1"]);
 
 				const failed = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: ["eval", "const c = 1;"],
 				});
+				const failedDetails = readRecord(failed.details);
 				assert.equal(failed.isError, true);
-				assert.equal(failed.details?.resultCategory, "failure");
+				assert.equal(failedDetails.resultCategory, "failure");
 				assert.equal(
-					(failed.details?.sessionTabTarget as { url?: string } | undefined)?.url,
+					readRecord(failedDetails.sessionTabTarget ?? {}).url,
 					"https://first.example/",
 					JSON.stringify(failed),
 				);
@@ -174,10 +173,11 @@ if (args.includes("snapshot")) {
 				const staleClick = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: ["click", "@e1"],
 				});
+				const staleClickDetails = readRecord(staleClick.details);
 				assert.equal(staleClick.isError, true);
-				assert.equal(staleClick.details?.failureCategory, "stale-ref");
+				assert.equal(staleClickDetails.failureCategory, "stale-ref");
 				assert.match(
-					(staleClick.content[0] as { text: string }).text,
+					readString(readRecord(staleClick.content[0]).text),
 					/may still have changed the page/,
 				);
 
@@ -272,9 +272,10 @@ process.stdout.write(JSON.stringify({ success: true, data: { clicked: true } }))
 				const staleClick = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: ["--session", "named", "click", "@e1"],
 				});
+				const staleClickDetails = readRecord(staleClick.details);
 				assert.equal(staleClick.isError, true);
-				assert.equal(staleClick.details?.failureCategory, "stale-ref");
-				assert.match(staleClick.content[0]?.text ?? "", /@e1/);
+				assert.equal(staleClickDetails.failureCategory, "stale-ref");
+				assert.match(readString(staleClick.content[0].text ?? ""), /@e1/);
 				assert.equal((await readInvocationLog(logPath)).length, 0);
 			});
 		} finally {
@@ -316,13 +317,15 @@ if (args.includes("open")) {
 					args: ["open", "https://first.example/"],
 					sessionMode: "fresh",
 				});
-				const firstSessionName = firstOpen.details?.sessionName as string;
+				const firstOpenDetails = readRecord(firstOpen.details);
+				const firstSessionName = readString(firstOpenDetails.sessionName);
 				const branchA = [...harness.ctx.sessionManager.getBranch()];
 				const secondOpen = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: ["open", "https://second.example/"],
 					sessionMode: "fresh",
 				});
-				const secondSessionName = secondOpen.details?.sessionName as string;
+				const secondOpenDetails = readRecord(secondOpen.details);
+				const secondSessionName = readString(secondOpenDetails.sessionName);
 				const branchB = [...harness.ctx.sessionManager.getBranch()];
 				assert.notEqual(firstSessionName, secondSessionName);
 
@@ -344,8 +347,9 @@ if (args.includes("open")) {
 				const snapshot = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: ["snapshot", "-i"],
 				});
+				const snapshotDetails = readRecord(snapshot.details);
 				assert.equal(snapshot.isError, false, JSON.stringify(snapshot));
-				assert.equal(snapshot.details?.sessionName, secondSessionName);
+				assert.equal(snapshotDetails.sessionName, secondSessionName);
 				const lastInvocation = (await readInvocationLog(logPath)).at(-1);
 				assert.deepEqual(lastInvocation?.args.slice(0, 3), [
 					"--json",
@@ -385,7 +389,7 @@ process.stdout.write(JSON.stringify({ success: true, data: { closed: true } }));
 					command: "screenshot",
 					createdAtMs: 1,
 					cwd: tempDir,
-					kind: "screenshot",
+					kind: "image",
 					path: artifactPath,
 					retentionState: "live",
 					storageScope: "explicit-path",
@@ -441,14 +445,13 @@ process.stdout.write(JSON.stringify({ success: true, data: { closed: true } }));
 				const close = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: ["--session", "named", "close"],
 				});
+				const closeDetails = readRecord(close.details);
 				assert.equal(close.isError, false, JSON.stringify(close));
-				assert.deepEqual(
-					(close.details?.artifactCleanup as { explicitArtifactPaths?: string[] } | undefined)
-						?.explicitArtifactPaths,
-					[secondArtifact],
-				);
+				assert.deepEqual(readRecord(closeDetails.artifactCleanup ?? {}).explicitArtifactPaths, [
+					secondArtifact,
+				]);
 				assert.doesNotMatch(
-					close.content[0]?.text ?? "",
+					readString(close.content[0].text ?? ""),
 					new RegExp(firstArtifact.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
 				);
 			});
@@ -526,9 +529,10 @@ if (command === "connect") {
 				const connectResult = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: ["connect", "9222"],
 				});
+				const connectResultDetails = readRecord(connectResult.details);
 				assert.equal(connectResult.isError, false);
-				const sessionName = connectResult.details?.sessionName as string | undefined;
-				assert.ok(sessionName);
+				const sessionName = readString(connectResultDetails.sessionName);
+				assert.ok(sessionName.length > 0);
 				const verifiedUrl = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: ["get", "url"],
 				});
@@ -537,77 +541,64 @@ if (command === "connect") {
 				const initialSnapshot = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: ["snapshot", "-i"],
 				});
+				const initialSnapshotDetails = readRecord(initialSnapshot.details);
 				assert.equal(initialSnapshot.isError, false, JSON.stringify(initialSnapshot));
-				assert.deepEqual(
-					(initialSnapshot.details?.refSnapshot as { refIds?: string[] } | undefined)?.refIds,
-					["e1"],
-				);
-				assert.equal(
-					"order" in
-						((initialSnapshot.details?.refSnapshot as Record<string, unknown> | undefined) ?? {}),
-					false,
-				);
+				assert.deepEqual(readRecord(initialSnapshotDetails.refSnapshot ?? {}).refIds, ["e1"]);
+				assert.equal("order" in readRecord(initialSnapshotDetails.refSnapshot ?? {}), false);
 
 				const snapshotResult = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: ["snapshot", "-i"],
 				});
+				const snapshotResultDetails = readRecord(snapshotResult.details);
 				assert.equal(snapshotResult.isError, true);
-				assert.equal(snapshotResult.details?.command, "snapshot");
-				assert.equal(snapshotResult.details?.failureCategory, "upstream-error");
-				assert.equal(snapshotResult.details?.refSnapshot, undefined);
+				assert.equal(snapshotResultDetails.command, "snapshot");
+				assert.equal(snapshotResultDetails.failureCategory, "upstream-error");
+				assert.equal(snapshotResultDetails.refSnapshot, undefined);
 				assert.equal(
-					(snapshotResult.details?.refSnapshotInvalidation as { reason?: string } | undefined)
-						?.reason,
+					readRecord(snapshotResultDetails.refSnapshotInvalidation ?? {}).reason,
 					"no-active-page",
 				);
 				assert.equal(
-					"order" in
-						((snapshotResult.details?.refSnapshotInvalidation as
-							| Record<string, unknown>
-							| undefined) ?? {}),
+					"order" in readRecord(snapshotResultDetails.refSnapshotInvalidation ?? {}),
 					false,
 				);
-				const nextActions = snapshotResult.details?.nextActions as
-					| Array<{ id: string; params?: { args?: string[] } }>
-					| undefined;
+				const nextActions = readArray(snapshotResultDetails.nextActions ?? []).map((value) =>
+					readRecord(value),
+				);
 				assert.deepEqual(
-					nextActions?.map((action) => action.id),
+					nextActions.map((action) => action.id),
 					["list-tabs-after-no-active-page"],
 				);
 				assert.deepEqual(
-					nextActions?.map((action) => action.params?.args),
+					nextActions.map((action) => readRecord(action.params).args),
 					[["--session", sessionName, "tab", "list"]],
 				);
 
 				const staleClick = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: ["click", "@e1"],
 				});
+				const staleClickDetails = readRecord(staleClick.details);
 				assert.equal(staleClick.isError, true);
-				assert.equal(staleClick.details?.failureCategory, "stale-ref");
-				assert.deepEqual(staleClick.details?.refIds, ["e1"]);
+				assert.equal(staleClickDetails.failureCategory, "stale-ref");
+				assert.deepEqual(staleClickDetails.refIds, ["e1"]);
 				assert.equal(
-					(staleClick.details?.refSnapshotInvalidation as { reason?: string } | undefined)?.reason,
+					readRecord(staleClickDetails.refSnapshotInvalidation ?? {}).reason,
 					"no-active-page",
 				);
-				assert.equal(
-					"order" in
-						((staleClick.details?.refSnapshotInvalidation as Record<string, unknown> | undefined) ??
-							{}),
-					false,
-				);
+				assert.equal("order" in readRecord(staleClickDetails.refSnapshotInvalidation ?? {}), false);
 				assert.match(
-					(staleClick.content[0] as { text: string }).text,
+					readString(readRecord(staleClick.content[0]).text),
 					/latest snapshot for this session reported No active page/,
 				);
-				const staleNextActions = staleClick.details?.nextActions as
-					| Array<{ id: string; params?: { args?: string[] } }>
-					| undefined;
+				const staleNextActions = readArray(staleClickDetails.nextActions ?? []).map((value) =>
+					readRecord(value),
+				);
 				assert.deepEqual(
-					staleNextActions?.map((action) => action.id),
+					staleNextActions.map((action) => action.id),
 					["refresh-interactive-refs"],
 				);
 				assert.deepEqual(
-					staleNextActions?.map((action) => action.params?.args),
+					staleNextActions.map((action) => readRecord(action.params).args),
 					[["--session", sessionName, "snapshot", "-i"]],
 				);
 
@@ -618,37 +609,30 @@ if (command === "connect") {
 						["click", "@e1"],
 					]),
 				});
+				const batchWithInlineSnapshotDetails = readRecord(batchWithInlineSnapshot.details);
 				assert.equal(batchWithInlineSnapshot.isError, true);
-				assert.equal(batchWithInlineSnapshot.details?.failureCategory, "stale-ref");
-				assert.deepEqual(batchWithInlineSnapshot.details?.refIds, ["e1"]);
+				assert.equal(batchWithInlineSnapshotDetails.failureCategory, "stale-ref");
+				assert.deepEqual(batchWithInlineSnapshotDetails.refIds, ["e1"]);
 				assert.match(
-					(batchWithInlineSnapshot.content[0] as { text: string }).text,
+					readString(readRecord(batchWithInlineSnapshot.content[0]).text),
 					/latest snapshot for this session reported No active page/,
 				);
 
 				const freshSnapshot = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: ["snapshot", "-i"],
 				});
+				const freshSnapshotDetails = readRecord(freshSnapshot.details);
 				assert.equal(freshSnapshot.isError, false, JSON.stringify(freshSnapshot));
-				assert.equal(freshSnapshot.details?.refSnapshotInvalidation, undefined);
-				assert.deepEqual(
-					(freshSnapshot.details?.refSnapshot as { refIds?: string[] } | undefined)?.refIds,
-					["e2"],
-				);
-				assert.equal(
-					"order" in
-						((freshSnapshot.details?.refSnapshot as Record<string, unknown> | undefined) ?? {}),
-					false,
-				);
+				assert.equal(freshSnapshotDetails.refSnapshotInvalidation, undefined);
+				assert.deepEqual(readRecord(freshSnapshotDetails.refSnapshot ?? {}).refIds, ["e2"]);
+				assert.equal("order" in readRecord(freshSnapshotDetails.refSnapshot ?? {}), false);
 
 				const freshClick = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: ["click", "@e2"],
 				});
+				const freshClickDetails = readRecord(freshClick.details);
 				assert.equal(freshClick.isError, false, JSON.stringify(freshClick));
-				assert.equal(
-					(freshClick.details?.data as { clicked?: string } | undefined)?.clicked,
-					"@e2",
-				);
+				assert.equal(readRecord(freshClickDetails.data ?? {}).clicked, "@e2");
 
 				const invocations = await readInvocationLog(logPath);
 				assert.deepEqual(
@@ -744,9 +728,10 @@ if (command === "connect") {
 				const connectResult = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: ["connect", "9222"],
 				});
+				const connectResultDetails = readRecord(connectResult.details);
 				assert.equal(connectResult.isError, false);
-				const sessionName = connectResult.details?.sessionName as string | undefined;
-				assert.ok(sessionName);
+				const sessionName = readString(connectResultDetails.sessionName);
+				assert.ok(sessionName.length > 0);
 				const verifiedUrl = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: ["get", "url"],
 				});
@@ -755,63 +740,50 @@ if (command === "connect") {
 				const initialSnapshot = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: ["snapshot", "-i"],
 				});
+				const initialSnapshotDetails = readRecord(initialSnapshot.details);
 				assert.equal(initialSnapshot.isError, false, JSON.stringify(initialSnapshot));
-				assert.deepEqual(
-					(initialSnapshot.details?.refSnapshot as { refIds?: string[] } | undefined)?.refIds,
-					["e1"],
-				);
-				assert.equal(
-					"order" in
-						((initialSnapshot.details?.refSnapshot as Record<string, unknown> | undefined) ?? {}),
-					false,
-				);
+				assert.deepEqual(readRecord(initialSnapshotDetails.refSnapshot ?? {}).refIds, ["e1"]);
+				assert.equal("order" in readRecord(initialSnapshotDetails.refSnapshot ?? {}), false);
 
 				const batchSnapshotFailure = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: ["batch"],
 					stdin: JSON.stringify([["snapshot", "-i"]]),
 				});
+				const batchSnapshotFailureDetails = readRecord(batchSnapshotFailure.details);
 				assert.equal(batchSnapshotFailure.isError, true, JSON.stringify(batchSnapshotFailure));
-				assert.equal(batchSnapshotFailure.details?.refSnapshot, undefined);
+				assert.equal(batchSnapshotFailureDetails.refSnapshot, undefined);
 				assert.equal(
-					(batchSnapshotFailure.details?.refSnapshotInvalidation as { reason?: string } | undefined)
-						?.reason,
+					readRecord(batchSnapshotFailureDetails.refSnapshotInvalidation ?? {}).reason,
 					"no-active-page",
 				);
 				assert.equal(
-					"order" in
-						((batchSnapshotFailure.details?.refSnapshotInvalidation as
-							| Record<string, unknown>
-							| undefined) ?? {}),
+					"order" in readRecord(batchSnapshotFailureDetails.refSnapshotInvalidation ?? {}),
 					false,
 				);
-				const nextActions = batchSnapshotFailure.details?.nextActions as
-					| Array<{ id: string; params?: { args?: string[] } }>
-					| undefined;
+				const nextActions = readArray(batchSnapshotFailureDetails.nextActions ?? []).map((value) =>
+					readRecord(value),
+				);
 				assert.deepEqual(
-					nextActions?.map((action) => action.id),
+					nextActions.map((action) => action.id),
 					["list-tabs-after-no-active-page"],
 				);
 				assert.deepEqual(
-					nextActions?.map((action) => action.params?.args),
+					nextActions.map((action) => readRecord(action.params).args),
 					[["--session", sessionName, "tab", "list"]],
 				);
 
 				const staleClick = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: ["click", "@e1"],
 				});
+				const staleClickDetails = readRecord(staleClick.details);
 				assert.equal(staleClick.isError, true);
-				assert.equal(staleClick.details?.failureCategory, "stale-ref");
-				assert.deepEqual(staleClick.details?.refIds, ["e1"]);
+				assert.equal(staleClickDetails.failureCategory, "stale-ref");
+				assert.deepEqual(staleClickDetails.refIds, ["e1"]);
 				assert.equal(
-					(staleClick.details?.refSnapshotInvalidation as { reason?: string } | undefined)?.reason,
+					readRecord(staleClickDetails.refSnapshotInvalidation ?? {}).reason,
 					"no-active-page",
 				);
-				assert.equal(
-					"order" in
-						((staleClick.details?.refSnapshotInvalidation as Record<string, unknown> | undefined) ??
-							{}),
-					false,
-				);
+				assert.equal("order" in readRecord(staleClickDetails.refSnapshotInvalidation ?? {}), false);
 
 				const batchSnapshotRecovery = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: ["batch"],
@@ -820,27 +792,18 @@ if (command === "connect") {
 						["snapshot", "-i", "--recover"],
 					]),
 				});
+				const batchSnapshotRecoveryDetails = readRecord(batchSnapshotRecovery.details);
 				assert.equal(batchSnapshotRecovery.isError, true, JSON.stringify(batchSnapshotRecovery));
-				assert.equal(batchSnapshotRecovery.details?.refSnapshotInvalidation, undefined);
-				assert.deepEqual(
-					(batchSnapshotRecovery.details?.refSnapshot as { refIds?: string[] } | undefined)?.refIds,
-					["e2"],
-				);
-				assert.equal(
-					"order" in
-						((batchSnapshotRecovery.details?.refSnapshot as Record<string, unknown> | undefined) ??
-							{}),
-					false,
-				);
+				assert.equal(batchSnapshotRecoveryDetails.refSnapshotInvalidation, undefined);
+				assert.deepEqual(readRecord(batchSnapshotRecoveryDetails.refSnapshot ?? {}).refIds, ["e2"]);
+				assert.equal("order" in readRecord(batchSnapshotRecoveryDetails.refSnapshot ?? {}), false);
 
 				const recoveredClick = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: ["click", "@e2"],
 				});
+				const recoveredClickDetails = readRecord(recoveredClick.details);
 				assert.equal(recoveredClick.isError, false, JSON.stringify(recoveredClick));
-				assert.equal(
-					(recoveredClick.details?.data as { clicked?: string } | undefined)?.clicked,
-					"@e2",
-				);
+				assert.equal(readRecord(recoveredClickDetails.data ?? {}).clicked, "@e2");
 
 				const invocations = await readInvocationLog(logPath);
 				assert.deepEqual(
@@ -915,8 +878,9 @@ if (args.includes("snapshot")) {
 				const snapshot = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: ["snapshot", "-i"],
 				});
+				const snapshotDetails = readRecord(snapshot.details);
 				assert.equal(snapshot.isError, false, JSON.stringify(snapshot));
-				assert.deepEqual(snapshot.details?.sessionTabTarget, {
+				assert.deepEqual(snapshotDetails.sessionTabTarget, {
 					title: undefined,
 					url: "https://app.example/",
 				});
@@ -924,15 +888,16 @@ if (args.includes("snapshot")) {
 				const networkRequest = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: ["network", "request", "42"],
 				});
+				const networkRequestDetails = readRecord(networkRequest.details);
 				assert.equal(networkRequest.isError, false, JSON.stringify(networkRequest));
-				assert.deepEqual(networkRequest.details?.sessionTabTarget, {
+				assert.deepEqual(networkRequestDetails.sessionTabTarget, {
 					title: undefined,
 					url: "https://app.example/",
 				});
-				assert.equal(networkRequest.details?.refSnapshot, undefined);
+				assert.equal(networkRequestDetails.refSnapshot, undefined);
 				assert.deepEqual(
 					SessionPageState.fromBranch(harness.ctx.sessionManager.getBranch()).get(
-						String(networkRequest.details?.sessionName),
+						readString(networkRequestDetails.sessionName),
 					).refSnapshot?.refIds,
 					["e1"],
 				);
@@ -940,8 +905,9 @@ if (args.includes("snapshot")) {
 				const pageErrors = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: ["errors"],
 				});
+				const pageErrorsDetails = readRecord(pageErrors.details);
 				assert.equal(pageErrors.isError, false, JSON.stringify(pageErrors));
-				assert.deepEqual(pageErrors.details?.sessionTabTarget, {
+				assert.deepEqual(pageErrorsDetails.sessionTabTarget, {
 					title: undefined,
 					url: "https://app.example/",
 				});
@@ -949,29 +915,28 @@ if (args.includes("snapshot")) {
 				const clickAfterNetworkRequest = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: ["click", "@e1"],
 				});
+				const clickAfterNetworkRequestDetails = readRecord(clickAfterNetworkRequest.details);
 				assert.equal(
 					clickAfterNetworkRequest.isError,
 					false,
 					JSON.stringify(clickAfterNetworkRequest),
 				);
-				assert.notEqual(clickAfterNetworkRequest.details?.failureCategory, "stale-ref");
-				assert.equal(
-					(clickAfterNetworkRequest.details?.data as { clicked?: string } | undefined)?.clicked,
-					"@e1",
-				);
+				assert.notEqual(clickAfterNetworkRequestDetails.failureCategory, "stale-ref");
+				assert.equal(readRecord(clickAfterNetworkRequestDetails.data ?? {}).clicked, "@e1");
 
 				const networkSourceLookup = await executeRegisteredTool(harness.tool, harness.ctx, {
 					networkSourceLookup: { requestId: "42" },
 				});
+				const networkSourceLookupDetails = readRecord(networkSourceLookup.details);
 				assert.equal(networkSourceLookup.isError, false, JSON.stringify(networkSourceLookup));
-				assert.deepEqual(networkSourceLookup.details?.sessionTabTarget, {
+				assert.deepEqual(networkSourceLookupDetails.sessionTabTarget, {
 					title: undefined,
 					url: "https://app.example/",
 				});
-				assert.equal(networkSourceLookup.details?.refSnapshot, undefined);
+				assert.equal(networkSourceLookupDetails.refSnapshot, undefined);
 				assert.deepEqual(
 					SessionPageState.fromBranch(harness.ctx.sessionManager.getBranch()).get(
-						String(networkSourceLookup.details?.sessionName),
+						readString(networkSourceLookupDetails.sessionName),
 					).refSnapshot?.refIds,
 					["e1"],
 				);
@@ -981,12 +946,15 @@ if (args.includes("snapshot")) {
 					harness.ctx,
 					{ args: ["click", "@e1"] },
 				);
+				const clickAfterNetworkSourceLookupDetails = readRecord(
+					clickAfterNetworkSourceLookup.details,
+				);
 				assert.equal(
 					clickAfterNetworkSourceLookup.isError,
 					false,
 					JSON.stringify(clickAfterNetworkSourceLookup),
 				);
-				assert.notEqual(clickAfterNetworkSourceLookup.details?.failureCategory, "stale-ref");
+				assert.notEqual(clickAfterNetworkSourceLookupDetails.failureCategory, "stale-ref");
 
 				const invocations = await readInvocationLog(logPath);
 				assert.equal(invocations.filter((entry) => entry.args.includes("click")).length, 2);
@@ -1038,6 +1006,7 @@ if (args.includes("snapshot")) {
 				const capture = await executeRegisteredTool(seed.tool, seed.ctx, {
 					args: ["--session", "named", "snapshot", "-i"],
 				});
+				const captureDetails = readRecord(capture.details);
 				assert.equal(capture.isError, false, JSON.stringify(capture));
 				const harness = createExtensionHarness({
 					branch: [
@@ -1054,7 +1023,7 @@ if (args.includes("snapshot")) {
 							details: {
 								args: ["--session", "named", "snapshot", "-i"],
 								command: "snapshot",
-								refSnapshot: capture.details?.refSnapshot,
+								refSnapshot: captureDetails.refSnapshot,
 								sessionName: "named",
 								sessionTabTarget: appTarget,
 							},
@@ -1064,7 +1033,7 @@ if (args.includes("snapshot")) {
 							details: {
 								args: ["--session", "named", "network", "request", "42"],
 								command: "network",
-								refSnapshot: capture.details?.refSnapshot,
+								refSnapshot: captureDetails.refSnapshot,
 								sessionName: "named",
 								sessionTabTarget: { title: undefined, url: "https://app.example/api/data" },
 								subcommand: "request",
@@ -1093,7 +1062,7 @@ if (args.includes("snapshot")) {
 										success: true,
 									},
 								],
-								refSnapshot: capture.details?.refSnapshot,
+								refSnapshot: captureDetails.refSnapshot,
 								sessionName: "named",
 								sessionTabTarget: { title: undefined, url: "https://app.example/api/data" },
 							},
@@ -1112,15 +1081,16 @@ if (args.includes("snapshot")) {
 				const click = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: ["--session", "named", "click", "@e1"],
 				});
+				const clickDetails = readRecord(click.details);
 				assert.equal(click.isError, false, JSON.stringify(click));
-				assert.notEqual(click.details?.failureCategory, "stale-ref");
-				assert.equal((click.details?.sessionTabTarget as { url: string }).url, appTarget.url);
-				assert.equal(click.details?.refSnapshot, undefined);
+				assert.notEqual(clickDetails.failureCategory, "stale-ref");
+				assert.equal(readRecord(clickDetails.sessionTabTarget).url, appTarget.url);
+				assert.equal(clickDetails.refSnapshot, undefined);
 				const restoredSnapshot = SessionPageState.fromBranch(
 					harness.ctx.sessionManager.getBranch(),
 				).get("named").refSnapshot;
 				assert.deepEqual(restoredSnapshot?.refIds, ["e1"]);
-				assert.equal("order" in (restoredSnapshot ?? {}), false);
+				assert.equal("order" in restoredSnapshot, false);
 
 				const invocations = await readInvocationLog(logPath);
 				assert.equal(invocations.filter((entry) => entry.args.includes("click")).length, 1);
@@ -1198,18 +1168,19 @@ if (args.includes("click")) {
 				const click = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: ["--session", "named", "click", "@e1"],
 				});
+				const clickDetails = readRecord(click.details);
 				assert.equal(click.isError, true);
-				assert.equal(click.details?.failureCategory, "stale-ref");
-				assert.deepEqual(click.details?.refIds, ["e1"]);
-				assert.equal(click.details?.refSnapshot, undefined);
+				assert.equal(clickDetails.failureCategory, "stale-ref");
+				assert.deepEqual(clickDetails.refIds, ["e1"]);
+				assert.equal(clickDetails.refSnapshot, undefined);
 				assert.deepEqual(
 					SessionPageState.fromBranch(harness.ctx.sessionManager.getBranch()).get("named")
 						.refSnapshot?.refIds,
 					[],
 				);
-				assert.equal(click.details?.refSnapshotInvalidation, undefined);
+				assert.equal(clickDetails.refSnapshotInvalidation, undefined);
 				assert.match(
-					(click.content[0] as { text: string }).text,
+					readString(readRecord(click.content[0]).text),
 					/was not present in the latest snapshot/,
 				);
 
@@ -1267,34 +1238,31 @@ if (args.includes("snapshot")) {
 				const firstSnapshot = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: ["snapshot", "-i"],
 				});
+				const firstSnapshotDetails = readRecord(firstSnapshot.details);
 				assert.equal(firstSnapshot.isError, false, JSON.stringify(firstSnapshot));
-				assert.deepEqual(
-					(firstSnapshot.details?.refSnapshot as { refIds?: string[] } | undefined)?.refIds,
-					["e1"],
-				);
+				assert.deepEqual(readRecord(firstSnapshotDetails.refSnapshot ?? {}).refIds, ["e1"]);
 
 				const emptySnapshot = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: ["snapshot", "-i"],
 				});
+				const emptySnapshotDetails = readRecord(emptySnapshot.details);
 				assert.equal(emptySnapshot.isError, false, JSON.stringify(emptySnapshot));
-				assert.deepEqual(
-					(emptySnapshot.details?.refSnapshot as { refIds?: string[] } | undefined)?.refIds,
-					[],
-				);
+				assert.deepEqual(readRecord(emptySnapshotDetails.refSnapshot ?? {}).refIds, []);
 
 				const staleClick = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: ["click", "@e1"],
 				});
+				const staleClickDetails = readRecord(staleClick.details);
 				assert.equal(staleClick.isError, true, JSON.stringify(staleClick));
-				assert.equal(staleClick.details?.failureCategory, "stale-ref");
+				assert.equal(staleClickDetails.failureCategory, "stale-ref");
 				assert.match(
-					(staleClick.content[0] as { text: string }).text,
+					readString(readRecord(staleClick.content[0]).text),
 					/was not present in the latest snapshot/,
 				);
-				assert.equal(staleClick.details?.refSnapshot, undefined);
+				assert.equal(staleClickDetails.refSnapshot, undefined);
 				assert.deepEqual(
 					SessionPageState.fromBranch(harness.ctx.sessionManager.getBranch()).get(
-						String(staleClick.details?.sessionName),
+						readString(staleClickDetails.sessionName),
 					).refSnapshot?.refIds,
 					[],
 				);
@@ -1350,10 +1318,11 @@ if (args.includes("snapshot")) {
 						["click", "@e1"],
 					]),
 				});
+				const staleBatchDetails = readRecord(staleBatch.details);
 				assert.equal(staleBatch.isError, true);
-				assert.equal(staleBatch.details?.failureCategory, "stale-ref");
+				assert.equal(staleBatchDetails.failureCategory, "stale-ref");
 				assert.match(
-					(staleBatch.content[0] as { text: string }).text,
+					readString(readRecord(staleBatch.content[0]).text),
 					/after an earlier batch step can navigate or mutate/,
 				);
 
@@ -1364,10 +1333,11 @@ if (args.includes("snapshot")) {
 						["scrollinto", "@e1"],
 					]),
 				});
+				const staleScrollAliasBatchDetails = readRecord(staleScrollAliasBatch.details);
 				assert.equal(staleScrollAliasBatch.isError, true);
-				assert.equal(staleScrollAliasBatch.details?.failureCategory, "stale-ref");
+				assert.equal(staleScrollAliasBatchDetails.failureCategory, "stale-ref");
 				assert.match(
-					(staleScrollAliasBatch.content[0] as { text: string }).text,
+					readString(readRecord(staleScrollAliasBatch.content[0]).text),
 					/Batch step scrollinto uses page-scoped ref @e1/,
 				);
 
@@ -1378,10 +1348,11 @@ if (args.includes("snapshot")) {
 						["tap", "@e1"],
 					]),
 				});
+				const staleTapBatchDetails = readRecord(staleTapBatch.details);
 				assert.equal(staleTapBatch.isError, true);
-				assert.equal(staleTapBatch.details?.failureCategory, "stale-ref");
+				assert.equal(staleTapBatchDetails.failureCategory, "stale-ref");
 				assert.match(
-					(staleTapBatch.content[0] as { text: string }).text,
+					readString(readRecord(staleTapBatch.content[0]).text),
 					/Batch step tap uses page-scoped ref @e1/,
 				);
 
@@ -1392,10 +1363,11 @@ if (args.includes("snapshot")) {
 						["click", "@e1"],
 					]),
 				});
+				const staleKeydownBatchDetails = readRecord(staleKeydownBatch.details);
 				assert.equal(staleKeydownBatch.isError, true);
-				assert.equal(staleKeydownBatch.details?.failureCategory, "stale-ref");
+				assert.equal(staleKeydownBatchDetails.failureCategory, "stale-ref");
 				assert.match(
-					(staleKeydownBatch.content[0] as { text: string }).text,
+					readString(readRecord(staleKeydownBatch.content[0]).text),
 					/Batch step click uses page-scoped ref @e1/,
 				);
 
@@ -1406,10 +1378,11 @@ if (args.includes("snapshot")) {
 						["click", "@e1"],
 					]),
 				});
+				const staleScrollThenClickBatchDetails = readRecord(staleScrollThenClickBatch.details);
 				assert.equal(staleScrollThenClickBatch.isError, true);
-				assert.equal(staleScrollThenClickBatch.details?.failureCategory, "stale-ref");
+				assert.equal(staleScrollThenClickBatchDetails.failureCategory, "stale-ref");
 				assert.match(
-					(staleScrollThenClickBatch.content[0] as { text: string }).text,
+					readString(readRecord(staleScrollThenClickBatch.content[0]).text),
 					/Batch step click uses page-scoped ref @e1/,
 				);
 
@@ -1424,10 +1397,13 @@ if (args.includes("snapshot")) {
 						]),
 					},
 				);
+				const staleScrollIntoThenClickBatchDetails = readRecord(
+					staleScrollIntoThenClickBatch.details,
+				);
 				assert.equal(staleScrollIntoThenClickBatch.isError, true);
-				assert.equal(staleScrollIntoThenClickBatch.details?.failureCategory, "stale-ref");
+				assert.equal(staleScrollIntoThenClickBatchDetails.failureCategory, "stale-ref");
 				assert.match(
-					(staleScrollIntoThenClickBatch.content[0] as { text: string }).text,
+					readString(readRecord(staleScrollIntoThenClickBatch.content[0]).text),
 					/Batch step click uses page-scoped ref @e2/,
 				);
 
@@ -1508,18 +1484,19 @@ if (args.includes("batch")) {
 				const pending = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: ["webmcp", "invoke", "wait_for_navigation", "--detach"],
 				});
+				const pendingDetails = readRecord(pending.details);
 				assert.equal(pending.isError, false, JSON.stringify(pending));
-				assert.equal((pending.details?.data as { status?: string } | undefined)?.status, "pending");
-				assert.equal(pending.details?.sessionTabTarget, undefined);
-				assert.equal(pending.details?.sessionTabTargetUnknown, true);
+				assert.equal(readRecord(pendingDetails.data ?? {}).status, "pending");
+				assert.equal(pendingDetails.sessionTabTarget, undefined);
+				assert.equal(pendingDetails.sessionTabTargetUnknown, true);
 				assert.equal(
-					(pending.details?.refSnapshotInvalidation as { reason?: string } | undefined)?.reason,
+					readRecord(pendingDetails.refSnapshotInvalidation ?? {}).reason,
 					"page-transition",
 				);
 				assert.deepEqual(
-					(pending.details?.nextActions as Array<{ id?: string }> | undefined)?.map(
-						(action) => action.id,
-					),
+					readArray(pendingDetails.nextActions ?? [])
+						.map((value) => readRecord(value))
+						.map((action) => action.id),
 					["verify-page-target-after-pending-webmcp"],
 				);
 
@@ -1528,14 +1505,18 @@ if (args.includes("batch")) {
 					args: ["snapshot", "-i"],
 				});
 				assert.equal(blockedSnapshot.isError, true, JSON.stringify(blockedSnapshot));
-				assert.match(blockedSnapshot.content[0]?.text ?? "", /active page became unverified/);
+				assert.match(
+					readString(blockedSnapshot.content[0].text ?? ""),
+					/active page became unverified/,
+				);
 				assert.equal((await readInvocationLog(logPath)).length, invocationCount);
 
 				const verifiedUrl = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: ["get", "url"],
 				});
+				const verifiedUrlDetails = readRecord(verifiedUrl.details);
 				assert.equal(verifiedUrl.isError, false, JSON.stringify(verifiedUrl));
-				assert.deepEqual(verifiedUrl.details?.sessionTabTarget, {
+				assert.deepEqual(verifiedUrlDetails.sessionTabTarget, {
 					title: undefined,
 					url: "https://webmcp.example/start",
 				});
@@ -1548,16 +1529,14 @@ if (args.includes("batch")) {
 						["snapshot", "-i"],
 					]),
 				});
+				const batchSnapshotDetails = readRecord(batchSnapshot.details);
 				assert.equal(batchSnapshot.isError, false, JSON.stringify(batchSnapshot));
-				assert.equal(batchSnapshot.details?.sessionTabTargetUnknown, undefined);
-				assert.deepEqual(batchSnapshot.details?.sessionTabTarget, {
+				assert.equal(batchSnapshotDetails.sessionTabTargetUnknown, undefined);
+				assert.deepEqual(batchSnapshotDetails.sessionTabTarget, {
 					title: "After WebMCP",
 					url: "https://webmcp.example/after",
 				});
-				assert.deepEqual(
-					(batchSnapshot.details?.refSnapshot as { refIds?: string[] } | undefined)?.refIds,
-					["e1"],
-				);
+				assert.deepEqual(readRecord(batchSnapshotDetails.refSnapshot ?? {}).refIds, ["e1"]);
 
 				const freshClick = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: ["click", "@e1"],
@@ -1573,24 +1552,25 @@ if (args.includes("batch")) {
 						"snapshot -i",
 					],
 				});
+				const pendingBatchDetails = readRecord(pendingBatch.details);
 				assert.equal(pendingBatch.isError, false, JSON.stringify(pendingBatch));
-				assert.equal(pendingBatch.details?.sessionTabTarget, undefined);
-				assert.equal(pendingBatch.details?.sessionTabTargetUnknown, true);
-				assert.equal(pendingBatch.details?.refSnapshot, undefined);
+				assert.equal(pendingBatchDetails.sessionTabTarget, undefined);
+				assert.equal(pendingBatchDetails.sessionTabTargetUnknown, true);
+				assert.equal(pendingBatchDetails.refSnapshot, undefined);
 				assert.doesNotMatch(
-					JSON.stringify(pendingBatch.details?.batchSteps),
+					JSON.stringify(pendingBatchDetails.batchSteps),
 					/inspect-after-mutation/,
 				);
 
 				const failedCancel = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: ["webmcp", "cancel", "invocation-2"],
 				});
+				const failedCancelDetails = readRecord(failedCancel.details);
 				assert.equal(failedCancel.isError, true, JSON.stringify(failedCancel));
-				assert.equal(failedCancel.details?.sessionTabTarget, undefined);
-				assert.equal(failedCancel.details?.sessionTabTargetUnknown, true);
+				assert.equal(failedCancelDetails.sessionTabTarget, undefined);
+				assert.equal(failedCancelDetails.sessionTabTargetUnknown, true);
 				assert.equal(
-					(failedCancel.details?.refSnapshotInvalidation as { reason?: string } | undefined)
-						?.reason,
+					readRecord(failedCancelDetails.refSnapshotInvalidation ?? {}).reason,
 					"page-transition",
 				);
 				const failedCancelInvocationCount = (await readInvocationLog(logPath)).length;
@@ -1612,8 +1592,9 @@ if (args.includes("batch")) {
 				const invalidatedClick = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: ["click", "@e1"],
 				});
+				const invalidatedClickDetails = readRecord(invalidatedClick.details);
 				assert.equal(invalidatedClick.isError, true, JSON.stringify(invalidatedClick));
-				assert.equal(invalidatedClick.details?.failureCategory, "stale-ref");
+				assert.equal(invalidatedClickDetails.failureCategory, "stale-ref");
 				assert.equal((await readInvocationLog(logPath)).length, postVerificationInvocationCount);
 			});
 		} finally {
@@ -1689,11 +1670,9 @@ if (args.includes("snapshot")) {
 				const initialSnapshot = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: ["snapshot", "-i"],
 				});
+				const initialSnapshotDetails = readRecord(initialSnapshot.details);
 				assert.equal(initialSnapshot.isError, false, JSON.stringify(initialSnapshot));
-				assert.deepEqual(
-					(initialSnapshot.details?.refSnapshot as { refIds?: string[] } | undefined)?.refIds,
-					["e1"],
-				);
+				assert.deepEqual(readRecord(initialSnapshotDetails.refSnapshot ?? {}).refIds, ["e1"]);
 
 				const staleBatch = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: ["batch"],
@@ -1702,39 +1681,43 @@ if (args.includes("snapshot")) {
 						["click", "@e1"],
 					]),
 				});
+				const staleBatchDetails = readRecord(staleBatch.details);
 				assert.equal(staleBatch.isError, true, JSON.stringify(staleBatch));
-				assert.equal(staleBatch.details?.failureCategory, "stale-ref", JSON.stringify(staleBatch));
+				assert.equal(staleBatchDetails.failureCategory, "stale-ref", JSON.stringify(staleBatch));
 				assert.match(
-					staleBatch.content[0]?.text ?? "",
+					readString(staleBatch.content[0].text ?? ""),
 					/after an earlier batch step can navigate or mutate/,
 				);
 
 				const recordStart = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: ["record", "start", join(tempDir, "direct.webm")],
 				});
+				const recordStartDetails = readRecord(recordStart.details);
 				assert.equal(recordStart.isError, false, JSON.stringify(recordStart));
 				assert.equal(
-					(recordStart.details?.refSnapshotInvalidation as { reason?: string } | undefined)?.reason,
+					readRecord(recordStartDetails.refSnapshotInvalidation ?? {}).reason,
 					"page-transition",
 				);
-				assert.equal(recordStart.details?.refSnapshot, undefined);
+				assert.equal(recordStartDetails.refSnapshot, undefined);
 
 				const staleClick = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: ["click", "@e1"],
 				});
+				const staleClickDetails = readRecord(staleClick.details);
 				assert.equal(staleClick.isError, true, JSON.stringify(staleClick));
-				assert.equal(staleClick.details?.failureCategory, "stale-ref", JSON.stringify(staleClick));
+				assert.equal(staleClickDetails.failureCategory, "stale-ref", JSON.stringify(staleClick));
 				assert.match(
-					staleClick.content[0]?.text ?? "",
+					readString(staleClick.content[0].text ?? ""),
 					/cannot be used yet\..*conservatively invalidate/,
 				);
 
 				const staleGuardedRead = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: ["is", "visible", "@e1"],
 				});
+				const staleGuardedReadDetails = readRecord(staleGuardedRead.details);
 				assert.equal(staleGuardedRead.isError, true, JSON.stringify(staleGuardedRead));
 				assert.equal(
-					staleGuardedRead.details?.failureCategory,
+					staleGuardedReadDetails.failureCategory,
 					"stale-ref",
 					JSON.stringify(staleGuardedRead),
 				);
@@ -1742,9 +1725,10 @@ if (args.includes("snapshot")) {
 				const staleScreenshot = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: ["screenshot", "@e1", join(tempDir, "stale.png")],
 				});
+				const staleScreenshotDetails = readRecord(staleScreenshot.details);
 				assert.equal(staleScreenshot.isError, true, JSON.stringify(staleScreenshot));
 				assert.equal(
-					staleScreenshot.details?.failureCategory,
+					staleScreenshotDetails.failureCategory,
 					"stale-ref",
 					JSON.stringify(staleScreenshot),
 				);
@@ -1752,12 +1736,10 @@ if (args.includes("snapshot")) {
 				const freshSnapshot = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: ["snapshot", "-i"],
 				});
+				const freshSnapshotDetails = readRecord(freshSnapshot.details);
 				assert.equal(freshSnapshot.isError, false, JSON.stringify(freshSnapshot));
-				assert.equal(freshSnapshot.details?.refSnapshotInvalidation, undefined);
-				assert.deepEqual(
-					(freshSnapshot.details?.refSnapshot as { refIds?: string[] } | undefined)?.refIds,
-					["e1"],
-				);
+				assert.equal(freshSnapshotDetails.refSnapshotInvalidation, undefined);
+				assert.deepEqual(readRecord(freshSnapshotDetails.refSnapshot ?? {}).refIds, ["e1"]);
 
 				const plainRestartBatch = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: ["batch"],
@@ -1766,8 +1748,9 @@ if (args.includes("snapshot")) {
 						["click", "@e1"],
 					]),
 				});
+				const plainRestartBatchDetails = readRecord(plainRestartBatch.details);
 				assert.equal(plainRestartBatch.isError, false, JSON.stringify(plainRestartBatch));
-				assert.equal(plainRestartBatch.details?.refSnapshotInvalidation, undefined);
+				assert.equal(plainRestartBatchDetails.refSnapshotInvalidation, undefined);
 
 				const plainRestartClick = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: ["click", "@e1"],
@@ -1777,19 +1760,20 @@ if (args.includes("snapshot")) {
 				const navigatingRestart = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: ["record", "restart", join(tempDir, "nav.webm"), "https://record.example/next"],
 				});
+				const navigatingRestartDetails = readRecord(navigatingRestart.details);
 				assert.equal(navigatingRestart.isError, false, JSON.stringify(navigatingRestart));
 				assert.equal(
-					(navigatingRestart.details?.refSnapshotInvalidation as { reason?: string } | undefined)
-						?.reason,
+					readRecord(navigatingRestartDetails.refSnapshotInvalidation ?? {}).reason,
 					"page-transition",
 				);
 
 				const staleAfterRestart = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: ["click", "@e1"],
 				});
+				const staleAfterRestartDetails = readRecord(staleAfterRestart.details);
 				assert.equal(staleAfterRestart.isError, true, JSON.stringify(staleAfterRestart));
 				assert.equal(
-					staleAfterRestart.details?.failureCategory,
+					staleAfterRestartDetails.failureCategory,
 					"stale-ref",
 					JSON.stringify(staleAfterRestart),
 				);
@@ -1802,18 +1786,20 @@ if (args.includes("snapshot")) {
 				const failedStart = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: ["record", "start", join(tempDir, "already-active.webm")],
 				});
+				const failedStartDetails = readRecord(failedStart.details);
 				assert.equal(failedStart.isError, true, JSON.stringify(failedStart));
 				assert.equal(
-					(failedStart.details?.refSnapshotInvalidation as { reason?: string } | undefined)?.reason,
+					readRecord(failedStartDetails.refSnapshotInvalidation ?? {}).reason,
 					"page-transition",
 				);
 
 				const staleAfterFailedStart = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: ["click", "@e1"],
 				});
+				const staleAfterFailedStartDetails = readRecord(staleAfterFailedStart.details);
 				assert.equal(staleAfterFailedStart.isError, true, JSON.stringify(staleAfterFailedStart));
 				assert.equal(
-					staleAfterFailedStart.details?.failureCategory,
+					staleAfterFailedStartDetails.failureCategory,
 					"stale-ref",
 					JSON.stringify(staleAfterFailedStart),
 				);
@@ -1823,18 +1809,20 @@ if (args.includes("snapshot")) {
 				const booleanFlagClick = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: ["click", "--new-tab", "@e1"],
 				});
+				const booleanFlagClickDetails = readRecord(booleanFlagClick.details);
 				assert.equal(booleanFlagClick.isError, true, JSON.stringify(booleanFlagClick));
 				assert.equal(
-					booleanFlagClick.details?.failureCategory,
+					booleanFlagClickDetails.failureCategory,
 					"stale-ref",
 					JSON.stringify(booleanFlagClick),
 				);
 				const booleanFlagScreenshot = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: ["screenshot", "--full", "@e1", join(tempDir, "full.png")],
 				});
+				const booleanFlagScreenshotDetails = readRecord(booleanFlagScreenshot.details);
 				assert.equal(booleanFlagScreenshot.isError, true, JSON.stringify(booleanFlagScreenshot));
 				assert.equal(
-					booleanFlagScreenshot.details?.failureCategory,
+					booleanFlagScreenshotDetails.failureCategory,
 					"stale-ref",
 					JSON.stringify(booleanFlagScreenshot),
 				);
@@ -1845,9 +1833,10 @@ if (args.includes("snapshot")) {
 						["click", "--new-tab", "@e1"],
 					]),
 				});
+				const booleanFlagBatchDetails = readRecord(booleanFlagBatch.details);
 				assert.equal(booleanFlagBatch.isError, true, JSON.stringify(booleanFlagBatch));
 				assert.equal(
-					booleanFlagBatch.details?.failureCategory,
+					booleanFlagBatchDetails.failureCategory,
 					"stale-ref",
 					JSON.stringify(booleanFlagBatch),
 				);
@@ -1876,9 +1865,10 @@ if (args.includes("snapshot")) {
 						"@e1",
 					],
 				});
+				const guardedDiffSelectorDetails = readRecord(guardedDiffSelector.details);
 				assert.equal(guardedDiffSelector.isError, true, JSON.stringify(guardedDiffSelector));
 				assert.equal(
-					guardedDiffSelector.details?.failureCategory,
+					guardedDiffSelectorDetails.failureCategory,
 					"stale-ref",
 					JSON.stringify(guardedDiffSelector),
 				);
@@ -1888,22 +1878,24 @@ if (args.includes("snapshot")) {
 				const rawArgvBatch = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: ["batch", "click @e1"],
 				});
+				const rawArgvBatchDetails = readRecord(rawArgvBatch.details);
 				assert.equal(rawArgvBatch.isError, true, JSON.stringify(rawArgvBatch));
 				assert.equal(
-					rawArgvBatch.details?.failureCategory,
+					rawArgvBatchDetails.failureCategory,
 					"stale-ref",
 					JSON.stringify(rawArgvBatch),
 				);
 				const rawArgvBooleanFlagBatch = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: ["batch", "click --new-tab @e1"],
 				});
+				const rawArgvBooleanFlagBatchDetails = readRecord(rawArgvBooleanFlagBatch.details);
 				assert.equal(
 					rawArgvBooleanFlagBatch.isError,
 					true,
 					JSON.stringify(rawArgvBooleanFlagBatch),
 				);
 				assert.equal(
-					rawArgvBooleanFlagBatch.details?.failureCategory,
+					rawArgvBooleanFlagBatchDetails.failureCategory,
 					"stale-ref",
 					JSON.stringify(rawArgvBooleanFlagBatch),
 				);
@@ -1922,14 +1914,15 @@ if (args.includes("snapshot")) {
 				const rawArgvLatch = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: ["batch", `record start ${join(tempDir, "latch2.webm")}`, "click @e1"],
 				});
+				const rawArgvLatchDetails = readRecord(rawArgvLatch.details);
 				assert.equal(rawArgvLatch.isError, true, JSON.stringify(rawArgvLatch));
 				assert.equal(
-					rawArgvLatch.details?.failureCategory,
+					rawArgvLatchDetails.failureCategory,
 					"stale-ref",
 					JSON.stringify(rawArgvLatch),
 				);
 				assert.match(
-					rawArgvLatch.content[0]?.text ?? "",
+					readString(rawArgvLatch.content[0].text ?? ""),
 					/after an earlier batch step can navigate or mutate/,
 				);
 
@@ -2012,11 +2005,9 @@ if (args.includes("snapshot")) {
 				const initialSnapshot = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: ["snapshot", "-i"],
 				});
+				const initialSnapshotDetails = readRecord(initialSnapshot.details);
 				assert.equal(initialSnapshot.isError, false, JSON.stringify(initialSnapshot));
-				assert.deepEqual(
-					(initialSnapshot.details?.refSnapshot as { refIds?: string[] } | undefined)?.refIds,
-					["e1"],
-				);
+				assert.deepEqual(readRecord(initialSnapshotDetails.refSnapshot ?? {}).refIds, ["e1"]);
 
 				const timedOutBatch = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: ["batch"],
@@ -2026,11 +2017,11 @@ if (args.includes("snapshot")) {
 					]),
 					timeoutMs: 900,
 				});
+				const timedOutBatchDetails = readRecord(timedOutBatch.details);
 				assert.equal(timedOutBatch.isError, true, JSON.stringify(timedOutBatch));
-				assert.equal(timedOutBatch.details?.timedOut, true, JSON.stringify(timedOutBatch));
+				assert.equal(timedOutBatchDetails.timedOut, true, JSON.stringify(timedOutBatch));
 				assert.equal(
-					(timedOutBatch.details?.refSnapshotInvalidation as { reason?: string } | undefined)
-						?.reason,
+					readRecord(timedOutBatchDetails.refSnapshotInvalidation ?? {}).reason,
 					"page-transition",
 					JSON.stringify(timedOutBatch),
 				);
@@ -2038,17 +2029,16 @@ if (args.includes("snapshot")) {
 				const staleClick = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: ["click", "@e1"],
 				});
+				const staleClickDetails = readRecord(staleClick.details);
 				assert.equal(staleClick.isError, true, JSON.stringify(staleClick));
-				assert.equal(staleClick.details?.failureCategory, "stale-ref", JSON.stringify(staleClick));
+				assert.equal(staleClickDetails.failureCategory, "stale-ref", JSON.stringify(staleClick));
 
 				const freshSnapshot = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: ["snapshot", "-i"],
 				});
+				const freshSnapshotDetails = readRecord(freshSnapshot.details);
 				assert.equal(freshSnapshot.isError, false, JSON.stringify(freshSnapshot));
-				assert.deepEqual(
-					(freshSnapshot.details?.refSnapshot as { refIds?: string[] } | undefined)?.refIds,
-					["e1"],
-				);
+				assert.deepEqual(readRecord(freshSnapshotDetails.refSnapshot ?? {}).refIds, ["e1"]);
 
 				// Upstream uses raw batch arguments exclusively when any exist, so a stdin-only record step
 				// cannot execute and must not invalidate refs when such a batch times out.
@@ -2057,16 +2047,17 @@ if (args.includes("snapshot")) {
 					stdin: JSON.stringify([["record", "start", join(tempDir, "ignored.webm")]]),
 					timeoutMs: 900,
 				});
+				const argvExclusiveTimeoutDetails = readRecord(argvExclusiveTimeout.details);
 				assert.equal(argvExclusiveTimeout.isError, true, JSON.stringify(argvExclusiveTimeout));
 				assert.equal(
-					argvExclusiveTimeout.details?.timedOut,
+					argvExclusiveTimeoutDetails.timedOut,
 					true,
 					JSON.stringify(argvExclusiveTimeout),
 				);
 				assert.equal(
-					argvExclusiveTimeout.details?.refSnapshotInvalidation,
+					argvExclusiveTimeoutDetails.refSnapshotInvalidation,
 					undefined,
-					JSON.stringify(argvExclusiveTimeout.details?.refSnapshotInvalidation),
+					JSON.stringify(argvExclusiveTimeoutDetails.refSnapshotInvalidation),
 				);
 
 				const clickAfterArgvTimeout = await executeRegisteredTool(harness.tool, harness.ctx, {
@@ -2143,17 +2134,18 @@ if (args.includes("snapshot")) {
 						["fill", "@e4", "standard_user"],
 					]),
 				});
+				const clickThenFillDetails = readRecord(clickThenFill.details);
 				assert.equal(clickThenFill.isError, true);
-				assert.equal(clickThenFill.details?.failureCategory, "stale-ref");
+				assert.equal(clickThenFillDetails.failureCategory, "stale-ref");
 				assert.match(
-					(clickThenFill.content[0] as { text: string }).text,
+					readString(readRecord(clickThenFill.content[0]).text),
 					/after an earlier batch step can navigate or mutate/,
 				);
 
 				const invocations = await readInvocationLog(logPath);
 				const batchInvocations = invocations.filter((entry) => entry.args.includes("batch"));
 				assert.equal(batchInvocations.length, 1);
-				assert.deepEqual(JSON.parse(String(batchInvocations[0]?.stdin ?? "[]")), [
+				assert.deepEqual(readArray(JSON.parse(batchInvocations[0]?.stdin ?? "[]")), [
 					["fill", "@e4", "standard_user"],
 					["fill", "@e5", "secret_sauce"],
 					["click", "@e3"],
@@ -2240,10 +2232,11 @@ if (args.includes("snapshot")) {
 						["fill", "@e6", "Alice"],
 					]),
 				});
+				const clickSubmitThenFillDetails = readRecord(clickSubmitThenFill.details);
 				assert.equal(clickSubmitThenFill.isError, true);
-				assert.equal(clickSubmitThenFill.details?.failureCategory, "stale-ref");
+				assert.equal(clickSubmitThenFillDetails.failureCategory, "stale-ref");
 				assert.match(
-					(clickSubmitThenFill.content[0] as { text: string }).text,
+					readString(readRecord(clickSubmitThenFill.content[0]).text),
 					/after an earlier batch step can navigate or mutate/,
 				);
 
@@ -2254,17 +2247,18 @@ if (args.includes("snapshot")) {
 						["fill", "@e6", "Alice"],
 					]),
 				});
+				const wrongRoleThenFillDetails = readRecord(wrongRoleThenFill.details);
 				assert.equal(wrongRoleThenFill.isError, true);
-				assert.equal(wrongRoleThenFill.details?.failureCategory, "stale-ref");
+				assert.equal(wrongRoleThenFillDetails.failureCategory, "stale-ref");
 				assert.match(
-					(wrongRoleThenFill.content[0] as { text: string }).text,
+					readString(readRecord(wrongRoleThenFill.content[0]).text),
 					/Batch step fill uses page-scoped ref @e6/,
 				);
 
 				const invocations = await readInvocationLog(logPath);
 				const batchInvocations = invocations.filter((entry) => entry.args.includes("batch"));
 				assert.equal(batchInvocations.length, 2);
-				assert.deepEqual(JSON.parse(String(batchInvocations[0]?.stdin ?? "[]")), [
+				assert.deepEqual(readArray(JSON.parse(batchInvocations[0]?.stdin ?? "[]")), [
 					["check", "@e1"],
 					["uncheck", "@e1"],
 					["check", "@e2"],
@@ -2272,7 +2266,7 @@ if (args.includes("snapshot")) {
 					["select", "@e4", "Pro"],
 					["click", "@e5"],
 				]);
-				assert.deepEqual(JSON.parse(String(batchInvocations[1]?.stdin ?? "[]")), [
+				assert.deepEqual(readArray(JSON.parse(batchInvocations[1]?.stdin ?? "[]")), [
 					["click", "@e1"],
 					["fill", "@e6", "Alice"],
 				]);
@@ -2381,20 +2375,16 @@ if (args.includes("batch")) {
 					args: ["batch"],
 					stdin: JSON.stringify([["snapshot", "-i"]]),
 				});
+				const batchSnapshotDetails = readRecord(batchSnapshot.details);
 				assert.equal(batchSnapshot.isError, false);
-				assert.deepEqual(
-					(batchSnapshot.details?.refSnapshot as { refIds?: string[] } | undefined)?.refIds,
-					["e7"],
-				);
+				assert.deepEqual(readRecord(batchSnapshotDetails.refSnapshot ?? {}).refIds, ["e7"]);
 
 				const click = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: ["click", "@e7"],
 				});
+				const clickDetails = readRecord(click.details);
 				assert.equal(click.isError, false);
-				assert.equal(
-					(click.details?.data as { clicked?: string } | undefined)?.clicked,
-					"batched ref",
-				);
+				assert.equal(readRecord(clickDetails.data ?? {}).clicked, "batched ref");
 			});
 		} finally {
 			await rm(tempDir, { force: true, recursive: true });
@@ -2462,18 +2452,19 @@ if (args.includes("snapshot")) {
 							["get", "html", "@e1"],
 						]),
 					});
+					const staleBatchDetails = readRecord(staleBatch.details);
 					assert.equal(staleBatch.isError, true);
-					assert.equal(staleBatch.details?.failureCategory, "stale-ref");
+					assert.equal(staleBatchDetails.failureCategory, "stale-ref");
 					assert.match(
-						(staleBatch.content[0] as { text: string }).text,
+						readString(readRecord(staleBatch.content[0]).text),
 						/no longer matches the latest same-page snapshot/,
 					);
 					assert.match(
-						(staleBatch.content[0] as { text: string }).text,
+						readString(readRecord(staleBatch.content[0]).text),
 						/Old target before rerender/,
 					);
 					assert.match(
-						(staleBatch.content[0] as { text: string }).text,
+						readString(readRecord(staleBatch.content[0]).text),
 						/New target after rerender/,
 					);
 
@@ -2530,10 +2521,11 @@ if (args.includes("snapshot")) {
 				const missingRefClick = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: ["click", "@e1"],
 				});
+				const missingRefClickDetails = readRecord(missingRefClick.details);
 				assert.equal(missingRefClick.isError, true);
-				assert.equal(missingRefClick.details?.failureCategory, "stale-ref");
+				assert.equal(missingRefClickDetails.failureCategory, "stale-ref");
 				assert.match(
-					(missingRefClick.content[0] as { text: string }).text,
+					readString(readRecord(missingRefClick.content[0]).text),
 					/was not present in the latest snapshot/,
 				);
 
@@ -2609,8 +2601,9 @@ if (args.includes("snapshot")) {
 						args: ["batch", "--bail=true"],
 						stdin: JSON.stringify([["click", "@e1"]]),
 					});
+					const bailEqualsDetails = readRecord(bailEquals.details);
 					assert.notEqual(
-						bailEquals.details?.failureCategory,
+						bailEqualsDetails.failureCategory,
 						"stale-ref",
 						JSON.stringify(bailEquals),
 					);
@@ -2619,7 +2612,7 @@ if (args.includes("snapshot")) {
 							.length,
 						0,
 					);
-					assert.match(bailEquals.content[0]?.text ?? "", /Use exact batch --bail/);
+					assert.match(readString(bailEquals.content[0].text ?? ""), /Use exact batch --bail/);
 
 					// Malformed ignored stdin must not fail artifact preflight for a valid raw-argv call.
 					const malformedIgnoredStdin = await executeRegisteredTool(harness.tool, harness.ctx, {
@@ -2651,7 +2644,7 @@ if (args.includes("snapshot")) {
 						stdin: "not json",
 					});
 					assert.equal(bailEqualsMalformed.isError, true, JSON.stringify(bailEqualsMalformed));
-					assert.match(bailEqualsMalformed.content[0]?.text ?? "", /stdin is ignored/);
+					assert.match(readString(bailEqualsMalformed.content[0].text ?? ""), /stdin is ignored/);
 
 					// Upstream-effective raw artifact rows get parent directories prepared.
 					const rawScreenshot = await executeRegisteredTool(harness.tool, harness.ctx, {

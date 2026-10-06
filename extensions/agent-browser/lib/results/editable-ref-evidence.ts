@@ -42,14 +42,7 @@ function stripLeadingSnapshotAccessibleName(text: string): string {
 	return text.replace(/^(\s*[-*]\s+\S+\s+)(?:"[^"]*"|'[^']*')/, "$1");
 }
 
-function parseEditableEvidenceText(text: string | undefined): boolean | undefined {
-	if (!text) {
-		return undefined;
-	}
-	const markerText = stripLeadingSnapshotAccessibleName(text);
-	if (EDITABLE_FALSE_TEXT_PATTERN.test(markerText)) {
-		return false;
-	}
+function parseEditableAssignments(markerText: string): boolean | undefined {
 	let hasPositiveAssignment = false;
 	for (const match of markerText.matchAll(EDITABLE_ASSIGNMENT_TEXT_PATTERN)) {
 		const key = match[1]?.toLowerCase();
@@ -61,28 +54,52 @@ function parseEditableEvidenceText(text: string | undefined): boolean | undefine
 			hasPositiveAssignment = true;
 		}
 	}
-	if (hasPositiveAssignment) {
-		return true;
+	return hasPositiveAssignment ? true : undefined;
+}
+
+function parseEditableEvidenceText(text: string | undefined): boolean | undefined {
+	if (text === undefined || text.length === 0) {
+		return undefined;
+	}
+	const markerText = stripLeadingSnapshotAccessibleName(text);
+	if (EDITABLE_FALSE_TEXT_PATTERN.test(markerText)) {
+		return false;
+	}
+	const assignment = parseEditableAssignments(markerText);
+	if (assignment !== undefined) {
+		return assignment;
 	}
 	return EDITABLE_BARE_TEXT_PATTERN.test(markerText) ? true : undefined;
 }
 
-export function getEditableRefEvidence(options: {
-	ref?: Record<string, unknown>;
-	text?: string;
-}): boolean | undefined {
+function getStructuredEditableEvidence(
+	ref: Readonly<Record<string, unknown>> | undefined,
+): boolean | undefined {
+	if (!ref) {
+		return undefined;
+	}
 	let hasPositiveEvidence = false;
-	if (options.ref) {
-		for (const key of EDITABLE_REF_EVIDENCE_KEYS) {
-			const evidence = parseEditableEvidenceValue(options.ref[key]);
-			if (evidence === false) {
-				return false;
-			}
-			if (evidence === true) {
-				hasPositiveEvidence = true;
-			}
+	for (const key of EDITABLE_REF_EVIDENCE_KEYS) {
+		const evidence = parseEditableEvidenceValue(ref[key]);
+		if (evidence === false) {
+			return false;
+		}
+		if (evidence === true) {
+			hasPositiveEvidence = true;
 		}
 	}
+	return hasPositiveEvidence ? true : undefined;
+}
+
+export function getEditableRefEvidence(options: {
+	readonly ref?: Readonly<Record<string, unknown>>;
+	readonly text?: string;
+}): boolean | undefined {
+	const structuredEvidence = getStructuredEditableEvidence(options.ref);
+	if (structuredEvidence === false) {
+		return false;
+	}
+	let hasPositiveEvidence = structuredEvidence === true;
 	const textEvidence = parseEditableEvidenceText(options.text);
 	if (textEvidence === false) {
 		return false;

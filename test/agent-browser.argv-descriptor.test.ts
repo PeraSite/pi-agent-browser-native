@@ -92,6 +92,8 @@ test("parseCommandInfo recognizes representative current command families", () =
 			expected: { command: "open", subcommand: "https://example.com" },
 		},
 	] as const) {
+		// Every command-family row is checked against its explicit expected parse result.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.deepEqual(parseCommandInfo([...args]), expected);
 	}
 });

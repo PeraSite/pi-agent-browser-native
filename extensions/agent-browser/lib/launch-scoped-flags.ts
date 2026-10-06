@@ -2,8 +2,8 @@ import { findCommandStartIndex } from "./argv-descriptor.js";
 import { isBooleanFlagEnabled } from "./argv-grammar.js";
 
 export interface LaunchScopedFlagDefinition {
-	flag: string;
-	reason: string;
+	readonly flag: string;
+	readonly reason: string;
 }
 
 export const LAUNCH_SCOPED_FLAG_DEFINITIONS = [
@@ -204,7 +204,7 @@ export const MANAGED_RESTORE_INCOMPATIBLE_BOOLEAN_ENVS = [
 	"AGENT_BROWSER_WEBGPU",
 ] as const;
 
-export function hasLaunchScopedFlagToken(args: string[], flag: string): boolean {
+export function hasLaunchScopedFlagToken(args: readonly string[], flag: string): boolean {
 	const commandStartIndex = findCommandStartIndex(args);
 	const command = commandStartIndex === undefined ? undefined : args[commandStartIndex];
 	return args.some((token, index) => {

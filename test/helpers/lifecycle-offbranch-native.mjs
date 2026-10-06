@@ -21,8 +21,7 @@ async function worker(options) {
 		modelsPath: null,
 		modelsStorePath: join(agentDir, "models-store.json"),
 	});
-	let session,
-		result,
+	let result,
 		callId = 0;
 	const sm = options.journal
 		? sdk.SessionManager.open(options.journal)
@@ -62,7 +61,7 @@ async function worker(options) {
 	});
 	await loader.reload();
 	assert.deepEqual(loader.getExtensions().errors, []);
-	({ session } = await sdk.createAgentSession({
+	const { session } = await sdk.createAgentSession({
 		cwd,
 		agentDir,
 		settingsManager,
@@ -70,7 +69,7 @@ async function worker(options) {
 		resourceLoader: loader,
 		sessionManager: sm,
 		noTools: "builtin",
-	}));
+	});
 	await session.bindExtensions({
 		onError: (e) => {
 			throw new Error(e.error);
@@ -148,7 +147,11 @@ export async function qualifyOffbranchRouting(options) {
 				clearTimeout(timer);
 				child.off("exit", exited);
 				child.off("message", message);
-				error ? reject(error) : resolve(value);
+				if (error) {
+					reject(error);
+				} else {
+					resolve(value);
+				}
 			}
 			child.once("exit", exited);
 			child.once("message", message);
@@ -188,6 +191,8 @@ export async function qualifyOffbranchRouting(options) {
 	const close = async (identity) => {
 		native(identity, ["close"]);
 		for (let i = 0; i < 100 && status(identity).active; i++) {
+			// Poll only after the previous native close status check and delay.
+			// oxlint-disable-next-line no-await-in-loop
 			await delay(50);
 		}
 		assert.equal(status(identity).active, false);
@@ -277,6 +282,8 @@ export async function qualifyOffbranchRouting(options) {
 		]) {
 			identities.push(identity);
 			const args = ["--namespace", identity.namespace ?? "", "--session", identity.name];
+			// Each provenance case owns one live session until its explicit close below.
+			// oxlint-disable-next-line no-await-in-loop
 			const callerOpened = await call(second.child, {
 				args: [...args, "open", "about:blank"],
 				sessionMode: "fresh",
@@ -291,9 +298,15 @@ export async function qualifyOffbranchRouting(options) {
 				callerLeaf: callerOpened.leaf,
 				actualCallerDetails: callerOpened.result.details,
 			});
+			// Reload observes the live session from this iteration before its close.
+			// oxlint-disable-next-line no-await-in-loop
 			await request(second.child, "reload");
 			assert.equal(status(identity).pid, caller.pid);
+			// Close this case before the next identity uses the same native socket root.
+			// oxlint-disable-next-line no-await-in-loop
 			await call(second.child, { args: [...args, "close"] });
+			// Confirm daemon retirement before advancing to the next identity.
+			// oxlint-disable-next-line no-await-in-loop
 			await close(identity);
 		}
 		const done = once(second.child, "exit");
@@ -304,10 +317,14 @@ export async function qualifyOffbranchRouting(options) {
 			if (child.exitCode === null && child.signalCode === null) {
 				const done = once(child, "exit");
 				child.kill("SIGKILL");
+				// Reap each owned SDK worker before closing its native daemon identities.
+				// oxlint-disable-next-line no-await-in-loop
 				await done;
 			}
 		}
 		for (const identity of identities) {
+			// Cleanup identities can share namespace/socket resources, so retire them in order.
+			// oxlint-disable-next-line no-await-in-loop
 			await close(identity);
 		}
 		await rm(ambient, { recursive: true, force: true });

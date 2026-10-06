@@ -4,30 +4,43 @@ import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 
-/** @typedef {"explicit-only" | "authenticated-only" | "always"} BrowserDefaultProfilePolicy */
+import {
+	DEFAULT_WEB_SEARCH_PROVIDER,
+	WEB_SEARCH_PROVIDERS,
+	getWebSearchProviderDescriptor,
+	getWebSearchProviderEnvVar,
+} from "./config-providers.js";
+import { parseAgentBrowserConfigLayer, describeUnknownError } from "./config-validation.js";
+export * from "./config-providers.js";
+export {
+	parseAgentBrowserConfigLayer,
+	validateAgentBrowserConfig,
+	validateWebSearchProvider,
+} from "./config-validation.js";
+
+/** @typedef {import("./config-providers.js").WebSearchProvider} WebSearchProvider */
+/** @typedef {import("./config-providers.js").ExaSearchType} ExaSearchType */
+/** @typedef {import("./config-providers.js").WebSearchProviderConfigKey} WebSearchProviderConfigKey */
+/** @typedef {import("./config-providers.js").WebSearchProviderDescriptor} WebSearchProviderDescriptor */
+/** @typedef {import("./config-validation.js").BrowserDefaultProfilePolicy} BrowserDefaultProfilePolicy */
+/** @typedef {import("./config-validation.js").BrowserDefaultProfileConfig} BrowserDefaultProfileConfig */
+/** @typedef {import("./config-validation.js").BrowserConfig} BrowserConfig */
+/** @typedef {import("./config-validation.js").WebSearchConfig} WebSearchConfig */
+/** @typedef {import("./config-validation.js").ConfigLayerScope} ConfigLayerScope */
+/** @typedef {import("./config-validation.js").AgentBrowserConfig} AgentBrowserConfig */
+/** @typedef {import("./config-validation.js").ConfigLayer} ConfigLayer */
 /** @typedef {"global" | "project" | "override" | "env-fallback"} AgentBrowserConfigScope */
-/** @typedef {"global" | "project" | "override"} ConfigLayerScope */
 /** @typedef {"literal" | "env" | "command"} CredentialSourceKind */
-/** @typedef {"exa" | "brave"} WebSearchProvider */
-/** @typedef {"auto" | "fast" | "instant" | "deep-lite" | "deep" | "deep-reasoning"} ExaSearchType */
-/** @typedef {"exaApiKey" | "braveApiKey"} WebSearchProviderConfigKey */
-/** @typedef {{ provider: WebSearchProvider; apiKeyEnv: string; configKey: WebSearchProviderConfigKey; label: string }} WebSearchProviderDescriptor */
-/** @typedef {{ name: string; policy?: BrowserDefaultProfilePolicy }} BrowserDefaultProfileConfig */
-/** @typedef {{ enabled?: boolean; preferredProvider?: WebSearchProvider; defaultSearchType?: ExaSearchType; braveApiKey?: string; exaApiKey?: string }} WebSearchConfig */
-/** @typedef {{ defaultProfile?: BrowserDefaultProfileConfig; executablePath?: string }} BrowserConfig */
-/** @typedef {{ version?: 1; webSearch?: WebSearchConfig; browser?: BrowserConfig }} AgentBrowserConfig */
-/** @typedef {{ config: AgentBrowserConfig; path: string; scope: ConfigLayerScope }} ConfigLayer */
-/** @typedef {{ kind: CredentialSourceKind; provider?: WebSearchProvider; rawValue: string; scope: AgentBrowserConfigScope }} CredentialSource */
-/** @typedef {{ global: string; project: string; override?: string }} AgentBrowserConfigPaths */
-/** @typedef {{ cwd?: string; env?: NodeJS.ProcessEnv; includeProjectConfig?: boolean }} AgentBrowserConfigLoadOptions */
-/** @typedef {{ browserDefaultProfile?: Required<BrowserDefaultProfileConfig>; browserDefaultProfileScope?: ConfigLayerScope; browserExecutablePath?: string; browserExecutablePathScope?: ConfigLayerScope; trustedBrowserDefaultProfile?: Required<BrowserDefaultProfileConfig>; trustedBrowserDefaultProfileScope?: ConfigLayerScope; trustedBrowserExecutablePath?: string; trustedBrowserExecutablePathScope?: ConfigLayerScope; config: AgentBrowserConfig; webSearchCredentialSources: Partial<Record<WebSearchProvider, CredentialSource>>; webSearchEnabled: boolean; webSearchPreferredProvider: WebSearchProvider; errors: string[]; layers: ConfigLayer[]; paths: AgentBrowserConfigPaths; projectConfigIncluded: boolean; warnings: string[] }} AgentBrowserConfigState */
-/** @typedef {{ scope: string; path: string; exists: boolean }} ConfigFileSummary */
+/** @typedef {{ readonly kind: CredentialSourceKind; readonly provider?: WebSearchProvider; readonly rawValue: string; readonly scope: AgentBrowserConfigScope }} CredentialSource */
+/** @typedef {{ readonly global: string; readonly project: string; readonly override?: string }} AgentBrowserConfigPaths */
+/** @typedef {{ readonly cwd?: string; readonly env?: NodeJS.ProcessEnv; readonly includeProjectConfig?: boolean }} AgentBrowserConfigLoadOptions */
+/** @typedef {{ readonly browserDefaultProfile?: Required<BrowserDefaultProfileConfig>; readonly browserDefaultProfileScope?: ConfigLayerScope; readonly browserExecutablePath?: string; readonly browserExecutablePathScope?: ConfigLayerScope; readonly trustedBrowserDefaultProfile?: Required<BrowserDefaultProfileConfig>; readonly trustedBrowserDefaultProfileScope?: ConfigLayerScope; readonly trustedBrowserExecutablePath?: string; readonly trustedBrowserExecutablePathScope?: ConfigLayerScope; readonly config: AgentBrowserConfig; readonly webSearchCredentialSources: Readonly<Partial<Record<WebSearchProvider, CredentialSource>>>; readonly webSearchEnabled: boolean; readonly webSearchPreferredProvider: WebSearchProvider; readonly errors: readonly string[]; readonly layers: readonly ConfigLayer[]; readonly paths: AgentBrowserConfigPaths; readonly projectConfigIncluded: boolean; readonly warnings: readonly string[] }} AgentBrowserConfigState */
+/** @typedef {{ readonly scope: string; readonly path: string; readonly exists: boolean }} ConfigFileSummary */
 
 const CONFIG_DIR_NAME = ".pi";
 
 export const AGENT_BROWSER_CONFIG_ENV = "PI_AGENT_BROWSER_CONFIG";
-export const BRAVE_API_KEY_ENV = "BRAVE_API_KEY";
-export const EXA_API_KEY_ENV = "EXA_API_KEY";
+
 export const CONFIG_RELATIVE_PATH = /** @type {const} */ ([
 	CONFIG_DIR_NAME,
 	"config",
@@ -42,89 +55,12 @@ export const GLOBAL_CONFIG_RELATIVE_PATH = /** @type {const} */ ([
 ]);
 export const SECRET_COMMAND_TIMEOUT_MS = 15_000;
 
-/** @type {Readonly<Record<WebSearchProvider, WebSearchProviderDescriptor>>} */
-export const WEB_SEARCH_PROVIDER_DESCRIPTORS = Object.freeze({
-	exa: Object.freeze({
-		provider: "exa",
-		apiKeyEnv: EXA_API_KEY_ENV,
-		configKey: "exaApiKey",
-		label: "Exa",
-	}),
-	brave: Object.freeze({
-		provider: "brave",
-		apiKeyEnv: BRAVE_API_KEY_ENV,
-		configKey: "braveApiKey",
-		label: "Brave Search",
-	}),
-});
-/** @type {readonly WebSearchProvider[]} */
-export const WEB_SEARCH_PROVIDERS = Object.freeze(["exa", "brave"]);
-/** @type {WebSearchProvider} */
-export const DEFAULT_WEB_SEARCH_PROVIDER = "exa";
-/** @type {readonly ExaSearchType[]} */
-export const EXA_SEARCH_TYPES = Object.freeze([
-	"auto",
-	"fast",
-	"instant",
-	"deep-lite",
-	"deep",
-	"deep-reasoning",
-]);
-/** @type {Readonly<Record<WebSearchProvider, WebSearchProviderConfigKey>>} */
-export const WEB_SEARCH_PROVIDER_CONFIG_KEYS = Object.freeze({
-	exa: WEB_SEARCH_PROVIDER_DESCRIPTORS.exa.configKey,
-	brave: WEB_SEARCH_PROVIDER_DESCRIPTORS.brave.configKey,
-});
-/** @type {Readonly<Record<WebSearchProvider, string>>} */
-export const WEB_SEARCH_PROVIDER_ENV_VARS = Object.freeze({
-	exa: WEB_SEARCH_PROVIDER_DESCRIPTORS.exa.apiKeyEnv,
-	brave: WEB_SEARCH_PROVIDER_DESCRIPTORS.brave.apiKeyEnv,
-});
-
-/**
- * @param {unknown} value
- * @returns {value is WebSearchProvider}
- */
-export function isWebSearchProvider(value) {
-	return (
-		typeof value === "string" &&
-		WEB_SEARCH_PROVIDERS.includes(/** @type {WebSearchProvider} */ (value))
-	);
-}
-
-/**
- * @param {WebSearchProvider} provider
- * @returns {WebSearchProviderDescriptor}
- */
-export function getWebSearchProviderDescriptor(provider) {
-	const descriptor = WEB_SEARCH_PROVIDER_DESCRIPTORS[provider];
-	if (!descriptor) {
-		throw new Error(`Unknown web-search provider: ${String(provider)}`);
-	}
-	return descriptor;
-}
-
-/** @param {WebSearchProvider} provider */
-export function getWebSearchProviderLabel(provider) {
-	return getWebSearchProviderDescriptor(provider).label;
-}
-
-/** @param {WebSearchProvider} provider */
-export function getWebSearchProviderEnvVar(provider) {
-	return getWebSearchProviderDescriptor(provider).apiKeyEnv;
-}
-
-/**
- * @param {WebSearchProvider} provider
- * @returns {WebSearchProviderConfigKey}
- */
-export function getWebSearchProviderConfigKey(provider) {
-	return getWebSearchProviderDescriptor(provider).configKey;
-}
-
 /** @param {NodeJS.ProcessEnv} [env] */
 export function getGlobalAgentBrowserConfigPath(env = process.env) {
-	const home = env.HOME?.trim() || env.USERPROFILE?.trim() || homedir();
+	const home =
+		[env.HOME?.trim(), env.USERPROFILE?.trim()].find(
+			(value) => value !== undefined && value.length > 0,
+		) ?? homedir();
 	return join(home, ...GLOBAL_CONFIG_RELATIVE_PATH);
 }
 
@@ -134,7 +70,7 @@ export function getProjectAgentBrowserConfigPath(cwd = process.cwd()) {
 }
 
 /**
- * @param {{ cwd?: string; env?: NodeJS.ProcessEnv }} [options]
+ * @param {{ readonly cwd?: string; readonly env?: NodeJS.ProcessEnv }} [options]
  * @returns {AgentBrowserConfigPaths}
  */
 export function getAgentBrowserConfigPaths(options = {}) {
@@ -143,7 +79,7 @@ export function getAgentBrowserConfigPaths(options = {}) {
 	return {
 		global: getGlobalAgentBrowserConfigPath(env),
 		project: getProjectAgentBrowserConfigPath(options.cwd),
-		...(override ? { override: resolve(override) } : {}),
+		...(override !== undefined && override.length > 0 ? { override: resolve(override) } : {}),
 	};
 }
 
@@ -157,242 +93,15 @@ export function mergeAgentBrowserConfig(base, override) {
 		...base,
 		...override,
 		browser: {
-			...(base.browser ?? {}),
-			...(override.browser ?? {}),
+			...base.browser,
+			...override.browser,
 			defaultProfile: override.browser?.defaultProfile ?? base.browser?.defaultProfile,
 		},
 		webSearch: {
-			...(base.webSearch ?? {}),
-			...(override.webSearch ?? {}),
+			...base.webSearch,
+			...override.webSearch,
 		},
 	};
-}
-
-/**
- * @param {unknown} value
- * @returns {value is Record<string, unknown>}
- */
-function isRecord(value) {
-	return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-/**
- * @param {unknown} value
- * @param {string} path
- * @param {string[]} errors
- */
-function validateString(value, path, errors) {
-	if (value === undefined) {
-		return undefined;
-	}
-	if (typeof value !== "string") {
-		errors.push(`${path} must be a string.`);
-		return undefined;
-	}
-	return value;
-}
-
-/**
- * @param {unknown} value
- * @param {string} path
- * @param {string[]} errors
- */
-function validateBoolean(value, path, errors) {
-	if (value === undefined) {
-		return undefined;
-	}
-	if (typeof value !== "boolean") {
-		errors.push(`${path} must be a boolean.`);
-		return undefined;
-	}
-	return value;
-}
-
-/**
- * @param {unknown} value
- * @param {string} path
- * @param {string[]} errors
- * @returns {WebSearchProvider | undefined}
- */
-export function validateWebSearchProvider(value, path, errors) {
-	if (value === undefined) {
-		return undefined;
-	}
-	const provider = validateString(value, path, errors)?.trim();
-	if (provider === undefined) {
-		return undefined;
-	}
-	if (!isWebSearchProvider(provider)) {
-		errors.push(`${path} must be one of ${WEB_SEARCH_PROVIDERS.join(", ")}.`);
-		return undefined;
-	}
-	return provider;
-}
-
-/**
- * @param {unknown} value
- * @param {string} path
- * @param {string[]} errors
- * @returns {ExaSearchType | undefined}
- */
-function validateExaSearchType(value, path, errors) {
-	if (value === undefined) {
-		return undefined;
-	}
-	const searchType = validateString(value, path, errors)?.trim();
-	if (searchType === undefined) {
-		return undefined;
-	}
-	if (!EXA_SEARCH_TYPES.includes(/** @type {ExaSearchType} */ (searchType))) {
-		errors.push(`${path} must be one of ${EXA_SEARCH_TYPES.join(", ")}.`);
-		return undefined;
-	}
-	return /** @type {ExaSearchType} */ (searchType);
-}
-
-/**
- * @param {unknown} value
- * @param {string} path
- * @param {string[]} errors
- * @returns {BrowserDefaultProfileConfig | undefined}
- */
-function validateBrowserDefaultProfile(value, path, errors) {
-	if (value === undefined) {
-		return undefined;
-	}
-	if (!isRecord(value)) {
-		errors.push(`${path} must be an object.`);
-		return undefined;
-	}
-	const name = validateString(value.name, `${path}.name`, errors)?.trim();
-	if (!name) {
-		errors.push(`${path}.name must not be blank.`);
-		return undefined;
-	}
-	const rawPolicy = validateString(value.policy, `${path}.policy`, errors);
-	const policy = rawPolicy ?? "authenticated-only";
-	if (!["explicit-only", "authenticated-only", "always"].includes(policy)) {
-		errors.push(`${path}.policy must be one of explicit-only, authenticated-only, always.`);
-		return undefined;
-	}
-	return { name, policy: /** @type {BrowserDefaultProfilePolicy} */ (policy) };
-}
-
-/**
- * @param {unknown} value
- * @param {string} path
- * @param {string[]} errors
- * @param {string[]} warnings
- * @returns {AgentBrowserConfig | undefined}
- */
-export function validateAgentBrowserConfig(value, path, errors, warnings) {
-	if (!isRecord(value)) {
-		errors.push(`${path} must contain a JSON object.`);
-		return undefined;
-	}
-	if (value.version !== undefined && value.version !== 1) {
-		errors.push(`${path}.version must be 1 when present.`);
-	}
-	/** @type {AgentBrowserConfig} */
-	const config = value.version === 1 ? { version: 1 } : {};
-
-	if (value.webSearch !== undefined) {
-		if (!isRecord(value.webSearch)) {
-			errors.push(`${path}.webSearch must be an object.`);
-		} else {
-			/** @type {NonNullable<AgentBrowserConfig["webSearch"]>} */
-			const webSearch = {};
-			const enabled = validateBoolean(value.webSearch.enabled, `${path}.webSearch.enabled`, errors);
-			if (enabled !== undefined) {
-				webSearch.enabled = enabled;
-			}
-			const preferredProvider = validateWebSearchProvider(
-				value.webSearch.preferredProvider,
-				`${path}.webSearch.preferredProvider`,
-				errors,
-			);
-			if (preferredProvider) {
-				webSearch.preferredProvider = preferredProvider;
-			}
-			const defaultSearchType = validateExaSearchType(
-				value.webSearch.defaultSearchType,
-				`${path}.webSearch.defaultSearchType`,
-				errors,
-			);
-			if (defaultSearchType) {
-				webSearch.defaultSearchType = defaultSearchType;
-			}
-			for (const provider of WEB_SEARCH_PROVIDERS) {
-				const descriptor = getWebSearchProviderDescriptor(provider);
-				const apiKey = validateString(
-					value.webSearch[descriptor.configKey],
-					`${path}.webSearch.${descriptor.configKey}`,
-					errors,
-				);
-				if (apiKey !== undefined) {
-					webSearch[descriptor.configKey] = apiKey;
-				}
-			}
-			if (Object.keys(webSearch).length > 0) {
-				config.webSearch = webSearch;
-			}
-		}
-	}
-
-	if (value.browser !== undefined) {
-		if (!isRecord(value.browser)) {
-			errors.push(`${path}.browser must be an object.`);
-		} else {
-			config.browser = {};
-			const defaultProfile = validateBrowserDefaultProfile(
-				value.browser.defaultProfile,
-				`${path}.browser.defaultProfile`,
-				errors,
-			);
-			if (defaultProfile) {
-				config.browser.defaultProfile = defaultProfile;
-			}
-			const executablePath = validateString(
-				value.browser.executablePath,
-				`${path}.browser.executablePath`,
-				errors,
-			)?.trim();
-			if (executablePath) {
-				config.browser.executablePath = executablePath;
-			}
-		}
-	}
-
-	for (const key of Object.keys(value)) {
-		if (!["version", "webSearch", "browser"].includes(key)) {
-			warnings.push(
-				`${path}.${key} is not a recognized pi-agent-browser-native config field and was ignored.`,
-			);
-		}
-	}
-	return config;
-}
-
-/**
- * @param {string} raw
- * @param {string} path
- * @param {ConfigLayerScope} scope
- * @param {string[]} errors
- * @param {string[]} warnings
- * @returns {ConfigLayer | undefined}
- */
-export function parseAgentBrowserConfigLayer(raw, path, scope, errors, warnings) {
-	let parsed;
-	try {
-		parsed = JSON.parse(raw);
-	} catch (error) {
-		errors.push(
-			`Could not parse ${scope} config ${path}: ${error instanceof Error ? error.message : String(error)}`,
-		);
-		return undefined;
-	}
-	const config = validateAgentBrowserConfig(parsed, path, errors, warnings);
-	return config ? { config, path, scope } : undefined;
 }
 
 /**
@@ -403,8 +112,8 @@ export function parseAgentBrowserConfigLayer(raw, path, scope, errors, warnings)
  */
 export function classifyCredentialSource(rawValue, scope, provider) {
 	const trimmed = rawValue.trim();
-	if (!trimmed) {
-		return undefined;
+	if (trimmed.length === 0) {
+		return;
 	}
 	if (trimmed.startsWith("!")) {
 		return { kind: "command", provider, rawValue: trimmed, scope };
@@ -421,8 +130,8 @@ export function classifyCredentialSource(rawValue, scope, provider) {
  */
 function getBrowserDefaultProfile(config) {
 	const profile = config.browser?.defaultProfile;
-	if (!profile?.name.trim()) {
-		return undefined;
+	if (!profile || profile.name.trim().length === 0) {
+		return;
 	}
 	return { name: profile.name.trim(), policy: profile.policy ?? "authenticated-only" };
 }
@@ -430,44 +139,44 @@ function getBrowserDefaultProfile(config) {
 /** @param {AgentBrowserConfig} config */
 function getBrowserExecutablePath(config) {
 	const executablePath = config.browser?.executablePath?.trim();
-	return executablePath || undefined;
+	return executablePath !== undefined && executablePath.length > 0 ? executablePath : undefined;
 }
 
 /**
- * @param {ConfigLayer[]} layers
+ * @param {readonly ConfigLayer[]} layers
  * @returns {ConfigLayerScope | undefined}
  */
 function getBrowserDefaultProfileScope(layers) {
 	for (let index = layers.length - 1; index >= 0; index -= 1) {
-		const layer = layers[index];
+		const layer = layers.at(index);
 		if (layer?.config.browser?.defaultProfile !== undefined) {
 			return layer.scope;
 		}
 	}
-	return undefined;
+	return;
 }
 
 /**
- * @param {ConfigLayer[]} layers
+ * @param {readonly ConfigLayer[]} layers
  * @returns {ConfigLayerScope | undefined}
  */
 function getBrowserExecutablePathScope(layers) {
 	for (let index = layers.length - 1; index >= 0; index -= 1) {
-		const layer = layers[index];
+		const layer = layers.at(index);
 		if (layer?.config.browser?.executablePath !== undefined) {
 			return layer.scope;
 		}
 	}
-	return undefined;
+	return;
 }
 
 /**
- * @param {ConfigLayer[]} layers
+ * @param {readonly ConfigLayer[]} layers
  * @returns {{ profile: Required<BrowserDefaultProfileConfig>; scope: ConfigLayerScope } | undefined}
  */
 function getTrustedBrowserDefaultProfile(layers) {
 	for (let index = layers.length - 1; index >= 0; index -= 1) {
-		const layer = layers[index];
+		const layer = layers.at(index);
 		if (!layer) {
 			continue;
 		}
@@ -476,35 +185,35 @@ function getTrustedBrowserDefaultProfile(layers) {
 			return { profile, scope: layer.scope };
 		}
 	}
-	return undefined;
+	return;
 }
 
 /**
- * @param {ConfigLayer[]} layers
+ * @param {readonly ConfigLayer[]} layers
  * @returns {{ executablePath: string; scope: ConfigLayerScope } | undefined}
  */
 function getTrustedBrowserExecutablePath(layers) {
 	for (let index = layers.length - 1; index >= 0; index -= 1) {
-		const layer = layers[index];
+		const layer = layers.at(index);
 		if (!layer) {
 			continue;
 		}
 		const executablePath = getBrowserExecutablePath(layer.config);
-		if (executablePath) {
+		if (executablePath !== undefined && executablePath.length > 0) {
 			return { executablePath, scope: layer.scope };
 		}
 	}
-	return undefined;
+	return;
 }
 
 /**
- * @param {ConfigLayer[]} layers
+ * @param {readonly ConfigLayer[]} layers
  * @param {WebSearchProviderConfigKey} key
  * @returns {AgentBrowserConfigScope}
  */
 function getWebSearchCredentialScope(layers, key) {
 	for (let index = layers.length - 1; index >= 0; index -= 1) {
-		const layer = layers[index];
+		const layer = layers.at(index);
 		if (layer?.config.webSearch?.[key] !== undefined) {
 			return layer.scope;
 		}
@@ -513,7 +222,7 @@ function getWebSearchCredentialScope(layers, key) {
 }
 
 /**
- * @param {{ env: NodeJS.ProcessEnv; layers: ConfigLayer[]; mergedConfig: AgentBrowserConfig }} options
+ * @param {{ readonly env: NodeJS.ProcessEnv; readonly layers: readonly ConfigLayer[]; readonly mergedConfig: AgentBrowserConfig }} options
  * @returns {Partial<Record<WebSearchProvider, CredentialSource>>}
  */
 export function buildWebSearchCredentialSources(options) {
@@ -529,7 +238,7 @@ export function buildWebSearchCredentialSources(options) {
 				provider,
 			);
 		}
-		if (!sources[provider] && options.env[descriptor.apiKeyEnv]?.trim()) {
+		if (!sources[provider] && (options.env[descriptor.apiKeyEnv]?.trim().length ?? 0) > 0) {
 			sources[provider] = {
 				kind: "literal",
 				provider,
@@ -542,7 +251,7 @@ export function buildWebSearchCredentialSources(options) {
 }
 
 /**
- * @param {{ env: NodeJS.ProcessEnv; layers: ConfigLayer[]; mergedConfig: AgentBrowserConfig; paths: AgentBrowserConfigPaths; errors: string[]; warnings: string[]; projectConfigIncluded?: boolean }} options
+ * @param {{ readonly env: NodeJS.ProcessEnv; readonly layers: readonly ConfigLayer[]; readonly mergedConfig: AgentBrowserConfig; readonly paths: AgentBrowserConfigPaths; readonly errors: readonly string[]; readonly warnings: readonly string[]; readonly projectConfigIncluded?: boolean }} options
  * @returns {AgentBrowserConfigState}
  */
 export function buildAgentBrowserConfigState(options) {
@@ -575,8 +284,8 @@ export function buildAgentBrowserConfigState(options) {
 /**
  * @param {string} path
  * @param {ConfigLayerScope} scope
- * @param {string[]} errors
- * @param {string[]} warnings
+ * @param {import("./config-validation.js").ConfigDiagnostics} errors
+ * @param {import("./config-validation.js").ConfigDiagnostics} warnings
  * @returns {ConfigLayer | undefined}
  */
 function readConfigLayerSync(path, scope, errors, warnings) {
@@ -584,13 +293,13 @@ function readConfigLayerSync(path, scope, errors, warnings) {
 	try {
 		raw = readFileSync(path, "utf8");
 	} catch (error) {
-		if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
-			return undefined;
+		if (error !== null && typeof error === "object" && "code" in error && error.code === "ENOENT") {
+			return;
 		}
 		errors.push(
-			`Could not read ${scope} config ${path}: ${error instanceof Error ? error.message : String(error)}`,
+			`Could not read ${scope} config ${path}: ${error instanceof Error ? error.message : describeUnknownError(error)}`,
 		);
-		return undefined;
+		return;
 	}
 	return parseAgentBrowserConfigLayer(raw, path, scope, errors, warnings);
 }
@@ -608,15 +317,13 @@ export function loadAgentBrowserConfigStateSync(options = {}) {
 	/** @type {string[]} */
 	const warnings = [];
 	/** @type {Array<{ path: string; scope: ConfigLayerScope }>} */
-	const layerCandidates = [
-		{ path: paths.global, scope: "global" },
-		...(includeProjectConfig
-			? [{ path: paths.project, scope: /** @type {ConfigLayerScope} */ ("project") }]
-			: []),
-		...(paths.override
-			? [{ path: paths.override, scope: /** @type {ConfigLayerScope} */ ("override") }]
-			: []),
-	];
+	const layerCandidates = [{ path: paths.global, scope: "global" }];
+	if (includeProjectConfig) {
+		layerCandidates.push({ path: paths.project, scope: "project" });
+	}
+	if (paths.override !== undefined && paths.override.length > 0) {
+		layerCandidates.push({ path: paths.override, scope: "override" });
+	}
 	/** @type {ConfigLayer[]} */
 	const layers = [];
 	/** @type {AgentBrowserConfig} */
@@ -653,13 +360,8 @@ export function resolveEnvInterpolations(rawValue, env) {
 			continue;
 		}
 		const next = rawValue[index + 1];
-		if (next === "$") {
-			output += "$";
-			index += 1;
-			continue;
-		}
-		if (next === "!") {
-			output += "!";
+		if (next === "$" || next === "!") {
+			output += next;
 			index += 1;
 			continue;
 		}
@@ -667,7 +369,7 @@ export function resolveEnvInterpolations(rawValue, env) {
 		if (next === "{") {
 			const end = rawValue.indexOf("}", index + 2);
 			if (end === -1) {
-				return undefined;
+				return;
 			}
 			name = rawValue.slice(index + 2, end);
 			index = end;
@@ -677,15 +379,15 @@ export function resolveEnvInterpolations(rawValue, env) {
 				output += "$";
 				continue;
 			}
-			name = match[1] ?? "";
+			name = match[1];
 			index += name.length;
 		}
-		if (!name) {
-			return undefined;
+		if (name.length === 0) {
+			return;
 		}
 		const value = env[name];
 		if (value === undefined) {
-			return undefined;
+			return;
 		}
 		output += value;
 	}
@@ -698,7 +400,7 @@ export function resolveEnvInterpolations(rawValue, env) {
  * @returns {WebSearchProvider[]}
  */
 export function getWebSearchProviderOrder(state, requestedProvider) {
-	if (requestedProvider && requestedProvider !== "auto") {
+	if (requestedProvider !== undefined && requestedProvider !== "auto") {
 		return [requestedProvider];
 	}
 	const preferred = state.webSearchPreferredProvider;
@@ -776,7 +478,7 @@ export function formatBrowserProfileStatus(state) {
 /** @param {AgentBrowserConfigState} state */
 export function formatBrowserExecutableStatus(state) {
 	const executablePath = state.browserExecutablePath;
-	if (!executablePath) {
+	if (executablePath === undefined || executablePath.length === 0) {
 		return "not configured";
 	}
 	const scope = state.browserExecutablePathScope ?? "unknown";
@@ -792,6 +494,8 @@ export function summarizeConfigFiles(state, exists = existsSync) {
 	return [
 		["global", state.paths.global],
 		["project", state.paths.project],
-		...(state.paths.override ? [["override", state.paths.override]] : []),
+		...(state.paths.override !== undefined && state.paths.override.length > 0
+			? [["override", state.paths.override]]
+			: []),
 	].map(([scope, path]) => ({ scope, path, exists: exists(path) }));
 }

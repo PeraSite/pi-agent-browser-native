@@ -1,3 +1,4 @@
+import { readArray, readRecord } from "./helpers/assertions.js";
 import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -33,7 +34,7 @@ process.stdout.write(JSON.stringify({success:true,data}));`,
 			);
 			await withPatchedEnv(
 				{
-					PATH: `${root}${delimiter}${process.env.PATH}`,
+					PATH: `${root}${delimiter}${process.env.PATH ?? ""}`,
 					AGENT_BROWSER_SESSION: undefined,
 					AGENT_BROWSER_NAMESPACE: undefined,
 				},
@@ -78,16 +79,21 @@ process.stdout.write(JSON.stringify({success:true,data}));`,
 						outputPath: exported,
 					});
 					assert.equal(capture.isError, false, JSON.stringify(capture));
-					const nativeData = JSON.parse(await readFile(exported, "utf8"));
+					const nativeData = readRecord(JSON.parse(await readFile(exported, "utf8")));
 					assert.equal(
-						Object.keys(nativeData.refs).length,
+						Object.keys(readRecord(nativeData.refs)).length,
 						34683,
 						"explicit structured snapshot exports retain every native ref",
 					);
-					assert.deepEqual(nativeData.refs.e34683, { role: "button", name: "Go" });
-					const code = harness.getTool("agent_browser_code")!;
+					assert.deepEqual(readRecord(nativeData.refs).e34683, { role: "button", name: "Go" });
+					const code =
+						// Missing code-tool registration fails immediately; journal-growth assertions cannot be skipped.
+						// oxlint-disable-next-line node-test/no-conditional-assertion
+						harness.getTool("agent_browser_code") ?? assert.fail("code tool must be registered");
 					let result;
 					for (let cell = 0; cell < 2; cell++) {
+						// The second cell must follow the first in the same journal to measure repeated-read growth.
+						// oxlint-disable-next-line no-await-in-loop
 						result = await executeRegisteredTool(code, harness.ctx, {
 							session: "growth",
 							code: 'let last; for(let i=0;i<15;i++) last=await browser({args:["get","title"]}); emit(last.data);',
@@ -111,27 +117,22 @@ process.stdout.write(JSON.stringify({success:true,data}));`,
 						bytes < 4 * 1024 * 1024,
 						`One capture plus small events must stay below 4 MiB; ordinary reads persisted ${bytes} bytes.`,
 					);
-					const records = transitions.map(
-						(entry) =>
-							entry.data as {
-								event?: { phase: string; pages?: Array<{ refs: { kind: string } }> };
-								snapshot?: { refs: object };
-							},
-					);
+					const records = transitions.map((entry) => readRecord(entry.data));
 					assert.equal(
-						records.filter((record) => record.snapshot).length,
+						records.filter((record) => record.snapshot !== undefined).length,
 						1,
 						"the complete ref payload is defined once",
 					);
 					assert.equal(
 						records.filter((record) =>
-							record.event?.pages?.some((page) => page.refs.kind === "reuse"),
+							readArray(readRecord(record.event).pages ?? [])
+								.map(readRecord)
+								.some((page) => readRecord(page.refs).kind === "reuse"),
 						).length,
 						30,
 					);
 					assert.equal(
-						(result.details?.artifactManifest as { entries?: unknown[] } | undefined)?.entries
-							?.length ?? 0,
+						readArray(readRecord(result.details.artifactManifest ?? {}).entries ?? []).length,
 						0,
 						"an invocation does not repeat unrelated receipts",
 					);

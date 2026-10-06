@@ -13,6 +13,7 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { buildToolPresentation } from "../extensions/agent-browser/lib/results/presentation.js";
+import { readRecord, readString } from "./helpers/assertions.js";
 test("buildToolPresentation rejects a pre-existing artifact that the command did not update", async () => {
 	const cwd = await mkdtemp(join(tmpdir(), "piab-stale-artifact-"));
 	const artifactPath = join(cwd, "screenshot.png");
@@ -30,7 +31,7 @@ test("buildToolPresentation rejects a pre-existing artifact that the command did
 		assert.equal(presentation.artifacts?.[0]?.status, "stale");
 		assert.equal(presentation.artifactVerification?.artifacts[0]?.state, "unverified");
 		assert.match(
-			(presentation.content[0] as { text: string }).text,
+			readString(readRecord(presentation.content[0]).text),
 			/outside the current command window/,
 		);
 	} finally {
@@ -121,12 +122,12 @@ test("buildToolPresentation formats snapshot output for the model", async () => 
 		},
 	});
 
-	assert.equal(presentation.content[0]?.type, "text");
+	assert.equal(presentation.content[0].type, "text");
 	assert.match(
-		(presentation.content[0] as { text: string }).text,
+		readString(readRecord(presentation.content[0]).text),
 		/Origin: https:\/\/example.com\//,
 	);
-	assert.match((presentation.content[0] as { text: string }).text, /Refs: 2/);
+	assert.match(readString(readRecord(presentation.content[0]).text), /Refs: 2/);
 	assert.match(presentation.summary, /Snapshot: 2 refs/);
 });
 
@@ -147,9 +148,9 @@ test("buildToolPresentation renders agent-readable content before read metadata"
 		},
 	});
 
-	assert.equal(presentation.content[0]?.type, "text");
+	assert.equal(presentation.content[0].type, "text");
 	assert.equal(
-		(presentation.content[0] as { text: string }).text,
+		readString(readRecord(presentation.content[0]).text),
 		"# Docs\n\nUse the current API.",
 	);
 	assert.equal(presentation.summary, "Read: https://example.com/docs.md");
@@ -200,10 +201,10 @@ test("buildToolPresentation enriches open results with a compact page-change sum
 	});
 
 	assert.equal(presentation.pageChangeSummary?.changeType, "navigation");
-	assert.equal(presentation.pageChangeSummary?.observed, true);
-	assert.equal(presentation.pageChangeSummary?.title, "Example Domain");
-	assert.equal(presentation.pageChangeSummary?.url, "https://example.com/");
-	assert.deepEqual(presentation.pageChangeSummary?.nextActionIds, ["inspect-opened-page"]);
+	assert.equal(presentation.pageChangeSummary.observed, true);
+	assert.equal(presentation.pageChangeSummary.title, "Example Domain");
+	assert.equal(presentation.pageChangeSummary.url, "https://example.com/");
+	assert.deepEqual(presentation.pageChangeSummary.nextActionIds, ["inspect-opened-page"]);
 });
 
 test("navigation content exposes native WebMCP availability and retains its data", async () => {
@@ -212,72 +213,81 @@ test("navigation content exposes native WebMCP availability and retains its data
 		url: "https://example.com/docs",
 		webmcp: { experimental: true, available: true, toolCount: 2 },
 	};
-	for (const batch of [false, true]) {
-		const presentation = await buildToolPresentation({
-			commandInfo: { command: batch ? "batch" : "open" },
-			cwd: process.cwd(),
-			envelope: {
-				success: true,
-				data: batch ? [{ command: ["open", data.url], success: true, result: data }] : data,
-			},
-		});
-		const text = presentation.content
-			.filter((item) => item.type === "text")
-			.map((item) => item.text)
-			.join("\n");
-		assert.match(text, /WebMCP tools are available.*experimental/);
-		assert.match(text, /webmcp list/);
-		assert.deepEqual(batch ? presentation.batchSteps?.[0]?.data : presentation.data, data);
-	}
+	await Promise.all(
+		[false, true].map(async (batch) => {
+			const presentation = await buildToolPresentation({
+				commandInfo: { command: batch ? "batch" : "open" },
+				cwd: process.cwd(),
+				envelope: {
+					success: true,
+					data: batch ? [{ command: ["open", data.url], success: true, result: data }] : data,
+				},
+			});
+			const text = presentation.content
+				.filter((item) => item.type === "text")
+				.map((item) => item.text)
+				.join("\n");
+			assert.match(text, /WebMCP tools are available.*experimental/);
+			assert.match(text, /webmcp list/);
+			assert.deepEqual(batch ? presentation.batchSteps?.[0]?.data : presentation.data, data);
+		}),
+	);
 });
 
 test("navigation content keeps absent or unavailable WebMCP hints quiet", async () => {
-	for (const webmcp of [
-		undefined,
-		{ available: false, toolCount: 2 },
-		{ available: true, toolCount: 0 },
-		{ available: true, toolCount: -1 },
-		{ available: true, toolCount: 0.5 },
-		{ available: true, toolCount: "2" },
-	]) {
-		const presentation = await buildToolPresentation({
-			commandInfo: { command: "open" },
-			cwd: process.cwd(),
-			envelope: { success: true, data: { title: "Docs", url: "https://example.com/docs", webmcp } },
-		});
-		assert.equal(
-			(presentation.content[0] as { text: string }).text,
-			"Docs\nhttps://example.com/docs",
-		);
-	}
+	await Promise.all(
+		[
+			undefined,
+			{ available: false, toolCount: 2 },
+			{ available: true, toolCount: 0 },
+			{ available: true, toolCount: -1 },
+			{ available: true, toolCount: 0.5 },
+			{ available: true, toolCount: "2" },
+		].map(async (webmcp) => {
+			const presentation = await buildToolPresentation({
+				commandInfo: { command: "open" },
+				cwd: process.cwd(),
+				envelope: {
+					success: true,
+					data: { title: "Docs", url: "https://example.com/docs", webmcp },
+				},
+			});
+			assert.equal(
+				readString(readRecord(presentation.content[0]).text),
+				"Docs\nhttps://example.com/docs",
+			);
+		}),
+	);
 });
 
 test("buildToolPresentation treats upstream aliases as page-changing commands", async () => {
-	for (const command of ["key", "keydown", "keyboard", "keyup", "scrollinto", "tap"] as const) {
-		const presentation = await buildToolPresentation({
-			commandInfo: { command },
-			cwd: process.cwd(),
-			envelope: { success: true, data: { ok: true } },
-		});
+	await Promise.all(
+		(["key", "keydown", "keyboard", "keyup", "scrollinto", "tap"] as const).map(async (command) => {
+			const presentation = await buildToolPresentation({
+				commandInfo: { command },
+				cwd: process.cwd(),
+				envelope: { success: true, data: { ok: true } },
+			});
 
-		assert.equal(presentation.nextActions?.[0]?.id, "inspect-after-mutation", command);
-		assert.deepEqual(
-			presentation.pageChangeSummary,
-			{
-				changeType: "mutation",
+			assert.equal(presentation.nextActions?.[0]?.id, "inspect-after-mutation", command);
+			assert.deepEqual(
+				presentation.pageChangeSummary,
+				{
+					changeType: "mutation",
+					command,
+					nextActionIds: ["inspect-after-mutation"],
+					observed: false,
+					summary: `${command} → action dispatched → application change unverified`,
+				},
 				command,
-				nextActionIds: ["inspect-after-mutation"],
-				observed: false,
-				summary: `${command} → action dispatched → application change unverified`,
-			},
-			command,
-		);
-		assert.match(
-			(presentation.content[0] as { text: string }).text,
-			/Action dispatched; application change unverified/,
-			command,
-		);
-	}
+			);
+			assert.match(
+				readString(readRecord(presentation.content[0]).text),
+				/Action dispatched; application change unverified/,
+				command,
+			);
+		}),
+	);
 });
 
 test("buildToolPresentation enriches click results with a current-page navigation summary", async () => {
@@ -298,15 +308,15 @@ test("buildToolPresentation enriches click results with a current-page navigatio
 		},
 	});
 
-	assert.equal(presentation.content[0]?.type, "text");
-	assert.match((presentation.content[0] as { text: string }).text, /Clicked: true/);
+	assert.equal(presentation.content[0].type, "text");
+	assert.match(readString(readRecord(presentation.content[0]).text), /Clicked: true/);
 	assert.match(
-		(presentation.content[0] as { text: string }).text,
+		readString(readRecord(presentation.content[0]).text),
 		/Href: https:\/\/example.com\/docs/,
 	);
-	assert.match((presentation.content[0] as { text: string }).text, /Current page:/);
-	assert.match((presentation.content[0] as { text: string }).text, /Destination Docs/);
-	assert.match((presentation.content[0] as { text: string }).text, /https:\/\/example.com\/docs/);
+	assert.match(readString(readRecord(presentation.content[0]).text), /Current page:/);
+	assert.match(readString(readRecord(presentation.content[0]).text), /Destination Docs/);
+	assert.match(readString(readRecord(presentation.content[0]).text), /https:\/\/example.com\/docs/);
 	assert.match(presentation.summary, /click → Destination Docs/);
 	assert.deepEqual(presentation.nextActions?.[0]?.params?.args, ["snapshot", "-i"]);
 	assert.deepEqual(presentation.pageChangeSummary, {
@@ -321,7 +331,7 @@ test("buildToolPresentation enriches click results with a current-page navigatio
 });
 
 for (const command of ["click", "snapshot"]) {
-	for (const success of [false, true])
+	for (const success of [false, true]) {
 		test(`buildToolPresentation renders pending ${command} confirmations with approve and deny recovery calls (success=${success})`, async () => {
 			const presentation = await buildToolPresentation({
 				commandInfo: { command, subcommand: command === "snapshot" ? "-i" : "@e7" },
@@ -336,16 +346,19 @@ for (const command of ["click", "snapshot"]) {
 				},
 			});
 
-			assert.equal(presentation.content[0]?.type, "text");
-			const text = (presentation.content[0] as { text: string }).text;
-			assert.match(text, /Confirmation required\./);
-			assert.match(text, /Pending confirmation id: c_8f3a1234/);
-			assert.match(text, command === "snapshot" ? /Action: snapshot/ : /Action: click @e7/);
-			assert.doesNotMatch(text, /no interactive elements|Refs: 0/);
+			assert.equal(presentation.content[0].type, "text");
+			const text = readString(readRecord(presentation.content[0]).text);
+			assert.match(readString(text), /Confirmation required\./);
+			assert.match(readString(text), /Pending confirmation id: c_8f3a1234/);
+			assert.match(
+				readString(text),
+				command === "snapshot" ? /Action: snapshot/ : /Action: click @e7/,
+			);
+			assert.doesNotMatch(readString(text), /no interactive elements|Refs: 0/);
 			assert.equal(presentation.resultCategory, "failure");
 			assert.equal(presentation.failureCategory, "confirmation-required");
-			assert.match(text, /\{ "args": \["confirm", "c_8f3a1234"\] \}/);
-			assert.match(text, /\{ "args": \["deny", "c_8f3a1234"\] \}/);
+			assert.match(readString(text), /\{ "args": \["confirm", "c_8f3a1234"\] \}/);
+			assert.match(readString(text), /\{ "args": \["deny", "c_8f3a1234"\] \}/);
 			assert.deepEqual(
 				presentation.nextActions?.map((action) => action.params?.args),
 				[
@@ -355,6 +368,7 @@ for (const command of ["click", "snapshot"]) {
 			);
 			assert.equal(presentation.summary, "Confirmation required: c_8f3a1234");
 		});
+	}
 }
 
 for (const command of ["click", "confirm", "snapshot"]) {
@@ -390,13 +404,13 @@ for (const command of ["click", "confirm", "snapshot"]) {
 			},
 		});
 
-		assert.equal(presentation.content[0]?.type, "text");
-		const text = (presentation.content[0] as { text: string }).text;
-		assert.match(text, /Pending confirmation id: c_nested/);
-		assert.doesNotMatch(text, /no interactive elements|Refs: 0/);
-		assert.match(text, /\["confirm", "c_nested"\]/);
-		assert.match(text, /\["deny", "c_nested"\]/);
-		assert.doesNotMatch(text, /user:pass|raw-token|token=secret/);
+		assert.equal(presentation.content[0].type, "text");
+		const text = readString(readRecord(presentation.content[0]).text);
+		assert.match(readString(text), /Pending confirmation id: c_nested/);
+		assert.doesNotMatch(readString(text), /no interactive elements|Refs: 0/);
+		assert.match(readString(text), /\["confirm", "c_nested"\]/);
+		assert.match(readString(text), /\["deny", "c_nested"\]/);
+		assert.doesNotMatch(readString(text), /user:pass|raw-token|token=secret/);
 		assert.equal(presentation.summary, "Confirmation required: c_nested");
 	});
 }
@@ -426,10 +440,10 @@ test("buildToolPresentation does not classify confirmation-like records without 
 		},
 	});
 
-	assert.equal(presentation.content[0]?.type, "text");
-	const text = (presentation.content[0] as { text: string }).text;
-	assert.doesNotMatch(text, /Pending confirmation id:/);
-	assert.match(text, /confirmation id omitted by upstream/);
+	assert.equal(presentation.content[0].type, "text");
+	const text = readString(readRecord(presentation.content[0]).text);
+	assert.doesNotMatch(readString(text), /Pending confirmation id:/);
+	assert.match(readString(text), /confirmation id omitted by upstream/);
 	assert.notEqual(presentation.summary, "Confirmation required: undefined");
 });
 
@@ -463,24 +477,29 @@ test("buildToolPresentation consistently redacts authentication query values in 
 			data.sessions[3],
 		],
 	};
-	for (const batch of [false, true]) {
-		const presentation = await buildToolPresentation({
-			commandInfo: batch ? { command: "batch" } : { command: "session", subcommand: "list" },
-			cwd: process.cwd(),
-			envelope: {
-				success: true,
-				data: batch ? [{ command: ["session", "list"], success: true, result: data }] : data,
-			},
-		});
-		assert.deepEqual(batch ? presentation.batchSteps?.[0]?.data : presentation.data, expectedData);
-		assert.doesNotMatch(JSON.stringify(presentation), /C123|S123|N123|A456|S456|N456/);
-		assert.ok(
-			presentationText(presentation).includes("Bearer authentication uses an access token."),
-		);
-		assert.ok(
-			presentationText(presentation).includes("https://EXAMPLE.invalid?state=open&nonce=7"),
-		);
-	}
+	await Promise.all(
+		[false, true].map(async (batch) => {
+			const presentation = await buildToolPresentation({
+				commandInfo: batch ? { command: "batch" } : { command: "session", subcommand: "list" },
+				cwd: process.cwd(),
+				envelope: {
+					success: true,
+					data: batch ? [{ command: ["session", "list"], success: true, result: data }] : data,
+				},
+			});
+			assert.deepEqual(
+				batch ? presentation.batchSteps?.[0]?.data : presentation.data,
+				expectedData,
+			);
+			assert.doesNotMatch(JSON.stringify(presentation), /C123|S123|N123|A456|S456|N456/);
+			assert.ok(
+				presentationText(presentation).includes("Bearer authentication uses an access token."),
+			);
+			assert.ok(
+				presentationText(presentation).includes("https://EXAMPLE.invalid?state=open&nonce=7"),
+			);
+		}),
+	);
 });
 
 test("buildToolPresentation redacts sensitive generic string summaries", async () => {
@@ -517,11 +536,11 @@ test("buildToolPresentation redacts structured secrets in generic fallback text"
 		},
 	});
 
-	assert.equal(presentation.content[0]?.type, "text");
-	const text = (presentation.content[0] as { text: string }).text;
-	assert.match(text, /\[REDACTED\]/);
+	assert.equal(presentation.content[0].type, "text");
+	const text = readString(readRecord(presentation.content[0]).text);
+	assert.match(readString(text), /\[REDACTED\]/);
 	assert.doesNotMatch(
-		text,
+		readString(text),
 		/secret-cookie|raw-token|raw-cookie|secret-token|secret-key|details-private-secret/,
 	);
 	assert.doesNotMatch(
@@ -547,10 +566,10 @@ test("buildToolPresentation redacts console and page error diagnostics", async (
 			},
 		},
 	});
-	const consoleText = (consolePresentation.content[0] as { text: string }).text;
-	assert.doesNotMatch(consoleText, /console-secret|json-cookie/);
-	assert.match(consoleText, /\[REDACTED\]/);
-	assert.match(consoleText, /other/);
+	const consoleText = readString(readRecord(consolePresentation.content[0]).text);
+	assert.doesNotMatch(readString(consoleText), /console-secret|json-cookie/);
+	assert.match(readString(consoleText), /\[REDACTED\]/);
+	assert.match(readString(consoleText), /other/);
 
 	const errorsPresentation = await buildToolPresentation({
 		commandInfo: { command: "errors" },
@@ -564,12 +583,14 @@ test("buildToolPresentation redacts console and page error diagnostics", async (
 			},
 		},
 	});
-	const errorsText = (errorsPresentation.content[0] as { text: string }).text;
-	assert.doesNotMatch(errorsText, /error-secret|url-secret/);
-	assert.match(errorsText, /\[REDACTED\]/);
+	const errorsText = readString(readRecord(errorsPresentation.content[0]).text);
+	assert.doesNotMatch(readString(errorsText), /error-secret|url-secret/);
+	assert.match(readString(errorsText), /\[REDACTED\]/);
 });
 
-function presentationText(presentation: Awaited<ReturnType<typeof buildToolPresentation>>): string {
+function presentationText(presentation: {
+	readonly content: readonly { readonly type: string; readonly text?: string }[];
+}): string {
 	return presentation.content.map((entry) => ("text" in entry ? entry.text : "")).join("\n");
 }
 
@@ -641,9 +662,11 @@ test("buildToolPresentation renders structured and empty eval results instead of
 		"false\n\nOrigin: https://shop.example/",
 	);
 
-	for (const result of [[1, 2, 3], {}, [], null, ""]) {
-		assert.doesNotMatch(presentationText(await evalPresentation(result)), /lifecycle/);
-	}
+	await Promise.all(
+		[[1, 2, 3], {}, [], null, ""].map(async (result) => {
+			assert.doesNotMatch(presentationText(await evalPresentation(result)), /lifecycle/);
+		}),
+	);
 });
 
 test("buildToolPresentation keeps upstream lifecycle bookkeeping out of model-facing content", async () => {

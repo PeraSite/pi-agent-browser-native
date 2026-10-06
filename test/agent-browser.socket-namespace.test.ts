@@ -26,7 +26,8 @@ test(
 	},
 	async (t) => {
 		assert.equal(process.platform, "linux");
-		const uid = process.getuid!();
+		assert.ok(process.getuid);
+		const uid = process.getuid();
 		const root = await lstat("/");
 		const temporary = await lstat("/tmp");
 		assert.equal(root.uid, Number((await readFile("/proc/sys/kernel/overflowuid", "utf8")).trim()));
@@ -38,21 +39,30 @@ test(
 		assert.equal(process.env.PI_AGENT_BROWSER_SOCKET_DIR, undefined);
 		t.diagnostic(JSON.stringify({ rootUid: root.uid, rootMode: "755", uid, tmpMode: "700" }));
 
-		const socketDir = getAgentBrowserSocketDir()!;
+		const socketDir = getAgentBrowserSocketDir();
+		assert.equal(typeof socketDir, "string");
+		assert.ok(socketDir !== undefined && socketDir !== "");
 		await mkdir(socketDir, { mode: 0o700 });
 		t.after(() => rm(socketDir, { recursive: true, force: true }));
 		const fixture = await mkdtemp("/tmp/root-anchor-");
 		t.after(() => rm(fixture, { recursive: true, force: true }));
 		const socketPath = join(socketDir, "native.sock");
-		const server = createServer((client) => client.end("native-unix-socket-ok"));
+		const server = createServer((client) => {
+			client.end("native-unix-socket-ok");
+		});
 		try {
 			server.listen(socketPath);
 			await once(server, "listening");
 			const client = createConnection(socketPath);
-			client.setTimeout(5_000, () => client.destroy(new Error("Unix socket exchange timed out")));
+			client.setTimeout(5_000, () => {
+				client.destroy(new Error("Unix socket exchange timed out"));
+			});
 			try {
 				const chunks: Buffer[] = [];
 				for await (const chunk of client) {
+					// Every received chunk is checked; the final exact nonempty socket payload prevents a zero-chunk pass.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
+					assert.ok(Buffer.isBuffer(chunk));
 					chunks.push(Buffer.from(chunk));
 				}
 				assert.equal(Buffer.concat(chunks).toString(), "native-unix-socket-ok");

@@ -336,7 +336,7 @@ Open a page and inspect it (first-call recipe: open → snapshot -i → interact
 
 Chromium launch switches belong in the value of `--args`, for example `{ "args": ["--args", "--no-sandbox", "open", "https://example.com"], "sessionMode": "fresh" }` when that switch is needed. A bare `--no-sandbox` in the command slot is an unknown command; in an `open` / `goto` / `navigate` option position, upstream ignores it. The wrapper diagnoses those forms without rejecting literal text, select values or paths in other commands. For batches, put `--args` in top-level `args` before `batch`, not inside a row.
 
-Local Chrome startup uses the stock binary's `--args --no-startup-window` capability to suppress Chrome's extra startup window. Headless remains the default. Caller launch arguments keep native CLI → environment → config precedence and follow this default; browsers started before this change with custom arguments may restart once when their native launch configuration changes. Ordinary follow-ups do not resend bootstrap settings. CDP, providers, Electron, and Lightpanda remain native-owned; no tabs are deleted or profiles edited by this behavior.
+Local Chrome startup uses stock `--args --no-startup-window` to suppress Chrome's extra startup window when native environment/config does not already own local launch defaults. In that case, caller CLI arguments follow the startup default unchanged. With native environment/config launch defaults, the wrapper injects no Chrome startup arguments; include `--no-startup-window` in your native `args` when a single headed window is wanted. Caller settings retain native CLI → environment → config precedence. Headless remains the default, ordinary follow-ups do not resend wrapper bootstrap settings, and changing native launch settings can restart a browser. CDP, providers, Electron, and Lightpanda remain native-owned; no tabs are deleted or profiles edited.
 
 ### Opt-in Lightpanda
 
@@ -831,24 +831,26 @@ These calls return plain text and stay stateless: the extension does not inject 
 
 ## Project map
 
-| Path                                            | Purpose                                                                                                                              |
-| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| `extensions/agent-browser/index.ts`             | TypeScript source for the Pi extension entrypoint; packed installs load compiled `dist/extensions/agent-browser/index.js`            |
-| `extensions/agent-browser/lib/runtime.ts`       | Argv parsing, session planning, redaction, and execution-plan helpers (pure planning; subprocess wiring lives beside the entrypoint) |
-| `extensions/agent-browser/lib/results/`         | Model-facing result rendering and error guidance                                                                                     |
-| `extensions/agent-browser/lib/playbook.ts`      | Canonical generated agent/browser guidance                                                                                           |
-| `scripts/agent-browser-target.mjs`              | Canonical recommended target and minimum supported stable version shared by runtime and build-time checks                            |
-| `scripts/agent-browser-capability-baseline.mjs` | Help samples and doc/token inventory for drift checks; imports the canonical target version                                          |
-| `scripts/check-command-reference-baseline.mjs`  | Regenerates or verifies HTML-bounded baseline blocks in `docs/COMMAND_REFERENCE.md` (via `npm run docs -- command-reference …`)      |
-| `docs/COMMAND_REFERENCE.md`                     | Repo-readable native command reference                                                                                               |
-| `docs/TOOL_CONTRACT.md`                         | Tool parameters, result shape, and behavior contract                                                                                 |
-| `docs/ELECTRON.md`                              | Dedicated public guide for Electron desktop-app support                                                                              |
-| `docs/ARCHITECTURE.md`                          | Design decisions and implementation structure                                                                                        |
-| `docs/REQUIREMENTS.md`                          | Product requirements and constraints                                                                                                 |
-| `docs/RELEASE.md`                               | Release, package, and lifecycle verification workflow                                                                                |
-| `docs/platform-smoke.md`                        | Crabbox macOS, Ubuntu, and native Windows release gate                                                                               |
-| `docs/SUPPORT_MATRIX.md`                        | Current upstream support audit and release-readiness matrix                                                                          |
-| `test/`                                         | Wrapper, runtime, presentation, lifecycle, and package tests                                                                         |
+| Path                                            | Purpose                                                                                                                         |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `extensions/agent-browser/index.ts`             | Native Pi factory wiring; packed installs load compiled `dist/extensions/agent-browser/index.js`                                |
+| `extensions/agent-browser/lib/runtime.ts`       | Stable public exports for pure planning, session identity/replay, timeout, and redaction helpers                                |
+| `extensions/agent-browser/lib/orchestration/`   | Direct/code admission, lifecycle, browser preparation/output, and Electron host ownership                                       |
+| `extensions/agent-browser/lib/results/`         | Model-facing result rendering and error guidance                                                                                |
+| `extensions/agent-browser/lib/playbook.ts`      | Canonical generated agent/browser guidance                                                                                      |
+| `scripts/agent-browser-target.mjs`              | Canonical recommended target and minimum supported stable version shared by runtime and build-time checks                       |
+| `scripts/agent-browser-capability-baseline.mjs` | Help samples and doc/token inventory for drift checks; imports the canonical target version                                     |
+| `scripts/check-command-reference-baseline.mjs`  | Regenerates or verifies HTML-bounded baseline blocks in `docs/COMMAND_REFERENCE.md` (via `npm run docs -- command-reference …`) |
+| `docs/COMMAND_REFERENCE.md`                     | Repo-readable native command reference                                                                                          |
+| `docs/TOOL_CONTRACT.md`                         | Tool parameters, result shape, and behavior contract                                                                            |
+| `docs/ELECTRON.md`                              | Dedicated public guide for Electron desktop-app support                                                                         |
+| `docs/ARCHITECTURE.md`                          | Design decisions and implementation structure                                                                                   |
+| `docs/CODE_QUALITY.md`                          | Strict lint/formatting policy, checker corrections, scope, and semantic exceptions                                              |
+| `docs/REQUIREMENTS.md`                          | Product requirements and constraints                                                                                            |
+| `docs/RELEASE.md`                               | Release, package, and lifecycle verification workflow                                                                           |
+| `docs/platform-smoke.md`                        | Crabbox macOS, Ubuntu, and native Windows release gate                                                                          |
+| `docs/SUPPORT_MATRIX.md`                        | Current upstream support audit and release-readiness matrix                                                                     |
+| `test/`                                         | Wrapper, runtime, presentation, lifecycle, and package tests                                                                    |
 
 ## More docs
 
@@ -857,6 +859,7 @@ These calls return plain text and stay stateless: the extension does not inject 
 - [`docs/TOOL_CONTRACT.md`](docs/TOOL_CONTRACT.md) — exact tool contract
 - [`docs/ELECTRON.md`](docs/ELECTRON.md) — Electron desktop-app guide
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — how the wrapper is designed
+- [`docs/CODE_QUALITY.md`](docs/CODE_QUALITY.md) — strict quality commands, coverage, and verified exceptions
 - [`docs/REQUIREMENTS.md`](docs/REQUIREMENTS.md) — product constraints and non-goals
 - [`docs/RELEASE.md`](docs/RELEASE.md) — maintainer release workflow
 - [`docs/SUPPORT_MATRIX.md`](docs/SUPPORT_MATRIX.md) — current upstream support matrix and closure evidence

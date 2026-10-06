@@ -13,15 +13,25 @@ import { isRecord } from "../parsing.js";
 import { appendBrowserTransition, getBrowserRecord } from "../browser-transcript.js";
 import { redactSensitiveText } from "../runtime.js";
 import type {
-	AgentBrowserObservation,
-	ArtifactVerificationSummary,
-	FileArtifactMetadata,
+	ProjectedAgentBrowserObservation,
+	AgentBrowserFailureCategory,
 	ImageObservation,
 } from "../results/contracts.js";
 import { attachInlineImage } from "../results/presentation/artifacts.js";
 import { projectAgentBrowserObservation } from "../results/presentation/content.js";
 import { redactPresentationData } from "../results/presentation/diagnostics.js";
 import type { AgentBrowserToolResult } from "./browser-run/types.js";
+import {
+	collectCodeArtifactReceipts,
+	collectCodeFileArtifacts,
+	type CodeArtifactReceipt,
+	type CodeFileArtifact,
+} from "./code-artifact-observation.js";
+import { parseCodeImageObservation } from "./code-image-observation.js";
+
+interface BrowserCodeObservation extends ProjectedAgentBrowserObservation {
+	readonly imageObservations?: readonly ImageObservation[];
+}
 
 type ScriptSessionCleanupState = "active" | "closed" | "failed";
 
@@ -35,41 +45,61 @@ export interface ScriptSessionLease {
 
 // The offline converter retains outstanding isolated-session cleanup facts in canonical events.
 export function getScriptSessionLeasesFromBranch(
-	branch: unknown[],
+	branch: readonly unknown[],
 	ownerSessionId?: string,
 ): Map<string, ScriptSessionLease> {
 	const leases = new Map<string, ScriptSessionLease>();
 	for (const entry of branch) {
-		const lease = getBrowserRecord(entry)?.event.state.scriptLease;
-		if (!isRecord(lease)) {
-			continue;
+		const lease = parseScriptLease(
+			getBrowserRecord(entry)?.event.state.scriptLease,
+			ownerSessionId,
+		);
+		if (lease !== undefined) {
+			leases.set(lease.sessionName, lease);
 		}
-		if (ownerSessionId !== undefined && lease.ownerSessionId !== ownerSessionId) {
-			continue;
-		}
-		const { cleanup, closeCommandArgs, launchAttempted, sessionName } = lease;
-		if (!isAgentBrowserScriptSessionName(sessionName)) {
-			continue;
-		}
-		const expected = createAgentBrowserScriptCloseArgs(sessionName);
-		if (
-			(cleanup !== "active" && cleanup !== "closed" && cleanup !== "failed") ||
-			launchAttempted !== true ||
-			!Array.isArray(closeCommandArgs) ||
-			closeCommandArgs.length !== expected.length ||
-			!closeCommandArgs.every((token, index) => token === expected[index])
-		) {
-			continue;
-		}
-		leases.set(sessionName, {
-			cleanup,
-			closeCommandArgs: expected,
-			launchAttempted: true,
-			sessionName,
-			ownerSessionId: typeof lease.ownerSessionId === "string" ? lease.ownerSessionId : undefined,
-		});
 	}
 	return leases;
+}
+
+function parseScriptLease(
+	value: unknown,
+	ownerSessionId: string | undefined,
+): ScriptSessionLease | undefined {
+	if (!isRecord(value)) {
+		return undefined;
+	}
+	if (ownerSessionId !== undefined && value.ownerSessionId !== ownerSessionId) {
+		return undefined;
+	}
+	const { closeCommandArgs, launchAttempted, sessionName } = value;
+	const cleanup = (["active", "closed", "failed"] as const).find(
+		(state) => state === value.cleanup,
+	);
+	if (!isAgentBrowserScriptSessionName(sessionName)) {
+		return undefined;
+	}
+	if (cleanup === undefined) {
+		return undefined;
+	}
+	const expected = createAgentBrowserScriptCloseArgs(sessionName);
+	if (launchAttempted !== true || !matchesCloseCommand(closeCommandArgs, expected)) {
+		return undefined;
+	}
+	return {
+		cleanup,
+		closeCommandArgs: expected,
+		launchAttempted: true,
+		sessionName,
+		ownerSessionId: typeof value.ownerSessionId === "string" ? value.ownerSessionId : undefined,
+	};
+}
+
+function matchesCloseCommand(value: unknown, expected: readonly string[]): boolean {
+	return (
+		Array.isArray(value) &&
+		value.length === expected.length &&
+		value.every((token, index) => token === expected[index])
+	);
 }
 
 export function appendScriptSessionLease(
@@ -99,143 +129,189 @@ export function appendScriptSessionLease(
 	});
 }
 
-export function createBrowserCodeOutput() {
-	const images = new Map<string, { observation: ImageObservation; size: number; mtime: number }>();
-	const selected = new Map<string, AgentBrowserToolResult["content"]>();
-	const receipts = new Map<string, ArtifactVerificationSummary["artifacts"][number]>();
-	const fileArtifacts = new Map<string, FileArtifactMetadata>();
-	let selectedBytes = 0;
+class BrowserCodeOutput {
+	private readonly images = new Map<
+		string,
+		{ observation: ImageObservation; size: number; mtime: number }
+	>();
+	private readonly selected = new Map<
+		string,
+		{ content: AgentBrowserToolResult["content"]; observation: ImageObservation }
+	>();
+	private readonly receipts = new Map<string, CodeArtifactReceipt>();
+	private readonly fileArtifacts = new Map<string, CodeFileArtifact>();
+	private selectedBytes = 0;
 
-	return {
-		async observe(result: AgentBrowserToolResult): Promise<AgentBrowserObservation> {
-			const details = isRecord(result.details) ? result.details : {};
-			const observation = projectAgentBrowserObservation(details, result.isError !== true);
-			for (const entry of observation.artifactVerification?.artifacts ?? []) {
-				receipts.set(entry.absolutePath ?? entry.path, entry);
-			}
-			for (const artifact of observation.artifacts ?? []) {
-				fileArtifacts.set(artifact.absolutePath, artifact);
-			}
-			if (observation.imageObservations) {
-				observation.imageObservations = await Promise.all(
-					observation.imageObservations.map(async (image) => {
-						const file = await stat(image.path);
-						const id = `image-${images.size + 1}`;
-						images.set(id, { observation: image, size: file.size, mtime: file.mtimeMs });
-						return { ...image, id };
-					}),
-				);
-			}
-			return observation;
-		},
-		async emitImage(value: unknown): Promise<void> {
-			const id = isRecord(value) && typeof value.id === "string" ? value.id : undefined;
-			const image = id ? images.get(id) : undefined;
-			if (!id || !image) {
-				throw new Error(
-					"emitImage expects an imageObservations handle returned by browser() in this code call.",
-				);
-			}
-			if (selected.has(id)) {
-				return;
-			}
-			if (selected.size >= 8 || selectedBytes + image.size > 20 * 1_024 * 1_024) {
-				throw new Error(
-					"Selected images exceed the code output limit (8 images / 20 MiB). Emit fewer images.",
-				);
-			}
-			const file = await stat(image.observation.path);
-			if (!file.isFile() || file.size !== image.size || file.mtimeMs !== image.mtime) {
-				throw new Error(
-					"The selected image changed since capture. Capture it again before emitting it.",
-				);
-			}
-			const presentation = await attachInlineImage(
-				{ content: [], summary: "Selected browser image" },
-				image.observation.path,
-			);
-			if (!presentation.content.some((item) => item.type === "image")) {
-				throw new Error(
-					presentation.content
-						.filter((item) => item.type === "text")
-						.map((item) => item.text)
-						.join("\n") || "The selected image could not be attached.",
-				);
-			}
-			selected.set(
-				id,
-				presentation.content.filter((item) => item.type === "image"),
-			);
-			selectedBytes += file.size;
-		},
-		async finish(
-			run: AgentBrowserScriptRunResult,
-			sessionName: string,
-			namespace?: string,
-		): Promise<AgentBrowserToolResult> {
-			let data: unknown;
-			let outputError: string | undefined;
-			try {
-				data = redactPresentationData({ command: "code" }, run.data);
-				if (
-					data !== undefined &&
-					Buffer.byteLength(JSON.stringify(data), "utf8") >
-						AGENT_BROWSER_SCRIPT_FINAL_OUTPUT_MAX_BYTES
-				) {
-					throw new Error("oversized");
+	readonly observe = async (result: AgentBrowserToolResult): Promise<BrowserCodeObservation> => {
+		const details = isRecord(result.details) ? result.details : {};
+		const observation = projectAgentBrowserObservation(details, result.isError !== true);
+		for (const entry of collectCodeArtifactReceipts(observation.artifactVerification)) {
+			this.receipts.set(entry.absolutePath ?? entry.path, entry);
+		}
+		for (const artifact of collectCodeFileArtifacts(observation.artifacts)) {
+			this.fileArtifacts.set(artifact.absolutePath, artifact);
+		}
+		if (observation.imageObservations === undefined) {
+			return { ...observation, imageObservations: undefined };
+		}
+		if (!Array.isArray(observation.imageObservations)) {
+			throw new Error("Browser capture returned invalid image observations.");
+		}
+		const images = await Promise.all(
+			observation.imageObservations.map(async (value: unknown) => {
+				const image = parseCodeImageObservation(value);
+				if (image === undefined) {
+					throw new Error("Browser capture returned invalid image observation geometry.");
 				}
-			} catch {
-				data = undefined;
-				outputError = "Code output could not be rendered as bounded JSON.";
-			}
-			const failureCategory = outputError
-				? "validation-error"
-				: (run.failureCategory ?? (run.rejectedCallCount > 0 ? "validation-error" : undefined));
-			const success = run.ok && failureCategory === undefined;
-			const artifacts = [...receipts.values()];
-			const count = (state: string) => artifacts.filter((entry) => entry.state === state).length;
-			const artifactVerification: ArtifactVerificationSummary | undefined = artifacts.length
-				? {
-						artifacts,
-						missingCount: count("missing"),
-						pendingCount: count("pending"),
-						unverifiedCount: count("unverified"),
-						verifiedCount: count("verified"),
-						verified: artifacts.every((entry) => entry.state === "verified"),
-					}
-				: undefined;
-			const observation = {
-				success,
-				resultCategory: success ? "success" : "failure",
-				failureCategory,
-				data,
-				error: outputError ?? (run.error ? redactSensitiveText(run.error) : undefined),
-				sessionName,
-				namespace,
-				codeRun: {
-					callCount: run.callCount,
-					emitCount: run.emitCount,
-					failedCallCount: run.steps.filter((step) => !step.ok).length,
-					rejectedCallCount: run.rejectedCallCount,
-					aborted: run.aborted,
-					timedOut: run.timedOut,
-				},
-				failures: run.failures?.length ? run.failures : undefined,
-				artifactVerification,
-				artifacts: fileArtifacts.size ? [...fileArtifacts.values()] : undefined,
-				imageObservations: [...selected.keys()].map((id) => ({
-					...images.get(id)!.observation,
-					id,
-				})),
-			};
-			const summary = success
-				? `Browser code completed (${run.callCount} calls).`
-				: "Browser code failed.";
-			return {
-				content: [...selected.values()].flat(),
-				details: { ...observation, codeSteps: run.steps, summary },
-				isError: !success,
-			};
-		},
+				const file = await stat(image.path);
+				const id = `image-${this.images.size + 1}`;
+				this.images.set(id, { observation: image, size: file.size, mtime: file.mtimeMs });
+				return { ...image, id };
+			}),
+		);
+		return { ...observation, imageObservations: images };
 	};
+
+	private resolveImage(value: unknown): {
+		id: string;
+		image: { observation: ImageObservation; size: number; mtime: number };
+	} {
+		const id = isRecord(value) && typeof value.id === "string" ? value.id : undefined;
+		const image = id !== undefined && id.length > 0 ? this.images.get(id) : undefined;
+		if (id === undefined || id.length === 0 || !image) {
+			throw new Error(
+				"emitImage expects an imageObservations handle returned by browser() in this code call.",
+			);
+		}
+		return { id, image };
+	}
+
+	readonly emitImage = async (value: unknown): Promise<void> => {
+		const { id, image } = this.resolveImage(value);
+		if (this.selected.has(id)) {
+			return;
+		}
+		if (this.selected.size >= 8 || this.selectedBytes + image.size > 20 * 1_024 * 1_024) {
+			throw new Error(
+				"Selected images exceed the code output limit (8 images / 20 MiB). Emit fewer images.",
+			);
+		}
+		const file = await stat(image.observation.path);
+		if (!file.isFile() || file.size !== image.size || file.mtimeMs !== image.mtime) {
+			throw new Error(
+				"The selected image changed since capture. Capture it again before emitting it.",
+			);
+		}
+		const presentation = await attachInlineImage(
+			{ content: [], summary: "Selected browser image" },
+			image.observation.path,
+		);
+		if (!presentation.content.some((item) => item.type === "image")) {
+			const reason = presentation.content
+				.filter((item) => item.type === "text")
+				.map((item) => item.text)
+				.join("\n");
+			throw new Error(reason.length > 0 ? reason : "The selected image could not be attached.");
+		}
+		this.selected.set(id, {
+			content: presentation.content.filter((item) => item.type === "image"),
+			observation: { ...image.observation, id },
+		});
+		this.selectedBytes += file.size;
+	};
+
+	private artifactVerification(): Readonly<Record<string, unknown>> | undefined {
+		const artifacts = [...this.receipts.values()];
+		if (artifacts.length === 0) {
+			return undefined;
+		}
+		const count = (state: string) => artifacts.filter((entry) => entry.state === state).length;
+		return {
+			artifacts,
+			missingCount: count("missing"),
+			pendingCount: count("pending"),
+			unverifiedCount: count("unverified"),
+			verifiedCount: count("verified"),
+			verified: artifacts.every((entry) => entry.state === "verified"),
+		};
+	}
+
+	private failureCategory(
+		run: AgentBrowserScriptRunResult,
+		outputError: string | undefined,
+	): AgentBrowserFailureCategory | undefined {
+		if (outputError !== undefined) {
+			return "validation-error";
+		}
+		return run.failureCategory ?? (run.rejectedCallCount > 0 ? "validation-error" : undefined);
+	}
+
+	private observation(
+		run: AgentBrowserScriptRunResult,
+		context: { readonly sessionName: string; readonly namespace?: string },
+		output: { readonly data: unknown; readonly error?: string },
+	): Record<string, unknown> {
+		const failureCategory = this.failureCategory(run, output.error);
+		const success = run.ok && failureCategory === undefined;
+		return {
+			success,
+			resultCategory: success ? "success" : "failure",
+			failureCategory,
+			data: output.data,
+			error:
+				output.error ??
+				(run.error !== undefined && run.error.length > 0
+					? redactSensitiveText(run.error)
+					: undefined),
+			...context,
+			codeRun: {
+				callCount: run.callCount,
+				emitCount: run.emitCount,
+				failedCallCount: run.steps.filter((step) => !step.ok).length,
+				rejectedCallCount: run.rejectedCallCount,
+				aborted: run.aborted,
+				timedOut: run.timedOut,
+			},
+			failures: run.failures !== undefined && run.failures.length > 0 ? run.failures : undefined,
+			artifactVerification: this.artifactVerification(),
+			artifacts: this.fileArtifacts.size > 0 ? [...this.fileArtifacts.values()] : undefined,
+			imageObservations: [...this.selected.values()].map((image) => image.observation),
+		};
+	}
+
+	readonly finish = async (
+		run: AgentBrowserScriptRunResult,
+		sessionName: string,
+		namespace?: string,
+	): Promise<AgentBrowserToolResult> => {
+		let data: unknown;
+		let error: string | undefined;
+		try {
+			data = redactPresentationData({ command: "code" }, run.data);
+			if (
+				data !== undefined &&
+				Buffer.byteLength(JSON.stringify(data), "utf8") >
+					AGENT_BROWSER_SCRIPT_FINAL_OUTPUT_MAX_BYTES
+			) {
+				throw new Error("oversized");
+			}
+		} catch {
+			data = undefined;
+			error = "Code output could not be rendered as bounded JSON.";
+		}
+		const observation = this.observation(run, { sessionName, namespace }, { data, error });
+		const success = observation.success === true;
+		const summary = success
+			? `Browser code completed (${run.callCount} calls).`
+			: "Browser code failed.";
+		return {
+			content: [...this.selected.values()].flatMap((image) => image.content),
+			details: { ...observation, codeSteps: run.steps, summary },
+			isError: !success,
+		};
+	};
+}
+
+export function createBrowserCodeOutput(): BrowserCodeOutput {
+	return new BrowserCodeOutput();
 }

@@ -1,8 +1,8 @@
 import { isRecord } from "../../parsing.js";
-import type { CommandInfo } from "../../runtime.js";
+import type { CommandInfo } from "../../argv-descriptor.js";
 import { getStringField, redactModelFacingText, stringifyModelFacing } from "./common.js";
 
-function formatSkillsListText(skills: unknown[]): string {
+function formatSkillsListText(skills: readonly unknown[]): string {
 	if (skills.length === 0) {
 		return "No agent-browser skills found.";
 	}
@@ -13,7 +13,7 @@ function formatSkillsListText(skills: unknown[]): string {
 			}
 			const name = redactModelFacingText(getStringField(item, "name") ?? `(skill ${index + 1})`);
 			const description = getStringField(item, "description");
-			return description
+			return description !== undefined
 				? `${index + 1}. ${name} — ${redactModelFacingText(description)}`
 				: `${index + 1}. ${name}`;
 		})
@@ -36,69 +36,97 @@ function getSkillContent(data: unknown): string | undefined {
 	return content.length > 0 ? content.join("\n\n") : undefined;
 }
 
-function splitShellWords(input: string): string[] | undefined {
-	const words: string[] = [];
-	let current = "";
-	let quote: "single" | "double" | undefined;
-	for (let index = 0; index < input.length; index += 1) {
-		const char = input[index];
-		if (quote === "single") {
-			if (char === "'") {
-				quote = undefined;
-			} else {
-				current += char;
-			}
-			continue;
-		}
-		if (quote === "double") {
-			if (char === '"') {
-				quote = undefined;
-			} else if (char === "\\" && index + 1 < input.length) {
-				index += 1;
-				current += input[index];
-			} else {
-				current += char;
-			}
-			continue;
-		}
-		if (char === "'") {
-			quote = "single";
-			continue;
-		}
-		if (char === '"') {
-			quote = "double";
-			continue;
-		}
-		if (char === "\\" && index + 1 < input.length) {
-			index += 1;
-			current += input[index];
-			continue;
-		}
-		if (char === "#" && current.length === 0) {
-			break;
-		}
-		if (/\s/.test(char)) {
-			if (current.length > 0) {
-				words.push(current);
-				current = "";
-			}
-			continue;
-		}
-		current += char;
+class SkillShellWords {
+	private readonly words: string[] = [];
+	private current = "";
+	private quote: "single" | "double" | undefined;
+	private index = 0;
+	private readonly input: string;
+
+	constructor(input: string) {
+		this.input = input;
 	}
-	if (quote) {
-		return undefined;
+
+	private flush(): void {
+		if (this.current.length > 0) {
+			this.words.push(this.current);
+			this.current = "";
+		}
 	}
-	if (current.length > 0) {
-		words.push(current);
+
+	private appendEscape(): void {
+		if (this.index + 1 < this.input.length) {
+			this.index += 1;
+			this.current += this.input[this.index];
+		} else {
+			this.current += "\\";
+		}
 	}
-	return words;
+
+	private consumeQuoted(char: string): void {
+		const closing = this.quote === "single" ? "'" : '"';
+		if (char === closing) {
+			this.quote = undefined;
+		} else if (this.quote === "double" && char === "\\") {
+			this.appendEscape();
+		} else {
+			this.current += char;
+		}
+	}
+
+	private consumeUnquoted(char: string): boolean {
+		if (char === "'" || char === '"') {
+			this.quote = char === "'" ? "single" : "double";
+		} else if (char === "\\") {
+			this.appendEscape();
+		} else if (char === "#" && this.current.length === 0) {
+			return false;
+		} else if (/\s/.test(char)) {
+			this.flush();
+		} else {
+			this.current += char;
+		}
+		return true;
+	}
+
+	parse(): string[] | undefined {
+		for (; this.index < this.input.length; this.index += 1) {
+			const char = this.input[this.index];
+			if (this.quote !== undefined) {
+				this.consumeQuoted(char);
+			} else if (!this.consumeUnquoted(char)) {
+				break;
+			}
+		}
+		if (this.quote !== undefined) {
+			return undefined;
+		}
+		this.flush();
+		return this.words;
+	}
 }
 
-function formatNativeAgentBrowserCall(args: string[], stdin?: string): string {
+function formatNativeAgentBrowserCall(args: readonly string[], stdin?: string): string {
 	return stdin === undefined
 		? `agent_browser { "args": ${JSON.stringify(args)} }`
 		: `agent_browser { "args": ${JSON.stringify(args)}, "stdin": ${JSON.stringify(stdin)} }`;
+}
+
+function readSkillHeredoc(
+	lines: readonly string[],
+	startIndex: number,
+	delimiter: string,
+	stripsLeadingTabs: boolean,
+): { readonly stdin: string; readonly endIndex: number } | undefined {
+	const stdinLines: string[] = [];
+	for (let cursor = startIndex; cursor < lines.length; cursor += 1) {
+		const candidate = stripsLeadingTabs ? lines[cursor].replace(/^\t+/, "") : lines[cursor];
+		if (candidate === delimiter) {
+			return { stdin: stdinLines.join("\n"), endIndex: cursor };
+		}
+		stdinLines.push(candidate);
+	}
+	return undefined;
 }
 
 function formatNativeSkillContent(content: string): string {
@@ -118,7 +146,7 @@ function formatNativeSkillContent(content: string): string {
 		const rawArgsText = commandMatch[2];
 		const heredocMatch = /^(.*?)\s+(<<-?)['"]?([A-Za-z_][A-Za-z0-9_]*)['"]?\s*$/.exec(rawArgsText);
 		const argsText = heredocMatch?.[1] ?? rawArgsText;
-		const args = splitShellWords(argsText);
+		const args = new SkillShellWords(argsText).parse();
 		if (!args || args.length === 0) {
 			output.push(line);
 			continue;
@@ -127,24 +155,13 @@ function formatNativeSkillContent(content: string): string {
 			output.push(`${indent}${formatNativeAgentBrowserCall(args)}`);
 			continue;
 		}
-		const stripsLeadingTabs = heredocMatch[2] === "<<-";
-		const delimiter = heredocMatch[3];
-		const stdinLines: string[] = [];
-		let cursor = index + 1;
-		while (cursor < lines.length) {
-			const candidate = stripsLeadingTabs ? lines[cursor].replace(/^\t+/, "") : lines[cursor];
-			if (candidate === delimiter) {
-				break;
-			}
-			stdinLines.push(candidate);
-			cursor += 1;
-		}
-		if (cursor >= lines.length) {
+		const heredoc = readSkillHeredoc(lines, index + 1, heredocMatch[3], heredocMatch[2] === "<<-");
+		if (!heredoc) {
 			output.push(line);
 			continue;
 		}
-		output.push(`${indent}${formatNativeAgentBrowserCall(args, stdinLines.join("\n"))}`);
-		index = cursor;
+		output.push(`${indent}${formatNativeAgentBrowserCall(args, heredoc.stdin)}`);
+		index = heredoc.endIndex;
 	}
 	return output.join("\n");
 }
@@ -160,7 +177,7 @@ export function formatSkillsText(commandInfo: CommandInfo, data: unknown): strin
 		return formatSkillsListText(data);
 	}
 	const content = getSkillContent(data);
-	if (content) {
+	if (content !== undefined && content.length > 0) {
 		const note = [
 			"Pi native-tool note: upstream skill text was adapted for this native tool.",
 			"Use args for CLI tokens and stdin only for batch, eval --stdin, or auth save --password-stdin; do not pipe heredocs through bash unless the user explicitly asks for a bash workflow.",

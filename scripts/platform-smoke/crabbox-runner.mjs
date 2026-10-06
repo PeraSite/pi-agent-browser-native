@@ -18,98 +18,110 @@ function packageSlug(config = {}) {
 	return process.env.PLATFORM_SMOKE_PACKAGE_SLUG || config.packageName || "pi-agent-browser-native";
 }
 
-export function describeTarget(targetName, config = {}) {
+function targetSetting(name, configured, fallback) {
+	return env(name) || configured || fallback;
+}
+
+function describeMacTarget(config) {
 	const slug = packageSlug(config);
+	const user = env("PLATFORM_SMOKE_MAC_USER") || env("USER");
+	const host = targetSetting("PLATFORM_SMOKE_MAC_HOST", config.macos?.host, "localhost");
+	const port = String(targetSetting("PLATFORM_SMOKE_MAC_PORT", config.macos?.port, 22));
+	const workRoot =
+		env("PLATFORM_SMOKE_MAC_WORK_ROOT") ||
+		config.macos?.workRoot ||
+		`/Users/${user}/crabbox/${slug}`;
+	return {
+		provider: "ssh",
+		crabboxTarget: "macos",
+		shell: "posix",
+		workRoot,
+		args: [
+			"--provider",
+			"ssh",
+			"--target",
+			"macos",
+			"--static-host",
+			host,
+			"--static-user",
+			user,
+			"--static-port",
+			port,
+			"--static-work-root",
+			workRoot,
+		],
+	};
+}
+
+function describeUbuntuTarget(config) {
+	const image =
+		env("PLATFORM_SMOKE_UBUNTU_IMAGE") || config.ubuntuContainerImage || DEFAULT_UBUNTU_IMAGE;
+	return {
+		provider: "local-container",
+		crabboxTarget: "linux",
+		shell: "posix",
+		image,
+		workRoot: config.localContainer?.workRoot || "/work/crabbox",
+		args: ["--provider", "local-container", "--target", "linux", "--local-container-image", image],
+	};
+}
+
+function describeWindowsTarget(config) {
+	const slug = packageSlug(config);
+	const vm = targetSetting(
+		"PLATFORM_SMOKE_WINDOWS_VM",
+		config.windowsParallels?.sourceVm,
+		"pi-extension-windows-template",
+	);
+	const snapshot = targetSetting(
+		"PLATFORM_SMOKE_WINDOWS_SNAPSHOT",
+		config.windowsParallels?.snapshot,
+		"crabbox-ready",
+	);
+	const user = targetSetting(
+		"PLATFORM_SMOKE_WINDOWS_USER",
+		config.windowsParallels?.user,
+		env("USER"),
+	);
+	const workRoot =
+		env("PLATFORM_SMOKE_WINDOWS_WORK_ROOT") ||
+		config.windowsParallels?.workRoot ||
+		`C:\\crabbox\\${slug}`;
+	return {
+		provider: "parallels",
+		crabboxTarget: "windows",
+		shell: "powershell",
+		workRoot,
+		windowsMode: "normal",
+		sourceVm: vm,
+		snapshot,
+		args: [
+			"--provider",
+			"parallels",
+			"--target",
+			"windows",
+			"--windows-mode",
+			"normal",
+			"--parallels-source",
+			vm,
+			"--parallels-source-snapshot",
+			snapshot,
+			"--parallels-user",
+			user,
+			"--parallels-work-root",
+			workRoot,
+		],
+	};
+}
+
+export function describeTarget(targetName, config = {}) {
 	switch (targetName) {
-		case "macos": {
-			const user = env("PLATFORM_SMOKE_MAC_USER") || env("USER");
-			const host = env("PLATFORM_SMOKE_MAC_HOST") || config.macos?.host || "localhost";
-			const port = String(env("PLATFORM_SMOKE_MAC_PORT") || config.macos?.port || 22);
-			const workRoot =
-				env("PLATFORM_SMOKE_MAC_WORK_ROOT") ||
-				config.macos?.workRoot ||
-				`/Users/${user}/crabbox/${slug}`;
-			return {
-				provider: "ssh",
-				crabboxTarget: "macos",
-				shell: "posix",
-				workRoot,
-				args: [
-					"--provider",
-					"ssh",
-					"--target",
-					"macos",
-					"--static-host",
-					host,
-					"--static-user",
-					user,
-					"--static-port",
-					port,
-					"--static-work-root",
-					workRoot,
-				],
-			};
-		}
-		case "ubuntu": {
-			const image =
-				env("PLATFORM_SMOKE_UBUNTU_IMAGE") || config.ubuntuContainerImage || DEFAULT_UBUNTU_IMAGE;
-			return {
-				provider: "local-container",
-				crabboxTarget: "linux",
-				shell: "posix",
-				image,
-				workRoot: config.localContainer?.workRoot || "/work/crabbox",
-				args: [
-					"--provider",
-					"local-container",
-					"--target",
-					"linux",
-					"--local-container-image",
-					image,
-				],
-			};
-		}
-		case "windows-native": {
-			const vm =
-				env("PLATFORM_SMOKE_WINDOWS_VM") ||
-				config.windowsParallels?.sourceVm ||
-				"pi-extension-windows-template";
-			const snapshot =
-				env("PLATFORM_SMOKE_WINDOWS_SNAPSHOT") ||
-				config.windowsParallels?.snapshot ||
-				"crabbox-ready";
-			const user =
-				env("PLATFORM_SMOKE_WINDOWS_USER") || config.windowsParallels?.user || env("USER");
-			const workRoot =
-				env("PLATFORM_SMOKE_WINDOWS_WORK_ROOT") ||
-				config.windowsParallels?.workRoot ||
-				`C:\\crabbox\\${slug}`;
-			return {
-				provider: "parallels",
-				crabboxTarget: "windows",
-				shell: "powershell",
-				workRoot,
-				windowsMode: "normal",
-				sourceVm: vm,
-				snapshot,
-				args: [
-					"--provider",
-					"parallels",
-					"--target",
-					"windows",
-					"--windows-mode",
-					"normal",
-					"--parallels-source",
-					vm,
-					"--parallels-source-snapshot",
-					snapshot,
-					"--parallels-user",
-					user,
-					"--parallels-work-root",
-					workRoot,
-				],
-			};
-		}
+		case "macos":
+			return describeMacTarget(config);
+		case "ubuntu":
+			return describeUbuntuTarget(config);
+		case "windows-native":
+			return describeWindowsTarget(config);
 		default:
 			throw new Error(`unknown platform smoke target: ${targetName}`);
 	}
@@ -147,11 +159,15 @@ export function execCrabbox(args, options = {}) {
 				);
 				try {
 					child.kill("SIGTERM");
-				} catch {}
+				} catch {
+					// A concurrently exited child needs no signal; its close/error receipt settles the run.
+				}
 				killTimeout = setTimeout(() => {
 					try {
 						child.kill("SIGKILL");
-					} catch {}
+					} catch {
+						// A concurrently exited child needs no signal; its close/error receipt settles the run.
+					}
 				}, 10_000);
 			}, options.timeout);
 		}
@@ -202,10 +218,14 @@ export async function warmupLease(targetName, slug, config = {}) {
 	let result;
 	for (let attempt = 1; attempt <= 2; attempt += 1) {
 		console.log(`  [crabbox] ${args.join(" ")}${attempt > 1 ? ` (retry ${attempt})` : ""}`);
+		// The retry depends on the prior warmup receipt and its completed stale-lease cleanup.
+		// oxlint-disable-next-line no-await-in-loop
 		result = await execCrabbox(args, { timeout: 300_000 });
 		if (!isRetryableWarmupFailure(targetName, result)) {
 			break;
 		}
+		// Stop stale target resources before a retry can acquire another lease.
+		// oxlint-disable-next-line no-await-in-loop
 		await cleanupStaleTargetState(targetName, config);
 	}
 	return {

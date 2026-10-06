@@ -6,9 +6,8 @@ const observation = new AsyncLocalStorage<{ catalog?: Record<string, unknown> }>
 export function getNativeWebMcpCatalog(data: unknown): Record<string, unknown> | undefined {
 	if (Array.isArray(data)) {
 		for (let index = data.length - 1; index >= 0; index -= 1) {
-			const catalog = getNativeWebMcpCatalog(
-				isRecord(data[index]) ? data[index].result : undefined,
-			);
+			const row: unknown = data[index];
+			const catalog = getNativeWebMcpCatalog(isRecord(row) ? row.result : undefined);
 			if (catalog) {
 				return catalog;
 			}

@@ -7,6 +7,7 @@
  */
 
 import assert from "node:assert/strict";
+import { readArray, readRecord, readString } from "./helpers/assertions.js";
 import { readFile, rm } from "node:fs/promises";
 import test from "node:test";
 
@@ -24,7 +25,7 @@ test("buildToolPresentation redacts scalar extraction results for eval and get c
 			},
 		},
 	});
-	const evalText = (evalPresentation.content[0] as { text: string }).text;
+	const evalText = readString(readRecord(evalPresentation.content[0]).text);
 	assert.doesNotMatch(evalText, /scalar-secret|origin-secret/);
 	assert.match(evalText, /\[REDACTED\]/);
 	assert.doesNotMatch(evalPresentation.summary, /scalar-secret/);
@@ -34,7 +35,7 @@ test("buildToolPresentation redacts scalar extraction results for eval and get c
 		cwd: process.cwd(),
 		envelope: { success: true, data: { result: "Cookie: sid=get-secret" } },
 	});
-	const getText = (getPresentation.content[0] as { text: string }).text;
+	const getText = readString(readRecord(getPresentation.content[0]).text);
 	assert.doesNotMatch(getText, /get-secret/);
 	assert.match(getText, /\[REDACTED\]/);
 
@@ -44,7 +45,10 @@ test("buildToolPresentation redacts scalar extraction results for eval and get c
 		envelope: { success: true, data: { text: "password=synthetic-secret-123" } },
 	});
 	assert.deepEqual(passwordPresentation.data, { text: "password=[REDACTED]" });
-	assert.match((passwordPresentation.content[0] as { text: string }).text, /password=\[REDACTED\]/);
+	assert.match(
+		readString(readRecord(passwordPresentation.content[0]).text),
+		/password=\[REDACTED\]/,
+	);
 	assert.doesNotMatch(JSON.stringify(passwordPresentation), /synthetic-secret-123/);
 });
 
@@ -58,7 +62,7 @@ test("buildToolPresentation adds clipboard permission guidance for denied clipbo
 
 	assert.equal(presentation.resultCategory, "failure");
 	assert.equal(presentation.failureCategory, "upstream-error");
-	const text = (presentation.content[0] as { text: string }).text;
+	const text = readString(readRecord(presentation.content[0]).text);
 	assert.match(text, /Agent-browser clipboard hint:/);
 	assert.match(text, /headless, managed, remote-profile, or file:\/\//);
 	assert.match(text, /snapshot -i/);
@@ -80,7 +84,7 @@ test("buildToolPresentation formats scalar extraction results for eval and get c
 	});
 	assert.equal(evalPresentation.content[0]?.type, "text");
 	assert.equal(
-		(evalPresentation.content[0] as { text: string }).text,
+		readString(readRecord(evalPresentation.content[0]).text),
 		"Example Domain\n\nOrigin: https://example.com/",
 	);
 	assert.equal(evalPresentation.summary, "Eval result: Example Domain");
@@ -99,7 +103,7 @@ test("buildToolPresentation formats scalar extraction results for eval and get c
 	});
 	assert.equal(getPresentation.content[0]?.type, "text");
 	assert.equal(
-		(getPresentation.content[0] as { text: string }).text,
+		readString(readRecord(getPresentation.content[0]).text),
 		"Example Domain\n\nOrigin: https://example.com/",
 	);
 	assert.equal(getPresentation.summary, "Title: Example Domain");
@@ -117,11 +121,11 @@ test("buildToolPresentation formats scalar extraction results for eval and get c
 		},
 	});
 	assert.equal(
-		(getTextPresentation.content[0] as { text: string }).text,
+		readString(readRecord(getTextPresentation.content[0]).text),
 		"Visible body text\n\nOrigin: https://example.com/",
 	);
 	assert.doesNotMatch(
-		(getTextPresentation.content[0] as { text: string }).text,
+		readString(readRecord(getTextPresentation.content[0]).text),
 		/lifecycle|reused/,
 	);
 });
@@ -177,18 +181,20 @@ test("buildToolPresentation compacts common action, wait, close, tab-close, and 
 			expected: "Console buffer cleared.",
 		},
 	];
-	for (const { commandInfo, data, expected } of cases) {
-		const presentation = await buildToolPresentation({
-			commandInfo,
-			cwd: process.cwd(),
-			envelope: { success: true, data },
-		});
-		assert.equal((presentation.content[0] as { text: string }).text, expected);
-		assert.doesNotMatch(
-			(presentation.content[0] as { text: string }).text,
-			/lifecycle|statePath|reused/,
-		);
-	}
+	await Promise.all(
+		cases.map(async ({ commandInfo, data, expected }) => {
+			const presentation = await buildToolPresentation({
+				commandInfo,
+				cwd: process.cwd(),
+				envelope: { success: true, data },
+			});
+			assert.equal(readString(readRecord(presentation.content[0]).text), expected);
+			assert.doesNotMatch(
+				readString(readRecord(presentation.content[0]).text),
+				/lifecycle|statePath|reused/,
+			);
+		}),
+	);
 });
 
 test("buildToolPresentation makes unverified batch mutations prominent", async () => {
@@ -203,14 +209,19 @@ test("buildToolPresentation makes unverified batch mutations prominent", async (
 			],
 		},
 	});
-	const text = (presentation.content[0] as { text: string }).text;
+	const text = readString(readRecord(presentation.content[0]).text);
 	assert.match(
 		text,
 		/^Mutation evidence: 1 action result proves dispatch only, not application state change\./,
 	);
 	assert.match(text, /fixed waits are not postconditions/);
 	assert.equal(presentation.pageChangeSummary?.observed, false);
-	assert.match(presentation.pageChangeSummary?.summary ?? "", /application change unverified/);
+	assert.match(
+		readRecord(presentation.pageChangeSummary).summary === undefined
+			? ""
+			: readString(readRecord(presentation.pageChangeSummary).summary),
+		/application change unverified/,
+	);
 });
 
 test("buildToolPresentation warns that keyboard inserttext may not update application state", async () => {
@@ -219,7 +230,7 @@ test("buildToolPresentation warns that keyboard inserttext may not update applic
 		cwd: process.cwd(),
 		envelope: { success: true, data: { inserted: true } },
 	});
-	const text = (presentation.content[0] as { text: string }).text;
+	const text = readString(readRecord(presentation.content[0]).text);
 	assert.match(text, /keyboard inserttext skips key events/);
 	assert.match(text, /does not prove a framework-controlled editor accepted it/);
 	assert.match(text, /use keyboard type when real key events are required/);
@@ -257,7 +268,7 @@ test("buildToolPresentation formats session status and session list", async () =
 		envelope: { success: true, data: { session: "demo-session" } },
 	});
 	assert.equal(current.summary, "Session: demo-session");
-	assert.equal((current.content[0] as { text: string }).text, "Current session: demo-session");
+	assert.equal(readString(readRecord(current.content[0]).text), "Current session: demo-session");
 
 	const list = await buildToolPresentation({
 		commandInfo: { command: "session", subcommand: "list" },
@@ -279,57 +290,61 @@ test("buildToolPresentation formats session status and session list", async () =
 		},
 	});
 	assert.equal(list.summary, "Sessions: 3");
-	assert.match((list.content[0] as { text: string }).text, /piab-foreign/);
-	assert.match((list.content[0] as { text: string }).text, /PIAB-case-alias/);
-	assert.match((list.content[0] as { text: string }).text, /name=work/);
+	assert.match(readString(readRecord(list.content[0]).text), /piab-foreign/);
+	assert.match(readString(readRecord(list.content[0]).text), /PIAB-case-alias/);
+	assert.match(readString(readRecord(list.content[0]).text), /name=work/);
 });
 
 test("buildToolPresentation exposes native session-info liveness and runtime identity", async () => {
 	const identity = { session: "shared", namespace: null, socketDir: "/tmp/isolated-sockets" };
-	for (const status of [
-		{ active: false, pid: null, version: null, runtime: null, runtimeError: null },
-		{ active: true, pid: 1234, version: "0.37.1", runtime: null, runtimeError: null },
-		{
-			active: true,
-			pid: 1234,
-			version: "0.37.1",
-			runtime: null,
-			runtimeError: "Runtime info unavailable",
-		},
-		{
-			active: true,
-			pid: 1234,
-			version: "0.37.1",
-			runtime: {
-				session: "shared",
-				namespace: null,
-				socketDir: identity.socketDir,
-				backgroundPid: 1234,
-				browserLaunched: false,
-				pageCount: 0,
-				engine: "chromium",
-				launchHash: null,
-				compatibilityStatus: "current",
-				restoreKey: null,
-				restoreStatus: "disabled",
-				restoreValidationPending: false,
-				restoreSave: false,
-				saveStatus: "disabled",
+	await Promise.all(
+		[
+			{ active: false, pid: null, version: null, runtime: null, runtimeError: null },
+			{ active: true, pid: 1234, version: "0.37.1", runtime: null, runtimeError: null },
+			{
+				active: true,
+				pid: 1234,
+				version: "0.37.1",
+				runtime: null,
+				runtimeError: "Runtime info unavailable",
 			},
-			runtimeError: null,
-		},
-	]) {
-		const data = { ...identity, ...status };
-		const result = await buildToolPresentation({
-			commandInfo: { command: "session", subcommand: "info" },
-			cwd: process.cwd(),
-			envelope: { success: true, data },
-		});
-		assert.deepEqual(
-			JSON.parse((result.content[0] as { text: string }).text.split("\n\n").slice(1).join("\n\n")),
-			data,
-		);
-	}
+			{
+				active: true,
+				pid: 1234,
+				version: "0.37.1",
+				runtime: {
+					session: "shared",
+					namespace: null,
+					socketDir: identity.socketDir,
+					backgroundPid: 1234,
+					browserLaunched: false,
+					pageCount: 0,
+					engine: "chromium",
+					launchHash: null,
+					compatibilityStatus: "current",
+					restoreKey: null,
+					restoreStatus: "disabled",
+					restoreValidationPending: false,
+					restoreSave: false,
+					saveStatus: "disabled",
+				},
+				runtimeError: null,
+			},
+		].map(async (status) => {
+			const data = { ...identity, ...status };
+			const result = await buildToolPresentation({
+				commandInfo: { command: "session", subcommand: "info" },
+				cwd: process.cwd(),
+				envelope: { success: true, data },
+			});
+			assert.deepEqual(
+				JSON.parse(
+					readString(readRecord(result.content[0]).text).split("\n\n").slice(1).join("\n\n"),
+				),
+				data,
+			);
+		}),
+	);
 });
 
 test("buildToolPresentation limits native session-info text to redacted status metadata", async () => {
@@ -367,10 +382,10 @@ test("buildToolPresentation limits native session-info text to redacted status m
 			},
 		},
 	});
-	const text = (result.content[0] as { text: string }).text;
-	const visible = JSON.parse(text.split("\n\n").slice(1).join("\n\n"));
+	const text = readString(readRecord(result.content[0]).text);
+	const visible = readRecord(JSON.parse(text.split("\n\n").slice(1).join("\n\n")));
 	assert.deepEqual(visible.runtime, runtime);
-	assert.match(visible.runtimeError, /REDACTED/);
+	assert.match(readString(visible.runtimeError), /REDACTED/);
 	assert.doesNotMatch(text, /runtime-secret|private/);
 	assert.match(text, /Exact profile: unknown/);
 });
@@ -383,7 +398,7 @@ test("buildToolPresentation formats Chrome profile arrays", async () => {
 	});
 
 	assert.equal(presentation.summary, "Chrome profiles: 1");
-	assert.equal((presentation.content[0] as { text: string }).text, "1. Default (Default)");
+	assert.equal(readString(readRecord(presentation.content[0]).text), "1. Default (Default)");
 });
 
 test("buildToolPresentation formats auth profile lists and show output without expanding secrets", async () => {
@@ -396,7 +411,7 @@ test("buildToolPresentation formats auth profile lists and show output without e
 		},
 	});
 	assert.equal(list.summary, "Auth profiles: 1");
-	const listText = (list.content[0] as { text: string }).text;
+	const listText = readString(readRecord(list.content[0]).text);
 	assert.match(listText, /prod/);
 	assert.doesNotMatch(listText, /secret|password/);
 
@@ -415,7 +430,7 @@ test("buildToolPresentation formats auth profile lists and show output without e
 		},
 	});
 	assert.equal(show.summary, "Auth profile: prod");
-	const showText = (show.content[0] as { text: string }).text;
+	const showText = readString(readRecord(show.content[0]).text);
 	assert.match(showText, /name: prod/);
 	assert.match(showText, /url: https:\/\/example.com/);
 	assert.match(showText, /username: user@example.com/);
@@ -524,22 +539,30 @@ test("buildToolPresentation formats stateful browser-context results without lea
 		},
 	] as const;
 
-	for (const testCase of cases) {
-		const presentation = await buildToolPresentation({
-			commandInfo: testCase.commandInfo,
-			cwd: process.cwd(),
-			envelope: { success: true, data: testCase.data },
-		});
-		assert.equal(presentation.summary, testCase.summary);
-		const text = (presentation.content[0] as { text: string }).text;
-		for (const pattern of testCase.matches) {
-			assert.match(text, pattern);
-		}
-		if (testCase.missing) {
-			assert.doesNotMatch(text, testCase.missing);
-			assert.doesNotMatch(JSON.stringify(presentation.data), testCase.missing);
-		}
-	}
+	await Promise.all(
+		cases.map(async (testCase) => {
+			const presentation = await buildToolPresentation({
+				commandInfo: testCase.commandInfo,
+				cwd: process.cwd(),
+				envelope: { success: true, data: testCase.data },
+			});
+			assert.equal(presentation.summary, testCase.summary);
+			const text = readString(readRecord(presentation.content[0]).text);
+			for (const pattern of testCase.matches) {
+				// Every pattern declared by this presentation fixture must match its observation.
+				// oxlint-disable-next-line node-test/no-conditional-assertion
+				assert.match(text, pattern);
+			}
+			if (testCase.missing) {
+				// Fixtures declaring a missing native field must not invent it; summary is checked above.
+				// oxlint-disable-next-line node-test/no-conditional-assertion
+				assert.doesNotMatch(text, testCase.missing);
+				// The same missing-field variant must also remain absent from structured data.
+				// oxlint-disable-next-line node-test/no-conditional-assertion
+				assert.doesNotMatch(JSON.stringify(presentation.data), testCase.missing);
+			}
+		}),
+	);
 });
 
 test("buildToolPresentation preserves managed restore capabilities and state-list rows", async () => {
@@ -563,7 +586,7 @@ test("buildToolPresentation preserves managed restore capabilities and state-lis
 	});
 	const listSerialized = JSON.stringify(list);
 	assert.equal(list.summary, "States: 2");
-	assert.match((list.content[0] as { text: string }).text, /caller-owned\.json/);
+	assert.match(readString(readRecord(list.content[0]).text), /caller-owned\.json/);
 	assert.match(
 		listSerialized,
 		new RegExp(restoreKey),
@@ -620,7 +643,7 @@ test("buildToolPresentation keeps benign storage values visible while redacting 
 		},
 	});
 
-	const text = (presentation.content[0] as { text: string }).text;
+	const text = readString(readRecord(presentation.content[0]).text);
 	const details = JSON.stringify(presentation.data);
 	assert.match(text, /theme: dark/);
 	assert.match(text, /locale: en-US/);
@@ -645,22 +668,24 @@ test("buildToolPresentation keeps benign storage values visible while redacting 
 
 test("buildToolPresentation redacts native all-entry storage maps, including batch rows", async () => {
 	const data = { data: { refresh: "opaque-credential", theme: "dark", locale: "en-US" } };
-	for (const batch of [false, true]) {
-		const presentation = await buildToolPresentation({
-			commandInfo: {
-				command: batch ? "batch" : "storage",
-				subcommand: batch ? undefined : "local",
-			},
-			cwd: process.cwd(),
-			envelope: {
-				success: true,
-				data: batch ? [{ command: ["storage", "local"], success: true, result: data }] : data,
-			},
-		});
-		assert.doesNotMatch(JSON.stringify(presentation), /opaque-credential/);
-		assert.match(JSON.stringify(presentation.data), /refresh/);
-		assert.match(JSON.stringify(presentation.data), /dark|en-US/);
-	}
+	await Promise.all(
+		[false, true].map(async (batch) => {
+			const presentation = await buildToolPresentation({
+				commandInfo: {
+					command: batch ? "batch" : "storage",
+					subcommand: batch ? undefined : "local",
+				},
+				cwd: process.cwd(),
+				envelope: {
+					success: true,
+					data: batch ? [{ command: ["storage", "local"], success: true, result: data }] : data,
+				},
+			});
+			assert.doesNotMatch(JSON.stringify(presentation), /opaque-credential/);
+			assert.match(JSON.stringify(presentation.data), /refresh/);
+			assert.match(JSON.stringify(presentation.data), /dark|en-US/);
+		}),
+	);
 });
 
 test("buildToolPresentation adds routed pending network diagnostics", async () => {
@@ -693,7 +718,7 @@ test("buildToolPresentation adds routed pending network diagnostics", async () =
 		sessionName: "pi-agent-browser-test",
 	});
 
-	const text = (presentation.content[0] as { text: string }).text;
+	const text = readString(readRecord(presentation.content[0]).text);
 	assert.match(text, /Network route diagnostics/);
 	assert.match(text, /pending-routed-request/);
 	assert.deepEqual(
@@ -704,7 +729,7 @@ test("buildToolPresentation adds routed pending network diagnostics", async () =
 		presentation.nextActions?.slice(0, 2).map((action) => action.id),
 		["inspect-routed-network-request", "start-network-har-capture-for-route-mock"],
 	);
-	assert.deepEqual(presentation.nextActions?.[0]?.params?.args, [
+	assert.deepEqual(readRecord(readRecord(readArray(presentation.nextActions)[0]).params).args, [
 		"--session",
 		"pi-agent-browser-test",
 		"network",
@@ -744,7 +769,7 @@ test("buildToolPresentation flags routed requests that return failed statuses", 
 		sessionName: "pi-agent-browser-test",
 	});
 
-	const text = (presentation.content[0] as { text: string }).text;
+	const text = readString(readRecord(presentation.content[0]).text);
 	assert.match(text, /unfulfilled-routed-request/);
 	assert.match(text, /treat failed, pending, or CORS-looking rows as unfulfilled/);
 	assert.deepEqual(
@@ -784,7 +809,7 @@ test("buildToolPresentation hides data image network noise from preview while pr
 		},
 	});
 
-	const text = (presentation.content[0] as { text: string }).text;
+	const text = readString(readRecord(presentation.content[0]).text);
 	assert.match(text, /Diagnostic noise hidden from preview: 1 data:image\/artifact request row/);
 	assert.match(text, /2\. 200 GET https:\/\/example\.test\/api\/items/);
 	assert.doesNotMatch(text, /data:image\/png/);
@@ -810,7 +835,7 @@ test("buildToolPresentation treats stream enable already-enabled as idempotent",
 	});
 
 	assert.equal(presentation.summary, "Stream already enabled");
-	assert.match((presentation.content[0] as { text: string }).text, /idempotent no-op/);
+	assert.match(readString(readRecord(presentation.content[0]).text), /idempotent no-op/);
 	assert.deepEqual(
 		presentation.nextActions?.map((action) => action.id),
 		["check-stream-status-after-noop", "disable-existing-stream-when-done"],
@@ -843,7 +868,7 @@ test("buildToolPresentation redacts stateful batch details", async () => {
 		data: presentation.data,
 	});
 	assert.doesNotMatch(
-		(presentation.content[0] as { text: string }).text,
+		readString(readRecord(presentation.content[0]).text),
 		/cookie-secret|storage-secret/,
 	);
 	assert.doesNotMatch(serialized, /cookie-secret|storage-secret/);
@@ -876,7 +901,7 @@ test("buildToolPresentation redacts failed stateful batch details", async () => 
 		batchSteps: presentation.batchSteps,
 		data: presentation.data,
 	});
-	assert.doesNotMatch((presentation.content[0] as { text: string }).text, /cookie-secret/);
+	assert.doesNotMatch(readString(readRecord(presentation.content[0]).text), /cookie-secret/);
 	assert.doesNotMatch(serialized, /cookie-secret/);
 	assert.match(serialized, /\[REDACTED\]/);
 	assert.deepEqual(presentation.batchSteps?.[1].command, [
@@ -885,7 +910,10 @@ test("buildToolPresentation redacts failed stateful batch details", async () => 
 		"--curl",
 		"/tmp/cookies.txt",
 	]);
-	assert.match(presentation.batchSteps?.[1].text ?? "", /cannot read '\/tmp\/cookies\.txt'/);
+	assert.match(
+		readString(readRecord(readArray(presentation.batchSteps)[1]).text),
+		/cannot read '\/tmp\/cookies\.txt'/,
+	);
 });
 
 test("buildToolPresentation formats redacted network payload, response, and error previews", async () => {
@@ -927,7 +955,7 @@ test("buildToolPresentation formats redacted network payload, response, and erro
 	});
 
 	assert.equal(presentation.summary, "Network requests: 2");
-	const text = (presentation.content[0] as { text: string }).text;
+	const text = readString(readRecord(presentation.content[0]).text);
 	assert.match(text, /Network failure summary: 1 actionable, 0 benign low-impact \(1 total\)\./);
 	assert.match(
 		text,
@@ -955,15 +983,18 @@ test("buildToolPresentation formats redacted network payload, response, and erro
 			"start-network-har-capture",
 		],
 	);
-	assert.deepEqual(presentation.nextActions?.[0]?.params?.args, [
+	assert.deepEqual(readRecord(readRecord(readArray(presentation.nextActions)[0]).params).args, [
 		"--session",
 		"work",
 		"network",
 		"request",
 		"req-2",
 	]);
-	assert.deepEqual(presentation.nextActions?.[1]?.params, { requestId: "req-2", session: "work" });
-	assert.deepEqual(presentation.nextActions?.[2]?.params?.args, [
+	assert.deepEqual(readRecord(readArray(presentation.nextActions)[1]).params, {
+		requestId: "req-2",
+		session: "work",
+	});
+	assert.deepEqual(readRecord(readRecord(readArray(presentation.nextActions)[2]).params).args, [
 		"--session",
 		"work",
 		"network",
@@ -971,14 +1002,14 @@ test("buildToolPresentation formats redacted network payload, response, and erro
 		"--filter",
 		"/items",
 	]);
-	assert.deepEqual(presentation.nextActions?.[3]?.params?.args, [
+	assert.deepEqual(readRecord(readRecord(readArray(presentation.nextActions)[3]).params).args, [
 		"--session",
 		"work",
 		"network",
 		"requests",
 		"--clear",
 	]);
-	assert.deepEqual(presentation.nextActions?.[4]?.params?.args, [
+	assert.deepEqual(readRecord(readRecord(readArray(presentation.nextActions)[4]).params).args, [
 		"--session",
 		"work",
 		"network",
@@ -1020,13 +1051,14 @@ test("buildToolPresentation returns bounded network request next actions for ben
 			"start-network-har-capture",
 		],
 	);
-	assert.deepEqual(benignPresentation.nextActions?.[0]?.params?.args, [
-		"network",
-		"request",
-		"icon-1",
-	]);
+	assert.deepEqual(
+		readRecord(readRecord(readArray(benignPresentation.nextActions)[0]).params).args,
+		["network", "request", "icon-1"],
+	);
 	assert.equal(
-		benignPresentation.nextActions?.some((action) => action.id.includes("source")),
+		readArray(benignPresentation.nextActions)
+			.map(readRecord)
+			.some((action) => readString(action.id).includes("source")),
 		false,
 	);
 
@@ -1058,14 +1090,14 @@ test("buildToolPresentation returns bounded network request next actions for ben
 			"start-network-har-capture",
 		],
 	);
-	assert.deepEqual(apiPresentation.nextActions?.[0]?.params?.args, [
+	assert.deepEqual(readRecord(readRecord(readArray(apiPresentation.nextActions)[0]).params).args, [
 		"--session",
 		"work",
 		"network",
 		"request",
 		"api-1",
 	]);
-	assert.deepEqual(apiPresentation.nextActions?.[1]?.params?.args, [
+	assert.deepEqual(readRecord(readRecord(readArray(apiPresentation.nextActions)[1]).params).args, [
 		"--session",
 		"work",
 		"network",
@@ -1073,14 +1105,14 @@ test("buildToolPresentation returns bounded network request next actions for ben
 		"--filter",
 		"/api/items",
 	]);
-	assert.deepEqual(apiPresentation.nextActions?.[2]?.params?.args, [
+	assert.deepEqual(readRecord(readRecord(readArray(apiPresentation.nextActions)[2]).params).args, [
 		"--session",
 		"work",
 		"network",
 		"requests",
 		"--clear",
 	]);
-	assert.deepEqual(apiPresentation.nextActions?.[3]?.params?.args, [
+	assert.deepEqual(readRecord(readRecord(readArray(apiPresentation.nextActions)[3]).params).args, [
 		"--session",
 		"work",
 		"network",
@@ -1088,83 +1120,87 @@ test("buildToolPresentation returns bounded network request next actions for ben
 		"start",
 	]);
 	assert.equal(
-		apiPresentation.nextActions?.some((action) => action.id.includes("source")),
+		readArray(apiPresentation.nextActions)
+			.map(readRecord)
+			.some((action) => readString(action.id).includes("source")),
 		false,
 	);
 	assert.doesNotMatch(JSON.stringify(apiPresentation.nextActions), /url-secret/);
 
-	for (const [requestId, url, forbiddenPattern] of [
-		[
-			"reset-1",
-			"https://example.test/reset/token/abc123?code=url-secret",
-			/reset\/token|abc123|url-secret/,
-		],
-		[
-			"reset-2",
-			"https://example.test/reset-password/abc123?code=url-secret",
-			/reset-password|abc123|url-secret/,
-		],
-		[
-			"session-1",
-			"https://example.test/accounts/session-id/abc123?code=url-secret",
-			/session-id|abc123|url-secret/,
-		],
-		[
-			"camel-1",
-			"https://example.test/account/passwordReset/abc123?code=url-secret",
-			/passwordReset|abc123|url-secret/,
-		],
-		[
-			"camel-2",
-			"https://example.test/account/resetToken/abc123?code=url-secret",
-			/resetToken|abc123|url-secret/,
-		],
-		[
-			"camel-3",
-			"https://example.test/account/sessionId/abc123?code=url-secret",
-			/sessionId|abc123|url-secret/,
-		],
-		[
-			"camel-4",
-			"https://example.test/account/apiKey/abc123?code=url-secret",
-			/apiKey|abc123|url-secret/,
-		],
-		[
-			"opaque-1",
-			"https://example.test/files/0123456789abcdef?code=url-secret",
-			/0123456789abcdef|url-secret/,
-		],
-	] as const) {
-		const sensitivePathPresentation = await buildToolPresentation({
-			commandInfo: { command: "network", subcommand: "requests" },
-			cwd: process.cwd(),
-			envelope: {
-				success: true,
-				data: {
-					requests: [{ method: "GET", requestId, status: 200, url }],
-				},
-			},
-		});
-		assert.deepEqual(
-			sensitivePathPresentation.nextActions?.map((action) => action.id),
+	await Promise.all(
+		(
 			[
-				"inspect-network-request",
-				"clear-network-requests-before-repro",
-				"start-network-har-capture",
-			],
-		);
-		assert.deepEqual(sensitivePathPresentation.nextActions?.[0]?.params?.args, [
-			"network",
-			"request",
-			requestId,
-		]);
-		assert.deepEqual(sensitivePathPresentation.nextActions?.[1]?.params?.args, [
-			"network",
-			"requests",
-			"--clear",
-		]);
-		assert.doesNotMatch(JSON.stringify(sensitivePathPresentation.nextActions), forbiddenPattern);
-	}
+				[
+					"reset-1",
+					"https://example.test/reset/token/abc123?code=url-secret",
+					/reset\/token|abc123|url-secret/,
+				],
+				[
+					"reset-2",
+					"https://example.test/reset-password/abc123?code=url-secret",
+					/reset-password|abc123|url-secret/,
+				],
+				[
+					"session-1",
+					"https://example.test/accounts/session-id/abc123?code=url-secret",
+					/session-id|abc123|url-secret/,
+				],
+				[
+					"camel-1",
+					"https://example.test/account/passwordReset/abc123?code=url-secret",
+					/passwordReset|abc123|url-secret/,
+				],
+				[
+					"camel-2",
+					"https://example.test/account/resetToken/abc123?code=url-secret",
+					/resetToken|abc123|url-secret/,
+				],
+				[
+					"camel-3",
+					"https://example.test/account/sessionId/abc123?code=url-secret",
+					/sessionId|abc123|url-secret/,
+				],
+				[
+					"camel-4",
+					"https://example.test/account/apiKey/abc123?code=url-secret",
+					/apiKey|abc123|url-secret/,
+				],
+				[
+					"opaque-1",
+					"https://example.test/files/0123456789abcdef?code=url-secret",
+					/0123456789abcdef|url-secret/,
+				],
+			] as const
+		).map(async ([requestId, url, forbiddenPattern]) => {
+			const sensitivePathPresentation = await buildToolPresentation({
+				commandInfo: { command: "network", subcommand: "requests" },
+				cwd: process.cwd(),
+				envelope: {
+					success: true,
+					data: {
+						requests: [{ method: "GET", requestId, status: 200, url }],
+					},
+				},
+			});
+			assert.deepEqual(
+				sensitivePathPresentation.nextActions?.map((action) => action.id),
+				[
+					"inspect-network-request",
+					"clear-network-requests-before-repro",
+					"start-network-har-capture",
+				],
+			);
+			assert.deepEqual(
+				readRecord(readRecord(readArray(sensitivePathPresentation.nextActions)[0]).params).args,
+				["network", "request", requestId],
+			);
+			assert.deepEqual(
+				readRecord(readRecord(readArray(sensitivePathPresentation.nextActions)[1]).params).args,
+				["network", "requests", "--clear"],
+			);
+			assert.doesNotMatch(JSON.stringify(sensitivePathPresentation.nextActions), forbiddenPattern);
+		}),
+	);
 });
 
 test("buildToolPresentation keeps failed network rows visible when successful rows would fill the preview", async () => {
@@ -1188,7 +1224,7 @@ test("buildToolPresentation keeps failed network rows visible when successful ro
 		envelope: { success: true, data: { requests } },
 	});
 
-	const text = (presentation.content[0] as { text: string }).text;
+	const text = readString(readRecord(presentation.content[0]).text);
 	assert.match(
 		text,
 		/46\. 404 GET https:\/\/example\.test\/missing\.js \(Script\) \[late-failure\] \[actionable: document, script, API, or non-benign request failure\]/,
@@ -1211,10 +1247,10 @@ test("buildToolPresentation formats vitals metrics and unavailable results", asy
 		"Vitals: LCP: 1234ms, FCP: 234ms, TTFB: 46ms, CLS: 0.01",
 	);
 	assert.match(
-		(metricsPresentation.content[0] as { text: string }).text,
+		readString(readRecord(metricsPresentation.content[0]).text),
 		/Vitals for https:\/\/example\.test\//,
 	);
-	assert.match((metricsPresentation.content[0] as { text: string }).text, /LCP: 1234ms/);
+	assert.match(readString(readRecord(metricsPresentation.content[0]).text), /LCP: 1234ms/);
 
 	const nestedPresentation = await buildToolPresentation({
 		commandInfo: { command: "web-vitals" },
@@ -1239,7 +1275,7 @@ test("buildToolPresentation formats vitals metrics and unavailable results", asy
 	});
 	assert.equal(unavailablePresentation.summary, "Vitals: metrics unavailable");
 	assert.match(
-		(unavailablePresentation.content[0] as { text: string }).text,
+		readString(readRecord(unavailablePresentation.content[0]).text),
 		/Metrics unavailable: No performance entries yet/,
 	);
 });
@@ -1265,7 +1301,7 @@ test("buildToolPresentation formats singular network request details without exp
 		},
 	});
 
-	const text = (presentation.content[0] as { text: string }).text;
+	const text = readString(readRecord(presentation.content[0]).text);
 	assert.match(
 		text,
 		/1\. 200 POST https:\/\/api\.example\.test\/items\?token=%5BREDACTED%5D \(Fetch\) \[detail-1\]/,
@@ -1293,7 +1329,7 @@ test("buildToolPresentation formats console and errors previews", async () => {
 		},
 	});
 	assert.equal(consolePresentation.summary, "Console messages: 2");
-	const consoleText = (consolePresentation.content[0] as { text: string }).text;
+	const consoleText = readString(readRecord(consolePresentation.content[0]).text);
 	assert.match(consoleText, /\[log\] hello/);
 	assert.match(consoleText, /\[error\] boom/);
 	assert.doesNotMatch(consoleText, /secret|args/);
@@ -1317,7 +1353,7 @@ test("buildToolPresentation formats console and errors previews", async () => {
 	});
 	assert.equal(errorsPresentation.summary, "Page errors: 1");
 	assert.equal(
-		(errorsPresentation.content[0] as { text: string }).text,
+		readString(readRecord(errorsPresentation.content[0]).text),
 		"1. Error: delayed (https://example.com/app.js:line 10:column 5)",
 	);
 });
@@ -1337,7 +1373,7 @@ test("buildToolPresentation labels diagnostic clear output as reset scoped", asy
 	});
 	assert.equal(networkReset.summary, "Network requests reset: 1 cleared");
 	assert.match(
-		(networkReset.content[0] as { text: string }).text,
+		readString(readRecord(networkReset.content[0]).text),
 		/Treat these as reset output, not current-page request failures/,
 	);
 
@@ -1352,7 +1388,7 @@ test("buildToolPresentation labels diagnostic clear output as reset scoped", asy
 	});
 	assert.equal(consoleReset.summary, "Console reset: 1 cleared");
 	assert.match(
-		(consoleReset.content[0] as { text: string }).text,
+		readString(readRecord(consoleReset.content[0]).text),
 		/Treat these as reset output, not current-page console errors/,
 	);
 
@@ -1363,7 +1399,7 @@ test("buildToolPresentation labels diagnostic clear output as reset scoped", asy
 	});
 	assert.equal(errorsReset.summary, "Page errors reset: 1 cleared");
 	assert.match(
-		(errorsReset.content[0] as { text: string }).text,
+		readString(readRecord(errorsReset.content[0]).text),
 		/Treat these as reset output, not current-page errors/,
 	);
 });
@@ -1377,7 +1413,7 @@ test("buildToolPresentation redacts dashboard and doctor diagnostic strings", as
 			data: { port: 9222, reason: "Authorization: Bearer dash-secret Cookie: sid=dash-cookie" },
 		},
 	});
-	const dashboardText = (dashboardPresentation.content[0] as { text: string }).text;
+	const dashboardText = readString(readRecord(dashboardPresentation.content[0]).text);
 	assert.doesNotMatch(dashboardText, /dash-secret|dash-cookie/);
 	assert.doesNotMatch(dashboardPresentation.summary, /dash-secret|dash-cookie/);
 	assert.match(dashboardText, /\[REDACTED\]/);
@@ -1390,7 +1426,7 @@ test("buildToolPresentation redacts dashboard and doctor diagnostic strings", as
 			data: { status: "Authorization: Bearer doctor-secret Cookie: sid=doctor-cookie" },
 		},
 	});
-	const doctorText = (doctorPresentation.content[0] as { text: string }).text;
+	const doctorText = readString(readRecord(doctorPresentation.content[0]).text);
 	assert.doesNotMatch(doctorText, /doctor-secret|doctor-cookie/);
 	assert.doesNotMatch(doctorPresentation.summary, /doctor-secret|doctor-cookie/);
 	assert.match(doctorText, /\[REDACTED\]/);
@@ -1403,7 +1439,7 @@ test("buildToolPresentation formats dashboard and doctor status", async () => {
 		envelope: { success: true, data: { pid: 123, port: 4848 } },
 	});
 	assert.equal(dashboard.summary, "Dashboard running on port 4848");
-	assert.equal((dashboard.content[0] as { text: string }).text, "Port: 4848\nPID: 123");
+	assert.equal(readString(readRecord(dashboard.content[0]).text), "Port: 4848\nPID: 123");
 
 	const stopped = await buildToolPresentation({
 		commandInfo: { command: "dashboard", subcommand: "stop" },
@@ -1411,7 +1447,7 @@ test("buildToolPresentation formats dashboard and doctor status", async () => {
 		envelope: { success: true, data: { reason: "not running", stopped: false } },
 	});
 	assert.equal(stopped.summary, "Dashboard not stopped: not running");
-	assert.match((stopped.content[0] as { text: string }).text, /Reason: not running/);
+	assert.match(readString(readRecord(stopped.content[0]).text), /Reason: not running/);
 
 	const doctor = await buildToolPresentation({
 		commandInfo: { command: "doctor" },
@@ -1423,7 +1459,7 @@ test("buildToolPresentation formats dashboard and doctor status", async () => {
 	});
 	assert.equal(doctor.summary, "Doctor: ok");
 	assert.equal(
-		(doctor.content[0] as { text: string }).text,
+		readString(readRecord(doctor.content[0]).text),
 		"Status: ok\nChecks: 1\n1. [info] binary",
 	);
 });
@@ -1519,23 +1555,25 @@ test("buildToolPresentation summarizes non-core command families and redacts dia
 		},
 	] as const;
 
-	for (const item of cases) {
-		const presentation = await buildToolPresentation({
-			commandInfo: item.commandInfo,
-			cwd: process.cwd(),
-			envelope: { success: true, data: item.data },
-		});
-		const text = (presentation.content[0] as { text: string }).text;
-		const serialized = JSON.stringify({
-			data: presentation.data,
-			summary: presentation.summary,
-			text,
-		});
-		const label = `${item.commandInfo.command} ${"subcommand" in item.commandInfo ? item.commandInfo.subcommand : ""}`;
-		assert.equal(presentation.summary, item.expectedSummary, label);
-		assert.match(text, item.expectedText, label);
-		assert.doesNotMatch(serialized, item.forbidden, label);
-	}
+	await Promise.all(
+		cases.map(async (item) => {
+			const presentation = await buildToolPresentation({
+				commandInfo: item.commandInfo,
+				cwd: process.cwd(),
+				envelope: { success: true, data: item.data },
+			});
+			const text = readString(readRecord(presentation.content[0]).text);
+			const serialized = JSON.stringify({
+				data: presentation.data,
+				summary: presentation.summary,
+				text,
+			});
+			const label = `${item.commandInfo.command} ${"subcommand" in item.commandInfo ? item.commandInfo.subcommand : ""}`;
+			assert.equal(presentation.summary, item.expectedSummary, label);
+			assert.match(text, item.expectedText, label);
+			assert.doesNotMatch(serialized, item.forbidden, label);
+		}),
+	);
 });
 
 test("buildToolPresentation compacts large diagnostic output and preserves spill path", async () => {
@@ -1550,17 +1588,17 @@ test("buildToolPresentation compacts large diagnostic output and preserves spill
 	});
 
 	assert.equal(presentation.content[0]?.type, "text");
-	const text = (presentation.content[0] as { text: string }).text;
+	const text = readString(readRecord(presentation.content[0]).text);
 	assert.match(text, /Large console output compacted/);
 	assert.match(text, /Full output path: /);
 	assert.equal(typeof presentation.fullOutputPath, "string");
-	assert.equal((presentation.data as { compacted: boolean }).compacted, true);
+	assert.equal(readRecord(presentation.data).compacted, true);
 
-	const spillPath = presentation.fullOutputPath;
-	assert.ok(spillPath);
+	const spillPath = readString(presentation.fullOutputPath);
+	assert.ok(spillPath.length > 0);
 	assert.match(text, new RegExp(spillPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
-	assert.match(await readFile(String(spillPath), "utf8"), /diagnostic console row 180/);
-	await rm(String(spillPath), { force: true });
+	assert.match(await readFile(spillPath, "utf8"), /diagnostic console row 180/);
+	await rm(spillPath, { force: true });
 });
 
 test("buildToolPresentation command-redacts whole-batch spill data", async () => {
@@ -1591,14 +1629,14 @@ test("buildToolPresentation command-redacts whole-batch spill data", async () =>
 		},
 	});
 
-	assert.equal((presentation.data as { compacted?: boolean }).compacted, true);
-	assert.ok(presentation.fullOutputPath);
-	const spill = await readFile(String(presentation.fullOutputPath), "utf8");
+	assert.equal(readRecord(presentation.data).compacted, true);
+	assert.ok(readString(presentation.fullOutputPath).length > 0);
+	const spill = await readFile(readString(presentation.fullOutputPath), "utf8");
 	assert.doesNotMatch(spill, /raw-cookie-secret/);
 	assert.doesNotMatch(spill, /raw-clipboard-secret/);
 	assert.match(spill, /\[REDACTED\]/);
 	assert.match(spill, /large successful batch row 90/);
-	await rm(String(presentation.fullOutputPath), { force: true });
+	await rm(readString(presentation.fullOutputPath), { force: true });
 });
 
 test("buildToolPresentation keeps failed batch context inline when compacting", async () => {
@@ -1624,7 +1662,7 @@ test("buildToolPresentation keeps failed batch context inline when compacting", 
 	});
 
 	assert.equal(presentation.content[0]?.type, "text");
-	const text = (presentation.content[0] as { text: string }).text;
+	const text = readString(readRecord(presentation.content[0]).text);
 	assert.match(text, /Large batch output compacted/);
 	assert.match(text, /Failure context:/);
 	assert.match(text, /First failing step: 91/);
@@ -1633,10 +1671,10 @@ test("buildToolPresentation keeps failed batch context inline when compacting", 
 	assert.match(text, /Full output path: /);
 	assert.equal(presentation.batchFailure?.failedStep.index, 90);
 	assert.equal(typeof presentation.fullOutputPath, "string");
-	const spillPath = presentation.fullOutputPath;
-	assert.ok(spillPath);
-	assert.match(await readFile(String(spillPath), "utf8"), /large successful batch row 90/);
-	await rm(String(spillPath), { force: true });
+	const spillPath = readString(presentation.fullOutputPath);
+	assert.ok(spillPath.length > 0);
+	assert.match(await readFile(spillPath, "utf8"), /large successful batch row 90/);
+	await rm(spillPath, { force: true });
 });
 
 test("buildToolPresentation bounds long failed command text when compacting batch output", async () => {
@@ -1663,15 +1701,15 @@ test("buildToolPresentation bounds long failed command text when compacting batc
 	});
 
 	assert.equal(presentation.content[0]?.type, "text");
-	const text = (presentation.content[0] as { text: string }).text;
+	const text = readString(readRecord(presentation.content[0]).text);
 	assert.match(text, /Large batch output compacted/);
 	assert.match(text, /Failure context:/);
 	assert.match(text, /First failing step: 91 — wait --text checkout-z+…/);
 	assert.equal(text.includes(longArgument), false);
 	assert.equal(text.includes("END_OF_UNBOUNDED_ARGUMENT"), false);
 	assert.ok(text.length < 4500, `compacted inline output was unexpectedly large: ${text.length}`);
-	const spillPath = presentation.fullOutputPath;
-	assert.ok(spillPath);
-	assert.match(await readFile(String(spillPath), "utf8"), /END_OF_UNBOUNDED_ARGUMENT/);
-	await rm(String(spillPath), { force: true });
+	const spillPath = readString(presentation.fullOutputPath);
+	assert.ok(spillPath.length > 0);
+	assert.match(await readFile(spillPath, "utf8"), /END_OF_UNBOUNDED_ARGUMENT/);
+	await rm(spillPath, { force: true });
 });

@@ -1,7 +1,5 @@
-import { rm } from "node:fs/promises";
-
 import { getAgentBrowserSessionIdentityKey } from "../../argv-grammar.js";
-import { inspectElectronLaunchStatus } from "../../electron/cleanup.js";
+import { inspectElectronLaunchStatus, type ElectronLaunchStatus } from "../../electron/cleanup.js";
 import type { ElectronLaunchRecord } from "../../electron/launch.js";
 import {
 	acquireManagedSessionPolicyLock,
@@ -10,175 +8,85 @@ import {
 import {
 	type ManagedSessionRestoreState,
 	type OwnedManagedSessionContext,
-	pruneOwnedManagedSessionRestoreSnapshots,
-	resolveExplicitAutosaveInterval,
 	withOwnedManagedSessionContext,
 } from "../../managed-session-restore.js";
-import { isManagedSessionRestoreKey } from "../../managed-session-storage.js";
 import { isRecord } from "../../parsing.js";
-import { readProcessStartIdentity } from "../../process-identity.js";
-import {
-	getAgentBrowserProcessEnvironment,
-	withAgentBrowserProcessEnvironment,
-} from "../../process-environment.js";
-import { runAgentBrowserProcess, withAttachedBrowserSessionContext } from "../../process.js";
-import { getAgentBrowserErrorText, parseAgentBrowserEnvelope } from "../../results/envelope.js";
-import { detectConfirmationRequired } from "../../results/confirmation.js";
-import { redactInvocationArgs } from "../../runtime.js";
+import { withAttachedBrowserSessionContext } from "../../process.js";
 import { runSessionCommandData } from "./session-state.js";
+import {
+	getHeadedManagedAutosaveEnv,
+	inspectManagedSessionDaemon,
+	type ManagedSessionDaemonInspection,
+} from "./managed-session-daemon-inspection.js";
 
-const MANAGED_SESSION_DAEMON_INSPECTION_TIMEOUT_MS = 35_000;
-const RUNNING_HEADED_AUTOSAVE_POLICY_CHANGE_ERROR =
-	'AGENT_BROWSER_AUTOSAVE_INTERVAL_MS cannot change a running wrapper-owned headed session\'s launch-time periodic autosave interval. Close that session first, then retry with sessionMode: "fresh" so the new daemon starts with the requested interval.';
+export { closeManagedSession } from "./managed-session-close.js";
+export {
+	getRunningHeadedAutosavePolicyChangeError,
+	inspectManagedSessionDaemon,
+} from "./managed-session-daemon-inspection.js";
+export type { ManagedSessionDaemonInspection } from "./managed-session-daemon-inspection.js";
 
-export function getRunningHeadedAutosavePolicyChangeError(
-	recordedInterval: string | undefined,
-	closeCommand = false,
-): string | undefined {
-	const explicitInterval = resolveExplicitAutosaveInterval(
-		getAgentBrowserProcessEnvironment().AGENT_BROWSER_AUTOSAVE_INTERVAL_MS,
+interface DaemonPolicyOptions {
+	readonly context: OwnedManagedSessionContext;
+	readonly electronLaunchRecord?: ElectronLaunchRecord;
+	readonly electronVerificationTimeoutMs?: number;
+	readonly mode?: "close" | "reuse";
+	readonly signal?: AbortSignal;
+}
+
+interface DaemonPolicyResult {
+	readonly cleanupOnlyReason?: "restore-disabled-daemon-without-provenance";
+	readonly daemonStatus?: ManagedSessionDaemonInspection["status"];
+	readonly error?: string;
+	readonly lock?: ManagedSessionPolicyLock;
+}
+
+type DaemonReceipt = Readonly<ReturnType<ManagedSessionRestoreState["getDaemonReceipt"]>>;
+
+function hasElectronAttachmentIdentity(record: ElectronLaunchRecord): boolean {
+	return (
+		record.webSocketDebuggerUrl !== undefined &&
+		record.webSocketDebuggerUrl !== "" &&
+		record.sessionName !== undefined &&
+		record.sessionName !== ""
 	);
-	return recordedInterval !== undefined &&
-		!closeCommand &&
-		explicitInterval !== undefined &&
-		explicitInterval !== recordedInterval
-		? RUNNING_HEADED_AUTOSAVE_POLICY_CHANGE_ERROR
-		: undefined;
 }
 
-function getHeadedManagedAutosaveEnv(interval: string | undefined): NodeJS.ProcessEnv | undefined {
-	return interval !== undefined ? { AGENT_BROWSER_AUTOSAVE_INTERVAL_MS: interval } : undefined;
-}
-
-export type ManagedSessionDaemonInspection =
-	| { restoreKey: string | null; status: "active"; generation?: string }
-	| { status: "inactive" | "missing-binary" | "unknown" };
-
-export async function inspectManagedSessionDaemon(options: {
-	cwd: string;
-	includeGeneration?: boolean;
-	headedManagedAutosaveInterval?: string;
-	namespace?: string;
-	preserveAttachedBrowserSession?: boolean;
-	sessionName: string;
-	signal?: AbortSignal;
-	timeoutMs?: number;
-}): Promise<ManagedSessionDaemonInspection> {
-	const processResult = await runAgentBrowserProcess({
-		args: [
-			"--json",
-			"--namespace",
-			options.namespace ?? "",
-			"--session",
-			options.sessionName,
-			"session",
-			"info",
-		],
-		cwd: options.cwd,
-		env: getHeadedManagedAutosaveEnv(options.headedManagedAutosaveInterval),
-		preserveAttachedBrowserSession: options.preserveAttachedBrowserSession,
-		signal: options.signal,
-		timeoutMs: options.timeoutMs ?? MANAGED_SESSION_DAEMON_INSPECTION_TIMEOUT_MS,
-	});
-	try {
-		if ((processResult.spawnError as NodeJS.ErrnoException | undefined)?.code === "ENOENT") {
-			return { status: "missing-binary" };
-		}
-		if (processResult.aborted || processResult.spawnError || processResult.exitCode !== 0) {
-			return { status: "unknown" };
-		}
-		const parsed = await parseAgentBrowserEnvelope({
-			stdout: processResult.stdout,
-			stdoutPath: processResult.stdoutSpillPath,
-		});
-		const data =
-			parsed.parseError || parsed.envelope?.success === false ? undefined : parsed.envelope?.data;
-		if (!isRecord(data) || typeof data.active !== "boolean") {
-			return { status: "unknown" };
-		}
-		if (!data.active) {
-			return { status: "inactive" };
-		}
-		if (!isRecord(data.runtime)) {
-			return { status: "unknown" };
-		}
-		let generation: string | undefined;
-		if (
-			options.includeGeneration &&
-			Number.isSafeInteger(data.runtime.backgroundPid) &&
-			Number(data.runtime.backgroundPid) > 0 &&
-			typeof data.runtime.socketDir === "string" &&
-			data.runtime.browserLaunched !== false
-		) {
-			const start = await readProcessStartIdentity(
-				Number(data.runtime.backgroundPid),
-				process.platform,
-				{ signal: options.signal, deadline: Date.now() + (options.timeoutMs ?? 5_000) },
-			);
-			if (start) {
-				generation = JSON.stringify({
-					pid: data.runtime.backgroundPid,
-					start,
-					socketDir: data.runtime.socketDir,
-				});
-			}
-		}
-		if (typeof data.runtime.restoreKey === "string" && data.runtime.restoreKey.length > 0) {
-			return { restoreKey: data.runtime.restoreKey, status: "active", generation };
-		}
-		return data.runtime.restoreKey === null
-			? { restoreKey: null, status: "active", generation }
-			: { status: "unknown" };
-	} finally {
-		if (processResult.stdoutSpillPath) {
-			await rm(processResult.stdoutSpillPath, { force: true }).catch(() => undefined);
-		}
-	}
-}
-
-async function verifyRestoredElectronAttachment(
+function restoredAttachmentTarget(
 	context: OwnedManagedSessionContext,
 	record: ElectronLaunchRecord | undefined,
-	signal?: AbortSignal,
-	timeoutMs?: number,
-): Promise<boolean> {
+): { readonly cwd: string; readonly record: ElectronLaunchRecord } | undefined {
 	const cwd = context.cwd;
+	if (cwd === undefined || cwd === "" || !record || !hasElectronAttachmentIdentity(record)) {
+		return undefined;
+	}
 	if (
-		!cwd ||
-		!record?.webSocketDebuggerUrl ||
-		!record.sessionName ||
 		record.cleanupState === "cleaned" ||
-		getAgentBrowserSessionIdentityKey(record.sessionName, record.namespace) !==
+		getAgentBrowserSessionIdentityKey(record.sessionName ?? "", record.namespace) !==
 			getAgentBrowserSessionIdentityKey(context.sessionName, context.namespace)
 	) {
-		return false;
+		return undefined;
 	}
-	const status = await inspectElectronLaunchStatus(record, signal);
-	if (
-		signal?.aborted ||
-		status.pidAlive !== true ||
-		status.userDataDirState !== "present" ||
-		status.version?.webSocketDebuggerUrl !== record.webSocketDebuggerUrl
-	) {
-		return false;
-	}
-	// This metadata probe must not grant daemon provenance just by spawning.
-	const connection = await withAttachedBrowserSessionContext(true, () =>
-		withOwnedManagedSessionContext(undefined, () =>
-			runSessionCommandData({
-				args: ["get", "cdp-url"],
-				cwd,
-				env: getHeadedManagedAutosaveEnv(context.headedManagedAutosaveInterval),
-				namespace: context.namespace,
-				pinNamespace: true,
-				sessionName: context.sessionName,
-				signal,
-				timeoutMs,
-			}),
-		),
-	);
+	return { cwd, record };
+}
+
+function attachmentStatusMatches(
+	record: ElectronLaunchRecord,
+	status: ElectronLaunchStatus,
+): boolean {
 	return (
-		!signal?.aborted &&
+		status.pidAlive === true &&
+		status.userDataDirState === "present" &&
+		status.version?.webSocketDebuggerUrl === record.webSocketDebuggerUrl
+	);
+}
+
+function attachmentConnectionMatches(
+	connection: unknown,
+	record: ElectronLaunchRecord,
+	status: ElectronLaunchStatus,
+): boolean {
+	return (
 		isRecord(connection) &&
 		typeof connection.cdpUrl === "string" &&
 		(connection.cdpUrl === record.webSocketDebuggerUrl ||
@@ -186,20 +94,165 @@ async function verifyRestoredElectronAttachment(
 	);
 }
 
-export async function acquireOwnedManagedSessionDaemonPolicy(options: {
-	context: OwnedManagedSessionContext;
-	electronLaunchRecord?: ElectronLaunchRecord;
-	electronVerificationTimeoutMs?: number;
-	mode?: "close" | "reuse";
-	signal?: AbortSignal;
-}): Promise<{
-	cleanupOnlyReason?: "restore-disabled-daemon-without-provenance";
-	daemonStatus?: ManagedSessionDaemonInspection["status"];
-	error?: string;
-	lock?: ManagedSessionPolicyLock;
-}> {
+async function verifyRestoredElectronAttachment(options: DaemonPolicyOptions): Promise<boolean> {
 	const { context, signal } = options;
-	if (!context.cwd) {
+	const attachment = restoredAttachmentTarget(context, options.electronLaunchRecord);
+	if (!attachment) {
+		return false;
+	}
+	const status = await inspectElectronLaunchStatus(attachment.record, signal);
+	if (signal?.aborted === true || !attachmentStatusMatches(attachment.record, status)) {
+		return false;
+	}
+	// This metadata probe must not grant daemon provenance just by spawning.
+	const connection = await withAttachedBrowserSessionContext(true, () =>
+		withOwnedManagedSessionContext(undefined, () =>
+			runSessionCommandData({
+				args: ["get", "cdp-url"],
+				cwd: attachment.cwd,
+				env: getHeadedManagedAutosaveEnv(context.headedManagedAutosaveInterval),
+				namespace: context.namespace,
+				pinNamespace: true,
+				sessionName: context.sessionName,
+				signal,
+				timeoutMs: options.electronVerificationTimeoutMs,
+			}),
+		),
+	);
+	return (
+		// The abort callback can change this signal during the awaited CDP read; static narrowing does not model it.
+		// oxlint-disable-next-line typescript/no-unnecessary-condition
+		!(signal?.aborted ?? false) &&
+		attachmentConnectionMatches(connection, attachment.record, status)
+	);
+}
+
+function reconcileDaemonReceipt(
+	context: OwnedManagedSessionContext,
+	daemon: ManagedSessionDaemonInspection,
+	receipt: DaemonReceipt,
+): void {
+	if (daemon.status === "inactive") {
+		context.restoreState.forgetDaemonRestoreKey(context.sessionName, context.namespace);
+	}
+	if (
+		daemon.status !== "active" ||
+		receipt === undefined ||
+		context.restoreState.hasDaemonRestoreKey(context.sessionName, context.namespace)
+	) {
+		return;
+	}
+	if (daemon.generation === receipt.generation && daemon.restoreKey === receipt.restoreKey) {
+		context.restoreState.recordDaemonRestoreKey(
+			context.sessionName,
+			context.namespace,
+			daemon.restoreKey,
+			daemon.generation,
+		);
+	} else {
+		context.restoreState.forgetDaemonRestoreKey(context.sessionName, context.namespace);
+	}
+}
+
+function daemonPolicyMismatch(
+	daemon: ManagedSessionDaemonInspection,
+	restoreDisabledPolicyNeedsProvenance: boolean,
+	hasKnownDaemonRestoreKey: boolean,
+): DaemonPolicyResult {
+	return {
+		cleanupOnlyReason:
+			daemon.status === "active" &&
+			restoreDisabledPolicyNeedsProvenance &&
+			!hasKnownDaemonRestoreKey
+				? "restore-disabled-daemon-without-provenance"
+				: undefined,
+		daemonStatus: daemon.status,
+		error: [
+			"This wrapper-owned session's live daemon does not match the requested managed-restore policy.",
+			'Close that session first, retry with sessionMode: "fresh", or use a distinct explicit --session.',
+		].join(" "),
+	};
+}
+
+async function validateReusableDaemonPolicy(
+	options: DaemonPolicyOptions,
+	daemon: ManagedSessionDaemonInspection,
+): Promise<DaemonPolicyResult> {
+	const { context } = options;
+	const stickyDisabled = context.restoreState.isDisabled(context.sessionName, context.namespace);
+	let hasKnownDaemonRestoreKey = context.restoreState.hasDaemonRestoreKey(
+		context.sessionName,
+		context.namespace,
+	);
+	const knownDaemonRestoreKey = context.restoreState.getDaemonRestoreKey(
+		context.sessionName,
+		context.namespace,
+	);
+	const requestedDaemonRestoreKey =
+		context.restoreDecision === "enabled" && stickyDisabled
+			? (knownDaemonRestoreKey ?? null)
+			: context.expectedDaemonRestoreKey;
+	if (daemon.status === "unknown") {
+		return {
+			error:
+				'The wrapper could not verify this managed session\'s live daemon restore policy. Retry, close that session, or use sessionMode: "fresh".',
+		};
+	}
+	const restoreDisabledPolicyNeedsProvenance =
+		stickyDisabled || context.restoreDecision !== "enabled";
+	if (
+		daemon.status === "active" &&
+		restoreDisabledPolicyNeedsProvenance &&
+		!hasKnownDaemonRestoreKey &&
+		daemon.restoreKey === requestedDaemonRestoreKey
+	) {
+		hasKnownDaemonRestoreKey = await verifyRestoredElectronAttachment(options);
+	}
+	return finishReusableDaemonPolicy(
+		context,
+		daemon,
+		{
+			restoreDisabledPolicyNeedsProvenance,
+			requestedDaemonRestoreKey,
+		},
+		hasKnownDaemonRestoreKey,
+	);
+}
+
+function finishReusableDaemonPolicy(
+	context: OwnedManagedSessionContext,
+	daemon: ManagedSessionDaemonInspection,
+	policy: {
+		readonly restoreDisabledPolicyNeedsProvenance: boolean;
+		readonly requestedDaemonRestoreKey: OwnedManagedSessionContext["expectedDaemonRestoreKey"];
+	},
+	hasKnownDaemonRestoreKey: boolean,
+): DaemonPolicyResult {
+	const activePolicyMatches =
+		daemon.status === "active" &&
+		(!policy.restoreDisabledPolicyNeedsProvenance || hasKnownDaemonRestoreKey) &&
+		daemon.restoreKey === policy.requestedDaemonRestoreKey;
+	if (activePolicyMatches) {
+		context.restoreState.recordDaemonRestoreKey(
+			context.sessionName,
+			context.namespace,
+			daemon.restoreKey,
+		);
+	}
+	return !["inactive", "missing-binary"].includes(daemon.status) && !activePolicyMatches
+		? daemonPolicyMismatch(
+				daemon,
+				policy.restoreDisabledPolicyNeedsProvenance,
+				hasKnownDaemonRestoreKey,
+			)
+		: { daemonStatus: daemon.status };
+}
+
+export async function acquireOwnedManagedSessionDaemonPolicy(
+	options: DaemonPolicyOptions,
+): Promise<DaemonPolicyResult> {
+	const { context, signal } = options;
+	if (context.cwd === undefined || context.cwd === "") {
 		return { error: "Managed-session policy validation requires the wrapper-owned session cwd." };
 	}
 	const lock = await acquireManagedSessionPolicyLock({
@@ -208,14 +261,13 @@ export async function acquireOwnedManagedSessionDaemonPolicy(options: {
 		signal,
 	});
 	if (!lock) {
-		return signal?.aborted
+		return signal?.aborted === true
 			? {}
 			: {
 					error:
 						"Managed-session policy coordination is unavailable or busy. Retry after the current operation finishes, repair the private policy-lock directory, and on POSIX verify that /bin/ps, /usr/bin/ps, or ps through PATH is available.",
 				};
 	}
-
 	try {
 		const receipt = context.restoreState.getDaemonReceipt(context.sessionName, context.namespace);
 		const daemon = await inspectManagedSessionDaemon({
@@ -228,25 +280,7 @@ export async function acquireOwnedManagedSessionDaemonPolicy(options: {
 			sessionName: context.sessionName,
 			signal,
 		});
-		if (daemon.status === "inactive") {
-			context.restoreState.forgetDaemonRestoreKey(context.sessionName, context.namespace);
-		}
-		if (
-			daemon.status === "active" &&
-			receipt &&
-			!context.restoreState.hasDaemonRestoreKey(context.sessionName, context.namespace)
-		) {
-			if (daemon.generation === receipt.generation && daemon.restoreKey === receipt.restoreKey) {
-				context.restoreState.recordDaemonRestoreKey(
-					context.sessionName,
-					context.namespace,
-					daemon.restoreKey,
-					daemon.generation,
-				);
-			} else {
-				context.restoreState.forgetDaemonRestoreKey(context.sessionName, context.namespace);
-			}
-		}
+		reconcileDaemonReceipt(context, daemon, receipt);
 		if (options.mode === "close") {
 			if (daemon.status === "active") {
 				context.restoreState.recordDaemonRestoreKey(
@@ -257,218 +291,9 @@ export async function acquireOwnedManagedSessionDaemonPolicy(options: {
 			}
 			return { daemonStatus: daemon.status, lock };
 		}
-
-		const stickyDisabled = context.restoreState.isDisabled(context.sessionName, context.namespace);
-		let hasKnownDaemonRestoreKey = context.restoreState.hasDaemonRestoreKey(
-			context.sessionName,
-			context.namespace,
-		);
-		const knownDaemonRestoreKey = context.restoreState.getDaemonRestoreKey(
-			context.sessionName,
-			context.namespace,
-		);
-		const requestedDaemonRestoreKey =
-			context.restoreDecision === "enabled" && stickyDisabled
-				? (knownDaemonRestoreKey ?? null)
-				: context.expectedDaemonRestoreKey;
-		if (daemon.status === "unknown") {
-			return {
-				error:
-					'The wrapper could not verify this managed session\'s live daemon restore policy. Retry, close that session, or use sessionMode: "fresh".',
-				lock,
-			};
-		}
-		const restoreDisabledPolicyNeedsProvenance =
-			stickyDisabled || context.restoreDecision !== "enabled";
-		if (
-			daemon.status === "active" &&
-			restoreDisabledPolicyNeedsProvenance &&
-			!hasKnownDaemonRestoreKey &&
-			daemon.restoreKey === requestedDaemonRestoreKey
-		) {
-			hasKnownDaemonRestoreKey = await verifyRestoredElectronAttachment(
-				context,
-				options.electronLaunchRecord,
-				signal,
-				options.electronVerificationTimeoutMs,
-			);
-		}
-		const activePolicyMatches =
-			daemon.status === "active" &&
-			(!restoreDisabledPolicyNeedsProvenance || hasKnownDaemonRestoreKey) &&
-			daemon.restoreKey === requestedDaemonRestoreKey;
-		if (activePolicyMatches) {
-			context.restoreState.recordDaemonRestoreKey(
-				context.sessionName,
-				context.namespace,
-				daemon.restoreKey,
-			);
-		}
-		return !["inactive", "missing-binary"].includes(daemon.status) && !activePolicyMatches
-			? {
-					cleanupOnlyReason:
-						daemon.status === "active" &&
-						restoreDisabledPolicyNeedsProvenance &&
-						!hasKnownDaemonRestoreKey
-							? "restore-disabled-daemon-without-provenance"
-							: undefined,
-					daemonStatus: daemon.status,
-					error: [
-						"This wrapper-owned session's live daemon does not match the requested managed-restore policy.",
-						'Close that session first, retry with sessionMode: "fresh", or use a distinct explicit --session.',
-					].join(" "),
-					lock,
-				}
-			: { daemonStatus: daemon.status, lock };
+		return { ...(await validateReusableDaemonPolicy(options, daemon)), lock };
 	} catch (error) {
 		await lock.release();
 		throw error;
 	}
-}
-
-export async function closeManagedSession(options: {
-	confirmActions?: string;
-	cwd: string;
-	headedManagedAutosaveInterval?: string;
-	namespace?: string;
-	policyLock?: ManagedSessionPolicyLock;
-	preserveAttachedBrowserSession?: boolean;
-	restoreState: ManagedSessionRestoreState;
-	sessionName: string;
-	socketDir?: string;
-	timeoutMs: number;
-}): Promise<string | undefined> {
-	return withAgentBrowserProcessEnvironment(
-		{
-			AGENT_BROWSER_CONFIRM_ACTIONS: options.confirmActions,
-			...(options.socketDir ? { PI_AGENT_BROWSER_SOCKET_DIR: options.socketDir } : {}),
-		},
-		async () => {
-			const controller = new AbortController();
-			let phase = "policy coordination";
-			let phaseStartedAt = Date.now();
-			let timeoutError: string | undefined;
-			const timer = setTimeout(() => {
-				timeoutError = `Managed-session cleanup timed out after ${options.timeoutMs} ms during ${phase} (${Date.now() - phaseStartedAt} ms in this phase).`;
-				controller.abort();
-			}, options.timeoutMs);
-			let stdoutSpillPath: string | undefined;
-			const closeArgs = [
-				...(options.namespace !== undefined ? ["--namespace", options.namespace] : []),
-				"--session",
-				options.sessionName,
-				"close",
-			];
-			const policyLock =
-				options.policyLock ??
-				(await acquireManagedSessionPolicyLock({
-					namespace: options.namespace,
-					sessionName: options.sessionName,
-					signal: controller.signal,
-					timeoutMs: Math.min(options.timeoutMs, 1_000),
-				}));
-			if (!policyLock) {
-				clearTimeout(timer);
-				return (
-					timeoutError ??
-					"Managed-session policy coordination is unavailable or busy; cleanup did not run. Retry after the current operation finishes or repair the private policy-lock directory."
-				);
-			}
-			try {
-				phase = "daemon inspection";
-				phaseStartedAt = Date.now();
-				const daemon = await inspectManagedSessionDaemon({
-					cwd: options.cwd,
-					headedManagedAutosaveInterval: options.headedManagedAutosaveInterval,
-					namespace: options.namespace,
-					preserveAttachedBrowserSession: options.preserveAttachedBrowserSession,
-					sessionName: options.sessionName,
-					signal: controller.signal,
-					timeoutMs: Math.min(options.timeoutMs, 2_000),
-				});
-				if (daemon.status === "active") {
-					options.restoreState.recordDaemonRestoreKey(
-						options.sessionName,
-						options.namespace,
-						daemon.restoreKey,
-					);
-				}
-				const daemonRestoreKey = options.restoreState.getDaemonRestoreKey(
-					options.sessionName,
-					options.namespace,
-				);
-				const ownedRestoreKey =
-					!options.restoreState.isDisabled(options.sessionName, options.namespace) &&
-					isManagedSessionRestoreKey(daemonRestoreKey)
-						? daemonRestoreKey
-						: null;
-				phase = "native close";
-				phaseStartedAt = Date.now();
-				const processResult = await runAgentBrowserProcess({
-					args: closeArgs,
-					cwd: options.cwd,
-					env: {
-						AGENT_BROWSER_JSON: "1",
-						...getHeadedManagedAutosaveEnv(options.headedManagedAutosaveInterval),
-					},
-					managedSessionRestoreState: options.restoreState,
-					ownedManagedSession: true,
-					preserveAttachedBrowserSession: options.preserveAttachedBrowserSession,
-					signal: controller.signal,
-				});
-				clearTimeout(timer);
-				stdoutSpillPath = processResult.stdoutSpillPath;
-				const parsed = await parseAgentBrowserEnvelope({
-					stdout: processResult.stdout,
-					stdoutPath: processResult.stdoutSpillPath,
-				});
-				if (!processResult.aborted && !processResult.spawnError && processResult.exitCode === 0) {
-					const data =
-						parsed.envelope?.success === true &&
-						isRecord(parsed.envelope.data) &&
-						parsed.envelope.data.closed === true
-							? parsed.envelope.data
-							: undefined;
-					if (data) {
-						options.restoreState.clear(options.sessionName, options.namespace);
-						pruneOwnedManagedSessionRestoreSnapshots({
-							cwd: options.cwd,
-							namespace: options.namespace,
-							restoreKey: ownedRestoreKey,
-							statePath: typeof data.statePath === "string" ? data.statePath : undefined,
-						});
-					}
-				}
-				const pending = detectConfirmationRequired(parsed.envelope?.data);
-				return (
-					timeoutError ??
-					(pending
-						? `Native close requires confirmation (${pending.id}); the session remains wrapper-owned.`
-						: getAgentBrowserErrorText({
-								aborted: processResult.aborted,
-								command: "close",
-								effectiveArgs: redactInvocationArgs(closeArgs),
-								envelope: parsed.envelope,
-								exitCode: processResult.exitCode,
-								parseError: parsed.parseError,
-								plainTextInspection: false,
-								spawnError: processResult.spawnError,
-								stderr: processResult.stderr,
-								timedOut: processResult.timedOut,
-								timeoutMs: processResult.timeoutMs,
-							}))
-				);
-			} catch (error) {
-				return timeoutError ?? (error instanceof Error ? error.message : String(error));
-			} finally {
-				clearTimeout(timer);
-				if (stdoutSpillPath) {
-					await rm(stdoutSpillPath, { force: true }).catch(() => undefined);
-				}
-				if (!options.policyLock) {
-					await policyLock.release();
-				}
-			}
-		},
-	);
 }

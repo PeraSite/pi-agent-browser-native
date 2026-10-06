@@ -8,7 +8,9 @@ import { isPlainTextInspectionArgs } from "./runtime.js";
 import {
 	projectAgentBrowserObservation,
 	OBSERVATION_INLINE_MAX_CHARS,
+	isStringArray,
 } from "./results/presentation/content.js";
+import { renderAgentBrowserObservation } from "./results/presentation/large-output.js";
 
 export const AGENT_BROWSER_NAMESPACE: ToolNamespace = {
 	name: "browser",
@@ -33,6 +35,40 @@ export const AGENT_BROWSER_OUTPUT_SCHEMA = JsonSchema.Object(
 	{ additionalProperties: true },
 );
 
+function inputArgs(input: unknown): readonly string[] | undefined {
+	return isRecord(input) && isStringArray(input.args) ? input.args : undefined;
+}
+
+function isJsonRequest(input: unknown): boolean {
+	return (
+		isRecord(input) && ("code" in input || isBooleanFlagEnabled(inputArgs(input) ?? [], "--json"))
+	);
+}
+
+function isJsonValue(value: unknown): value is JsonValue {
+	if (
+		value === null ||
+		typeof value === "string" ||
+		typeof value === "number" ||
+		typeof value === "boolean"
+	) {
+		return true;
+	}
+	if (Array.isArray(value)) {
+		return value.every(isJsonValue);
+	}
+	return isRecord(value) && Object.values(value).every(isJsonValue);
+}
+
+function serializedObservation(value: unknown): JsonValue {
+	// Serialization keeps native JSON omission/coercion semantics; validate the decoded unknown boundary.
+	const decoded: unknown = JSON.parse(JSON.stringify(value));
+	if (!isJsonValue(decoded)) {
+		throw new Error("Browser observation did not serialize to a JSON value.");
+	}
+	return decoded;
+}
+
 /** Final public boundary, after execution, persistence, and any requested output export. */
 export async function finalizeAgentBrowserNativeResult<T extends AgentToolResult<unknown>>(
 	result: T,
@@ -40,7 +76,7 @@ export async function finalizeAgentBrowserNativeResult<T extends AgentToolResult
 ): Promise<T> {
 	const finalized = finalizeAgentBrowserFailure(result, input);
 	// Native help/version stays plain text; the entrypoint intentionally skips observation rendering for it.
-	if (isRecord(input) && Array.isArray(input.args) && isPlainTextInspectionArgs(input.args)) {
+	if (isPlainTextInspectionArgs(inputArgs(input) ?? [])) {
 		return finalized;
 	}
 	const succeeded = finalized.isError !== true;
@@ -51,16 +87,11 @@ export async function finalizeAgentBrowserNativeResult<T extends AgentToolResult
 	const details = isRecord(result.details) ? result.details : {};
 	const observation = projectAgentBrowserObservation(details, succeeded);
 	if (JSON.stringify(observation).length > OBSERVATION_INLINE_MAX_CHARS) {
-		const { renderAgentBrowserObservation } =
-			await import("./results/presentation/large-output.js");
 		const rendered = await renderAgentBrowserObservation({
 			content: finalized.content,
 			details,
 			succeeded,
-			json:
-				isRecord(input) &&
-				("code" in input ||
-					(Array.isArray(input.args) && isBooleanFlagEnabled(input.args, "--json"))),
+			json: isJsonRequest(input),
 			// The caller's exact visible output stays inline (for example formatted search results); only the structured field is bounded.
 			preserveContent: true,
 		});
@@ -74,5 +105,5 @@ export async function finalizeAgentBrowserNativeResult<T extends AgentToolResult
 			input,
 		);
 	}
-	return { ...finalized, structuredContent: JSON.parse(JSON.stringify(observation)) as JsonValue };
+	return { ...finalized, structuredContent: serializedObservation(observation) };
 }

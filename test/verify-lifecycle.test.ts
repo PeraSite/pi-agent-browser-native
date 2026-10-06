@@ -7,6 +7,7 @@
  */
 
 import assert from "node:assert/strict";
+import { readRecord, readArray, readString } from "./helpers/assertions.js";
 import { execFile as execFileCallback } from "node:child_process";
 import { appendFile, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -17,67 +18,26 @@ import test from "node:test";
 
 import { TARGET_AGENT_BROWSER_VERSION_LABEL } from "../scripts/agent-browser-target.mjs";
 
+// Node's execFile has custom promisify semantics; its callback API returns ChildProcess,
+// while promisify's ambient callback declaration returns void. Preserve the native adapter.
+// oxlint-disable-next-line typescript/strict-void-return
 const execFile = promisify(execFileCallback);
 
 type LifecycleResult = {
-	toolCallId?: string;
-	isError?: boolean;
-	content?: Array<{ type: string; text: string }>;
-	details?: {
-		command?: string;
-		resultCategory?: string;
-		failureCategory?: string;
-		data?: unknown;
-		sessionName?: string;
-		sessionTabTarget?: { url: string };
+	readonly toolCallId?: string;
+	readonly isError?: boolean;
+	readonly content?: readonly { readonly type: string; readonly text: string }[];
+	readonly details?: {
+		readonly command?: string;
+		readonly resultCategory?: string;
+		readonly failureCategory?: string;
+		readonly data?: unknown;
+		readonly sessionName?: string;
+		readonly sessionTabTarget?: { readonly url: string };
 	};
 };
 
-const lifecycleModule = (await import("../scripts/verify-lifecycle.mjs")) as unknown as {
-	agentBrowserResults: (entries: unknown[]) => Array<{
-		content?: Array<{ text?: string; type?: string }>;
-		details?: { fullOutputPath?: string; fullOutputPaths?: string[]; sessionName?: string };
-		toolName?: string;
-	}>;
-	buildPiLaunchArgs: (options: { model: string; sessionId: string }) => string[];
-	buildSettingsPayload: (options: { packageDir: string; sessionDir: string }) => {
-		enableInstallTelemetry: boolean;
-		extensions: string[];
-		packages: string[];
-		prompts: string[];
-		quietStartup: boolean;
-		sessionDir: string;
-		skills: string[];
-		themes: string[];
-	};
-	collectFullOutputPaths: (results: unknown[]) => string[];
-	createLifecycleSessionId: (pid?: number) => string;
-	fakeAgentBrowserScript: () => string;
-	injectLifecycleSentinelSource: (source: string, token: string) => string;
-	isDirectRun: (metaUrl: string, argv?: string[]) => boolean;
-	matchesSuccessfulPageResult: (result: unknown, command: string, expectedUrl: string) => boolean;
-	waitForAgentBrowserResult: (options: {
-		describe: string;
-		sessionFile?: string;
-		sessionDir?: string;
-		timeoutMs: number;
-		sinceCount: number;
-		predicate: (result: LifecycleResult) => boolean;
-	}) => Promise<{ result: LifecycleResult; sessionFile: string }>;
-	paneLooksReady: (pane: string) => boolean;
-	parseCliArgs: (argv?: string[]) => {
-		keepArtifacts: boolean;
-		model: string;
-		showHelp: boolean;
-		timeoutMs: number;
-		verbose: boolean;
-	};
-	parseJsonl: (text: string) => unknown[];
-	sentinelTokens: (entries: unknown[]) => string[];
-	sessionHeaderId: (entries: unknown[]) => string | undefined;
-	tmuxActiveTarget: (tmuxSession: string) => string;
-};
-
+import * as lifecycleModule from "../scripts/verify-lifecycle.mjs";
 const {
 	agentBrowserResults,
 	buildPiLaunchArgs,
@@ -134,7 +94,11 @@ test("fake lifecycle agent-browser reports the canonical upstream version withou
 	try {
 		await writeFile(scriptPath, lifecycleModule.fakeAgentBrowserScript(), "utf8");
 		for (const args of [["--version"], ["--allow-file-access", "false", "--version"]]) {
+			// Keep child execution and its stdout assertion paired before checking the next argv variant.
+			// oxlint-disable-next-line no-await-in-loop
 			const { stdout } = await execFile(process.execPath, [scriptPath, ...args], { env: {} });
+			// Both fixed version argv variants must produce the same canonical native version.
+			// oxlint-disable-next-line node-test/no-conditional-assertion
 			assert.equal(stdout, TARGET_AGENT_BROWSER_VERSION_LABEL);
 		}
 	} finally {
@@ -253,12 +217,12 @@ test("parseJsonl and extraction helpers read agent_browser results and sentinel 
 
 	assert.equal(sessionHeaderId(entries), "piab-lifecycle-4242");
 	assert.deepEqual(sentinelTokens(entries), ["v1", "v2"]);
-	const results = agentBrowserResults(entries);
+	const results = readArray(agentBrowserResults(entries)).map(readRecord);
 	assert.deepEqual(
 		results.map((result) => result.toolName),
 		["agent_browser", "agent_browser_code", "agent_browser_qa"],
 	);
-	assert.equal(results[0]?.details?.sessionName, "s1");
+	assert.equal(readRecord(results[0].details).sessionName, "s1");
 	assert.deepEqual(collectFullOutputPaths(results), ["/tmp/a.txt"]);
 });
 
@@ -375,6 +339,8 @@ test("lifecycle page checks require successful expected-command observed data, n
 				},
 			},
 		]) {
+			// Every fixed malformed/mismatched page result must fail the lifecycle matcher.
+			// oxlint-disable-next-line node-test/no-conditional-assertion
 			assert.equal(
 				matchesSuccessfulPageResult(result, command, "https://react.dev/"),
 				false,
@@ -405,7 +371,8 @@ for (const laterSuccess of [false, true]) {
 					sessionFile,
 					timeoutMs: 20,
 					sinceCount: 1,
-					predicate: (result) => result.toolCallId === successfulSnapshot.toolCallId,
+					predicate: (result: unknown) =>
+						readRecord(result).toolCallId === successfulSnapshot.toolCallId,
 				}),
 				/Unexpected agent_browser result.*call_1423577b6db24f3b9b3c6637.*category failure\/tab-drift/,
 			);
@@ -452,15 +419,18 @@ test("lifecycle wait discovers the initial transcript for observed open validati
 				},
 			}),
 		);
-		const opened = await waitForAgentBrowserResult({
-			describe: "initial open",
-			sessionDir: directory,
-			timeoutMs: 2000,
-			sinceCount: 0,
-			predicate: (result) => matchesSuccessfulPageResult(result, "open", "https://react.dev/"),
-		});
+		const opened = readRecord(
+			await waitForAgentBrowserResult({
+				describe: "initial open",
+				sessionDir: directory,
+				timeoutMs: 2000,
+				sinceCount: 0,
+				predicate: (result: unknown) =>
+					matchesSuccessfulPageResult(result, "open", "https://react.dev/"),
+			}),
+		);
 		// Native find may return mixed separators; assert the discovered file's identity, not its spelling.
-		assert.equal(await realpath(opened.sessionFile), await realpath(sessionFile));
+		assert.equal(await realpath(readString(opened.sessionFile)), await realpath(sessionFile));
 		assert.equal(matchesSuccessfulPageResult(opened.result, "open", "https://react.dev/"), true);
 	} finally {
 		await rm(directory, { force: true, recursive: true });
@@ -482,13 +452,18 @@ test("lifecycle wait accepts a newly appended expected QA failure using the orig
 			sessionFile,
 			timeoutMs: 2000,
 			sinceCount: 0,
-			predicate: (result) =>
-				result?.details?.failureCategory === "qa-failure" &&
-				result?.details?.resultCategory === "failure" &&
-				result?.isError === true,
+			predicate: (result: unknown) => {
+				const row = readRecord(result);
+				const details = readRecord(row.details);
+				return (
+					details.failureCategory === "qa-failure" &&
+					details.resultCategory === "failure" &&
+					row.isError === true
+				);
+			},
 		});
 		await appendFile(sessionFile, lifecycleResultLine(qaFailure));
-		assert.equal((await waiting).result.toolCallId, qaFailure.toolCallId);
+		assert.equal(readRecord(readRecord(await waiting).result).toolCallId, qaFailure.toolCallId);
 	} finally {
 		await rm(directory, { force: true, recursive: true });
 	}
@@ -505,7 +480,9 @@ test("collectFullOutputPaths de-duplicates primary and secondary spill paths", (
 });
 
 test("parseJsonl reports malformed session transcript lines", () => {
-	assert.throws(() => parseJsonl('{"ok":true}\nnot-json'), /Invalid JSONL at line 2/);
+	assert.throws(() => {
+		parseJsonl('{"ok":true}\nnot-json');
+	}, /Invalid JSONL at line 2/);
 });
 
 test("injectLifecycleSentinelSource inserts and replaces one command inside the compiled extension factory", async () => {
@@ -520,19 +497,33 @@ test("injectLifecycleSentinelSource inserts and replaces one command inside the 
 			/\n\t\/\/ PIAB_LIFECYCLE_SENTINEL_START[\s\S]*?\n\t\/\/ PIAB_LIFECYCLE_SENTINEL_END\n/;
 		let injected = source;
 		for (const token of ["v1", "v2"]) {
-			injected = injectLifecycleSentinelSource(injected, token);
+			injected = readString(injectLifecycleSentinelSource(injected, token));
+			// Both ordered sentinel revisions must register their own lifecycle command.
+			// oxlint-disable-next-line node-test/no-conditional-assertion
 			assert.match(
 				injected,
 				new RegExp(`pi\\.registerCommand\\("piab-lifecycle-sentinel-${token}"`),
 			);
+			// Both ordered sentinel revisions must persist their own exact token.
+			// oxlint-disable-next-line node-test/no-conditional-assertion
 			assert.match(
 				injected,
 				new RegExp(`pi\\.appendEntry\\("piab-lifecycle-sentinel", \\{ token: "${token}" \\}\\);`),
 			);
+			// Both sentinel replacements must preserve all unrelated compiled source bytes.
+			// oxlint-disable-next-line node-test/no-conditional-assertion
 			assert.equal(injected.replace(sentinelBlock, ""), source);
+			// Both ordered revisions must retain exactly one injected sentinel start marker.
+			// oxlint-disable-next-line node-test/no-conditional-assertion
 			assert.equal((injected.match(/PIAB_LIFECYCLE_SENTINEL_START/g) ?? []).length, 1);
+			// Both ordered revisions must retain exactly one injected sentinel end marker.
+			// oxlint-disable-next-line node-test/no-conditional-assertion
 			assert.equal((injected.match(/PIAB_LIFECYCLE_SENTINEL_END/g) ?? []).length, 1);
+			// The next sentinel revision reuses this path only after the current syntax check.
+			// oxlint-disable-next-line no-await-in-loop
 			await writeFile(checkPath, injected, "utf8");
+			// Check the current revision before its file is replaced by the next injected token.
+			// oxlint-disable-next-line no-await-in-loop
 			await execFile(process.execPath, ["--check", checkPath]);
 		}
 		assert.doesNotMatch(injected, /piab-lifecycle-sentinel-v1|token: "v1"/);

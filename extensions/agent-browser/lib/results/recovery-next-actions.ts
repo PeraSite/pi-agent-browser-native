@@ -1,21 +1,22 @@
 import { buildAgentBrowserNextActions } from "./action-recommendations.js";
 import { type AgentBrowserNextAction, withOptionalSessionArgs } from "./next-actions.js";
+import type { AgentBrowserRecoveryContext } from "./action-contracts.js";
 
 export interface TabRecoveryCorrection {
-	selectedTab?: string;
-	targetTitle?: string;
-	targetUrl?: string;
+	readonly selectedTab?: string;
+	readonly targetTitle?: string;
+	readonly targetUrl?: string;
 }
 
 export interface TabRecoveryTarget {
-	title?: string;
-	url?: string;
+	readonly title?: string;
+	readonly url?: string;
 }
 
 export function buildConnectedSessionNextActions(
 	sessionName: string | undefined,
-): AgentBrowserNextAction[] {
-	if (!sessionName) {
+): readonly AgentBrowserNextAction[] {
+	if ((sessionName ?? "") === "") {
 		return [];
 	}
 	return (
@@ -29,8 +30,8 @@ export function buildConnectedSessionNextActions(
 
 export function buildNoActivePageNextActions(
 	sessionName: string | undefined,
-): AgentBrowserNextAction[] {
-	if (!sessionName) {
+): readonly AgentBrowserNextAction[] {
+	if ((sessionName ?? "") === "") {
 		return [];
 	}
 	return (
@@ -43,7 +44,7 @@ export function buildNoActivePageNextActions(
 
 export function buildPendingWebMcpNextActions(
 	sessionName: string | undefined,
-): AgentBrowserNextAction[] {
+): readonly AgentBrowserNextAction[] {
 	return [
 		{
 			id: "verify-page-target-after-pending-webmcp",
@@ -57,25 +58,35 @@ export function buildPendingWebMcpNextActions(
 	];
 }
 
-export function buildSessionTabRecoveryNextActions(options: {
-	kind: "about-blank" | "tab-drift";
-	recoveryApplied?: boolean;
-	resultCategory?: "failure" | "success";
-	sessionName?: string;
-	tabCorrection?: TabRecoveryCorrection;
-	target?: TabRecoveryTarget;
-}): AgentBrowserNextAction[] {
+interface SessionTabRecoveryOptions {
+	readonly kind: "about-blank" | "tab-drift";
+	readonly recoveryApplied?: boolean;
+	readonly resultCategory?: "failure" | "success";
+	readonly sessionName?: string;
+	readonly tabCorrection?: TabRecoveryCorrection;
+	readonly target?: TabRecoveryTarget;
+}
+
+function getSessionTabRecoveryContext(
+	options: SessionTabRecoveryOptions,
+): AgentBrowserRecoveryContext {
+	return {
+		kind: options.kind,
+		recoveryApplied: options.recoveryApplied,
+		selectedTab: options.tabCorrection?.selectedTab,
+		sessionName: options.sessionName,
+		targetTitle: options.tabCorrection?.targetTitle ?? options.target?.title,
+		targetUrl: options.tabCorrection?.targetUrl ?? options.target?.url,
+	};
+}
+
+export function buildSessionTabRecoveryNextActions(
+	options: SessionTabRecoveryOptions,
+): readonly AgentBrowserNextAction[] {
 	const resultCategory = options.resultCategory ?? "success";
 	return (
 		buildAgentBrowserNextActions({
-			recovery: {
-				kind: options.kind,
-				recoveryApplied: options.recoveryApplied,
-				selectedTab: options.tabCorrection?.selectedTab,
-				sessionName: options.sessionName,
-				targetTitle: options.tabCorrection?.targetTitle ?? options.target?.title,
-				targetUrl: options.tabCorrection?.targetUrl ?? options.target?.url,
-			},
+			recovery: getSessionTabRecoveryContext(options),
 			resultCategory,
 			successCategory: resultCategory === "success" ? "completed" : undefined,
 		}) ?? []
@@ -84,17 +95,16 @@ export function buildSessionTabRecoveryNextActions(options: {
 
 export function buildSessionAwareStaleRefNextActions(
 	sessionName: string | undefined,
-): AgentBrowserNextAction[] {
+): readonly AgentBrowserNextAction[] {
 	return (
 		buildAgentBrowserNextActions({ failureCategory: "stale-ref", resultCategory: "failure" }) ?? []
 	).map((action) => {
 		const actionArgs = action.params?.args;
-		return {
-			...action,
+		return Object.assign({}, action, {
 			params:
 				action.params && actionArgs
 					? { ...action.params, args: withOptionalSessionArgs(sessionName, actionArgs) }
 					: action.params,
-		};
+		});
 	});
 }

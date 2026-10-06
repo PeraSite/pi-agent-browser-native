@@ -1,3 +1,4 @@
+import { readArray, readNumber, readRecord, readString } from "./helpers/assertions.js";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
@@ -84,7 +85,7 @@ console.log(JSON.stringify({ success: true, data }));
 				USERPROFILE: root,
 				PI_AGENT_BROWSER_SOCKET_DIR: join(root, "s"),
 				PI_AGENT_BROWSER_TEST_CUSTOM_SESSION_INFO: "1",
-				PATH: `${root}${delimiter}${process.env.PATH}`,
+				PATH: `${root}${delimiter}${process.env.PATH ?? ""}`,
 			},
 			async () => {
 				let selected = a;
@@ -95,18 +96,18 @@ console.log(JSON.stringify({ success: true, data }));
 					onBusEvent(channel, request) {
 						if (channel === "pi-change-working-dir:resolve-execution-cwd") {
 							resolutions++;
-							(request as { result: { cwd: string } }).result = { cwd: selected };
+							Object.assign(readRecord(request), { result: { cwd: selected } });
 						}
 					},
 				});
 				const opened = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: ["open", "https://fixture.test/"],
 				});
-				assert.equal(opened.isError, false, opened.content[0]?.text);
+				assert.equal(opened.isError, false, opened.content[0].text);
 				const recording = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: ["record", "start", "capture.webm"],
 				});
-				assert.equal(recording.isError, false, recording.content[0]?.text);
+				assert.equal(recording.isError, false, recording.content[0].text);
 				selected = b;
 				const pending = executeRegisteredTool(harness.tool, harness.ctx, {
 					args: ["screenshot", "shots/page.png"],
@@ -114,39 +115,47 @@ console.log(JSON.stringify({ success: true, data }));
 				});
 				selected = a; // An await or queue must not re-resolve the operation root.
 				const screenshot = await pending;
-				assert.equal(screenshot.isError, false, screenshot.content[0]?.text);
-				assert.equal(screenshot.details?.sessionName, "browser-a");
-				assert.equal((screenshot.details?.artifacts as Array<{ cwd: string }>)[0].cwd, b);
+				const screenshotDetails = readRecord(screenshot.details);
+				assert.equal(screenshot.isError, false, screenshot.content[0].text);
+				assert.equal(screenshotDetails.sessionName, "browser-a");
+				assert.equal(
+					readArray(screenshotDetails.artifacts).map((value) => readRecord(value))[0].cwd,
+					b,
+				);
 				assert.ok((await readFile(join(b, "shots/page.png"))).length > 0);
 				assert.ok((await readFile(join(b, "results/page.json"))).length > 0);
 				assert.equal(resolutions, 3);
 				assert.equal(harness.ctx.cwd, a);
 				selected = b;
-				for (const params of [
-					{ sourceLookup: { componentName: "Widget", includeDomHints: false } },
-					{ networkSourceLookup: { url: "https://fixture.test/api/items" } },
-				]) {
-					const result = await executeRegisteredTool(harness.tool, harness.ctx, params);
-					assert.equal(result.isError, false, result.content[0]?.text);
-					assert.match(
-						JSON.stringify(result.details?.sourceLookup ?? result.details?.networkSourceLookup),
-						/OnlyB.ts/,
-					);
-					assert.doesNotMatch(
-						JSON.stringify(result.details?.sourceLookup ?? result.details?.networkSourceLookup),
-						/OnlyA.ts/,
-					);
-				}
+				await Promise.all(
+					[
+						{ sourceLookup: { componentName: "Widget", includeDomHints: false } },
+						{ networkSourceLookup: { url: "https://fixture.test/api/items" } },
+					].map(async (params) => {
+						const result = await executeRegisteredTool(harness.tool, harness.ctx, params);
+						const resultDetails = readRecord(result.details);
+						assert.equal(result.isError, false, result.content[0].text);
+						assert.match(
+							JSON.stringify(resultDetails.sourceLookup ?? resultDetails.networkSourceLookup),
+							/OnlyB.ts/,
+						);
+						assert.doesNotMatch(
+							JSON.stringify(resultDetails.sourceLookup ?? resultDetails.networkSourceLookup),
+							/OnlyA.ts/,
+						);
+					}),
+				);
 				await writeFile(join(b, "input.txt"), "B input");
 				const upload = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: ["upload", "#upload", "input.txt"],
 				});
-				assert.equal(upload.isError, false, upload.content[0]?.text);
-				assert.match(JSON.stringify(upload.details?.data), /B input/);
+				const uploadDetails = readRecord(upload.details);
+				assert.equal(upload.isError, false, upload.content[0].text);
+				assert.match(JSON.stringify(uploadDetails.data), /B input/);
 				const download = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: ["download", "#link", "downloads/report.txt"],
 				});
-				assert.equal(download.isError, false, download.content[0]?.text);
+				assert.equal(download.isError, false, download.content[0].text);
 				assert.equal(await readFile(join(b, "downloads/report.txt"), "utf8"), "download fixture");
 				const one = executeRegisteredTool(harness.tool, harness.ctx, {
 					args: ["batch", "--bail"],
@@ -158,7 +167,9 @@ console.log(JSON.stringify({ success: true, data }));
 				});
 				selected = a;
 				for (const result of await Promise.all([one, two])) {
-					assert.equal(result.isError, false, result.content[0]?.text);
+					// Exhaustive fixture variant (await Promise.all([one, two])): this selected path must satisfy its own contract.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
+					assert.equal(result.isError, false, result.content[0].text);
 				}
 				assert.ok((await readFile(join(b, "jobs/one.png"))).length > 0);
 				assert.ok((await readFile(join(b, "jobs/two.png"))).length > 0);
@@ -167,13 +178,13 @@ console.log(JSON.stringify({ success: true, data }));
 					args: ["record", "stop"],
 					outputPath: "receipts/stop.json",
 				});
-				assert.equal(stopped.isError, false, stopped.content[0]?.text);
+				assert.equal(stopped.isError, false, stopped.content[0].text);
 				assert.equal(await readFile(join(a, "capture.webm"), "utf8"), "video fixture");
 				assert.ok((await readFile(join(b, "receipts/stop.json"))).length > 0);
 				const newRecording = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: ["record", "start", "new.webm"],
 				});
-				assert.equal(newRecording.isError, false, newRecording.content[0]?.text);
+				assert.equal(newRecording.isError, false, newRecording.content[0].text);
 				selected = a;
 				assert.equal(
 					(await executeRegisteredTool(harness.tool, harness.ctx, { args: ["record", "stop"] }))
@@ -185,71 +196,75 @@ console.log(JSON.stringify({ success: true, data }));
 				const snapshot = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: ["snapshot", "-i"],
 				});
-				assert.equal(snapshot.isError, false, snapshot.content[0]?.text);
+				const snapshotDetails = readRecord(snapshot.details);
+				assert.equal(snapshot.isError, false, snapshot.content[0].text);
 				assert.ok(
-					String(snapshot.details?.fullOutputPath).startsWith(
+					readString(snapshotDetails.fullOutputPath).startsWith(
 						join(root, "sessions", ".pi-agent-browser-artifacts"),
 					),
 				);
-				const calls = (await readInvocationLog(log)) as Array<{
-					args: string[];
-					cwd: string;
-					profile: string;
-					launch: number;
-				}>;
+				const calls = readArray(await readInvocationLog(log)).map((value) => readRecord(value));
 				assert.ok(calls.every((call) => call.cwd === a && call.profile === "Profile A"));
 				assert.ok(
-					calls.filter((call) => call.launch > 0).every((call) => call.launch === 1),
+					calls.filter((call) => readNumber(call.launch) > 0).every((call) => call.launch === 1),
 					"live browser never restarted",
 				);
 				const beforeScript = resolutions;
-				const script = executeRegisteredTool(harness.getTool("agent_browser_code")!, harness.ctx, {
-					code: 'await browser({args:["screenshot","code/one.png"]}); await browser({args:["screenshot","code/two.png"]}); emit("done");',
-				});
+				const script = executeRegisteredTool(
+					// Missing code-tool registration fails immediately rather than skipping cwd assertions.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
+					harness.getTool("agent_browser_code") ?? assert.fail("code tool must be registered"),
+					harness.ctx,
+					{
+						code: 'await browser({args:["screenshot","code/one.png"]}); await browser({args:["screenshot","code/two.png"]}); emit("done");',
+					},
+				);
 				selected = a;
 				const scriptResult = await script;
-				assert.equal(scriptResult.isError, false, scriptResult.content[0]?.text);
+				assert.equal(scriptResult.isError, false, scriptResult.content[0].text);
 				assert.equal(resolutions, beforeScript + 1, "code calls inherit one outer cwd snapshot");
 				assert.ok((await readFile(join(b, "code/one.png"))).length > 0);
 				assert.ok((await readFile(join(b, "code/two.png"))).length > 0);
 				assert.ok(
-					(await readFile(String(snapshot.details?.fullOutputPath))).length > 0,
+					(await readFile(readString(snapshotDetails.fullOutputPath))).length > 0,
 					"cached artifact stays in the original store",
 				);
 				selected = b;
 				const configured = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: ["--config", "agent-browser.json", "get", "title"],
 				});
-				assert.equal(configured.isError, false, configured.content[0]?.text);
-				assert.equal(configured.details?.sessionName, "browser-b");
+				const configuredDetails = readRecord(configured.details);
+				assert.equal(configured.isError, false, configured.content[0].text);
+				assert.equal(configuredDetails.sessionName, "browser-b");
 				await withPatchedEnv(
 					{ AGENT_BROWSER_CONFIG: "agent-browser.json", AGENT_BROWSER_SESSION: "env-session" },
 					async () => {
 						const env = await executeRegisteredTool(harness.tool, harness.ctx, {
 							args: ["get", "title"],
 						});
-						assert.equal(env.details?.sessionName, "env-session");
+						const envDetails = readRecord(env.details);
+						assert.equal(envDetails.sessionName, "env-session");
 						const explicit = await executeRegisteredTool(harness.tool, harness.ctx, {
 							args: ["--session", "per-call", "get", "title"],
 						});
-						assert.equal(explicit.details?.sessionName, "per-call");
+						const explicitDetails = readRecord(explicit.details);
+						assert.equal(explicitDetails.sessionName, "per-call");
 					},
 				);
 				const unrelated = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: ["--session", "unused-target", "get", "title"],
 				});
-				assert.equal(unrelated.isError, false, unrelated.content[0]?.text);
-				assert.equal(unrelated.details?.sessionName, "unused-target");
+				const unrelatedDetails = readRecord(unrelated.details);
+				assert.equal(unrelated.isError, false, unrelated.content[0].text);
+				assert.equal(unrelatedDetails.sessionName, "unused-target");
 				const restoredDefault = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: ["get", "title"],
 				});
-				assert.equal(restoredDefault.details?.sessionName, "browser-a");
-				const laterCalls = (await readInvocationLog(log)) as Array<{
-					args: string[];
-					cwd: string;
-					session: string;
-					configPath: string;
-				}>;
+				const restoredDefaultDetails = readRecord(restoredDefault.details);
+				assert.equal(restoredDefaultDetails.sessionName, "browser-a");
+				const laterCalls = readArray(await readInvocationLog(log)).map((value) =>
+					readRecord(value),
+				);
 				assert.ok(
 					laterCalls
 						.filter(
@@ -269,10 +284,11 @@ console.log(JSON.stringify({ success: true, data }));
 				const removedOrigin = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: ["screenshot", "after-removal.png"],
 				});
+				const removedOriginDetails = readRecord(removedOrigin.details);
 				assert.equal(removedOrigin.isError, true);
-				assert.equal(removedOrigin.details?.failureCategory, "validation-error");
+				assert.equal(removedOriginDetails.failureCategory, "validation-error");
 				assert.match(
-					removedOrigin.content[0]?.text ?? "",
+					readString(removedOrigin.content[0].text ?? ""),
 					/Browser launch directory is unavailable/,
 				);
 				assert.equal(
@@ -284,10 +300,22 @@ console.log(JSON.stringify({ success: true, data }));
 					{ args: ["screenshot", "recovered-fresh.png"], sessionMode: "fresh" as const },
 					{ args: ["--config", "agent-browser.json", "screenshot", "recovered-config.png"] },
 				]) {
+					// These operations share browser/cwd state; finish the operation and its file readback before the next transition.
+					// oxlint-disable-next-line no-await-in-loop
 					const recovered = await executeRegisteredTool(harness.tool, harness.ctx, params);
-					assert.equal(recovered.isError, false, recovered.content[0]?.text);
-					assert.equal(recovered.details?.sessionName, "browser-b");
-					assert.ok((await readFile(join(b, params.args.at(-1)!))).length > 0);
+					const recoveredDetails = readRecord(recovered.details);
+					// Both fresh and configured recovery variants must select B and write the requested artifact.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
+					assert.equal(recovered.isError, false, recovered.content[0].text);
+					// Both fresh and configured recovery variants must select B and write the requested artifact.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
+					assert.equal(recoveredDetails.sessionName, "browser-b");
+					// These operations share browser/cwd state; finish the operation and its file readback before the next transition.
+					// oxlint-disable-next-line no-await-in-loop
+					const artifact = await readFile(join(b, readString(params.args.at(-1))));
+					// Both fresh and configured recovery variants must select B and write the requested artifact.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
+					assert.ok(artifact.length > 0);
 				}
 			},
 		);
@@ -322,7 +350,7 @@ console.log(JSON.stringify({ success: true, data }));
 				USERPROFILE: root,
 				AGENT_BROWSER_ENCRYPTION_KEY: "a".repeat(64),
 				PI_AGENT_BROWSER_SOCKET_DIR: join(root, "s"),
-				PATH: `${root}${delimiter}${process.env.PATH}`,
+				PATH: `${root}${delimiter}${process.env.PATH ?? ""}`,
 			},
 			async () => {
 				let selected = b;
@@ -331,7 +359,7 @@ console.log(JSON.stringify({ success: true, data }));
 					sessionFile: join(root, "one.jsonl"),
 					onBusEvent(channel, request) {
 						if (channel === "pi-change-working-dir:resolve-execution-cwd") {
-							Object.assign(request as object, { result: { cwd: selected } });
+							Object.assign(readRecord(request), { result: { cwd: selected } });
 						}
 					},
 				});
@@ -346,7 +374,9 @@ console.log(JSON.stringify({ success: true, data }));
 						outputPath: "queued.json",
 					});
 					const queuedCode = executeRegisteredTool(
-						harness.getTool("agent_browser_code")!,
+						// Missing code-tool registration fails immediately rather than skipping cwd assertions.
+						// oxlint-disable-next-line node-test/no-conditional-assertion
+						harness.getTool("agent_browser_code") ?? assert.fail("code tool must be registered"),
 						harness.ctx,
 						{
 							code: 'emit((await browser({args:["get","title"]})).data);',
@@ -355,8 +385,8 @@ console.log(JSON.stringify({ success: true, data }));
 					);
 					selected = a;
 					const [fresh, followup] = await Promise.all([first, queued]);
-					assert.equal(fresh.isError, false, fresh.content[0]?.text);
-					assert.equal(followup.isError, false, followup.content[0]?.text);
+					assert.equal(fresh.isError, false, fresh.content[0].text);
+					assert.equal(followup.isError, false, followup.content[0].text);
 					assert.equal(
 						followup.details?.sessionName,
 						fresh.details?.sessionName,
@@ -365,28 +395,26 @@ console.log(JSON.stringify({ success: true, data }));
 					assert.equal(fresh.details?.managedSessionCwd, b);
 					assert.equal(followup.details?.managedSessionCwd, b);
 					assert.equal(
-						(followup.details?.outputFile as { absolutePath: string }).absolutePath,
+						readRecord(followup.details.outputFile).absolutePath,
 						join(b, "queued.json"),
 					);
 					assert.ok((await readFile(join(b, "queued.json"))).length > 0);
 					await assert.rejects(readFile(join(a, "queued.json")), { code: "ENOENT" });
 					const code = await queuedCode;
-					assert.equal(code.isError, false, code.content[0]?.text);
+					const codeDetails = readRecord(code.details);
+					assert.equal(code.isError, false, code.content[0].text);
 					assert.equal(
-						code.details?.sessionName,
-						fresh.details?.sessionName,
+						codeDetails.sessionName,
+						fresh.details.sessionName,
 						"queued code must follow the fresh browser",
 					);
 					assert.equal(
-						(code.details?.outputFile as { absolutePath: string }).absolutePath,
+						readRecord(codeDetails.outputFile).absolutePath,
 						join(b, "queued-code.json"),
 					);
 					assert.equal(
-						(
-							harness.appendedEntries.at(-1)?.data as {
-								event: { state: { managedSessionCwd: string } };
-							}
-						).event.state.managedSessionCwd,
+						readRecord(readRecord(readRecord(harness.appendedEntries.at(-1)?.data).event).state)
+							.managedSessionCwd,
 						b,
 					);
 				} finally {
@@ -411,19 +439,23 @@ test("managed launch and restore roots survive directory changes, fresh replacem
 	const a = join(root, "a"),
 		b = join(root, "b"),
 		log = join(root, "calls.jsonl");
-	for (const cwd of [a, b]) {
-		await mkdir(cwd);
-		execFileSync("git", ["init", "-q", cwd]);
-		await writeFile(
-			join(cwd, "agent-browser.json"),
-			JSON.stringify({ args: cwd === a ? "--disable-gpu" : "--disable-extensions" }),
-		);
-	}
+	await Promise.all(
+		[a, b].map(async (cwd) => {
+			await mkdir(cwd);
+			execFileSync("git", ["init", "-q", cwd]);
+			await writeFile(
+				join(cwd, "agent-browser.json"),
+				JSON.stringify({ args: cwd === a ? "--disable-gpu" : "--disable-extensions" }),
+			);
+		}),
+	);
 	await writeFakeAgentBrowserBinary(
 		root,
 		`
 const fs = require("node:fs"), args = process.argv.slice(2);
 const session = args.includes("--session") ? args[args.indexOf("--session") + 1] : "default";
+const configPath = process.env.AGENT_BROWSER_CONFIG ?? require("node:path").join(process.cwd(), "agent-browser.json");
+const configArgs = JSON.parse(fs.readFileSync(configPath, "utf8")).args;
 const statePath = ${JSON.stringify(join(root, "state.json"))};
 let sessions = {}; try { sessions = JSON.parse(fs.readFileSync(statePath, "utf8")); } catch {}
 const state = sessions[session] ??= { active: false, restoreKey: null, launches: 0 };
@@ -437,7 +469,7 @@ else {
   data = tokens[0] === "tab" ? { tabs: [{ tabId: "t1", active: true, url: "https://fixture.test/", title: "Fixture" }] } : { url: "https://fixture.test/", title: "Fixture" };
 }
 if (tokens[0] !== "session") fs.writeFileSync(statePath, JSON.stringify(sessions));
-fs.appendFileSync(${JSON.stringify(log)}, JSON.stringify({args, cwd:process.cwd(), session, restore:process.env.AGENT_BROWSER_RESTORE, launches:state.launches}) + "\\n");
+fs.appendFileSync(${JSON.stringify(log)}, JSON.stringify({args, cwd:process.cwd(), session, configPath, configArgs, environmentArgs:process.env.AGENT_BROWSER_ARGS ?? null, restore:process.env.AGENT_BROWSER_RESTORE, launches:state.launches}) + "\\n");
 console.log(JSON.stringify({success:true, data}));
 `,
 	);
@@ -450,7 +482,7 @@ console.log(JSON.stringify({success:true, data}));
 				AGENT_BROWSER_ENCRYPTION_KEY: "a".repeat(64),
 				PI_AGENT_BROWSER_SOCKET_DIR: join(root, "s"),
 				PI_AGENT_BROWSER_TEST_CUSTOM_SESSION_INFO: "1",
-				PATH: `${root}${delimiter}${process.env.PATH}`,
+				PATH: `${root}${delimiter}${process.env.PATH ?? ""}`,
 			},
 			async () => {
 				let selected = a;
@@ -460,7 +492,7 @@ console.log(JSON.stringify({success:true, data}));
 					branch,
 					onBusEvent(channel: string, request: unknown) {
 						if (channel === "pi-change-working-dir:resolve-execution-cwd") {
-							Object.assign(request as object, { result: { cwd: selected } });
+							Object.assign(readRecord(request), { result: { cwd: selected } });
 						}
 					},
 				};
@@ -468,34 +500,42 @@ console.log(JSON.stringify({success:true, data}));
 				await runExtensionEvent(harness.handlers, "session_start", {}, harness.ctx);
 				const call = async (params: Parameters<typeof executeRegisteredTool>[2]) => {
 					const result = await executeRegisteredTool(harness.tool, harness.ctx, params);
-					assert.equal(result.isError, false, result.content[0]?.text);
-					branch.push(createToolBranchEntry({ details: result.details! }));
+					const resultDetails = readRecord(result.details);
+					assert.equal(result.isError, false, result.content[0].text);
+					branch.push(createToolBranchEntry({ details: readRecord(resultDetails) }));
 					return result;
 				};
 				const first = await call({ args: ["open", "https://fixture.test/"], sessionMode: "fresh" });
-				const firstSession = first.details?.sessionName;
-				assert.equal(first.details?.managedSessionCwd, a);
+				const firstDetails = readRecord(first.details);
+				const firstSession = firstDetails.sessionName;
+				assert.equal(firstDetails.managedSessionCwd, a);
 				selected = b;
 				const followup = await call({ args: ["get", "title"], outputPath: "title.json" });
-				assert.equal(followup.details?.sessionName, firstSession);
-				assert.equal(followup.details?.managedSessionCwd, a);
+				const followupDetails = readRecord(followup.details);
+				assert.equal(followupDetails.sessionName, firstSession);
+				assert.equal(followupDetails.managedSessionCwd, a);
 				assert.ok((await readFile(join(b, "title.json"))).length > 0);
-				let calls = (await readInvocationLog(log)) as Array<{
-					args: string[];
-					cwd: string;
-					session: string;
-					restore: string;
-					launches: number;
-				}>;
+				let calls = readArray(await readInvocationLog(log)).map((value) => readRecord(value));
 				const activeCalls = calls.filter(
-					(row) => row.session === firstSession && !row.args.includes("info"),
+					(row) =>
+						row.session === firstSession && !readArray(row.args).map(readString).includes("info"),
 				);
 				const firstRestore = activeCalls[0].restore;
-				assert.match(firstRestore, /^piab-r2-/);
+				assert.match(readString(firstRestore), /^piab-r2-/);
 				assert.ok(
 					activeCalls.every(
 						(row) => row.cwd === a && row.restore === firstRestore && row.launches === 1,
 					),
+				);
+				assert.ok(
+					activeCalls.every(
+						(row) =>
+							row.configPath === join(a, "agent-browser.json") &&
+							row.configArgs === "--disable-gpu" &&
+							row.environmentArgs === null &&
+							!readArray(row.args).map(readString).includes("--args"),
+					),
+					"native A configuration reaches initial and active calls unchanged",
 				);
 				const pendingFresh = call({
 					args: ["open", "https://fixture.test/"],
@@ -504,13 +544,15 @@ console.log(JSON.stringify({success:true, data}));
 				const queued = call({ args: ["get", "title"], outputPath: "queued-after-fresh.json" });
 				selected = a;
 				const fresh = await pendingFresh;
+				const freshDetails = readRecord(fresh.details);
 				const queuedResult = await queued;
-				assert.equal(queuedResult.details?.sessionName, fresh.details?.sessionName);
-				assert.equal(queuedResult.details?.managedSessionCwd, b);
+				const queuedResultDetails = readRecord(queuedResult.details);
+				assert.equal(queuedResultDetails.sessionName, freshDetails.sessionName);
+				assert.equal(queuedResultDetails.managedSessionCwd, b);
 				assert.ok((await readFile(join(b, "queued-after-fresh.json"))).length > 0);
-				assert.notEqual(fresh.details?.sessionName, firstSession);
-				assert.equal(fresh.details?.managedSessionCwd, b);
-				const newSession = fresh.details?.sessionName;
+				assert.notEqual(freshDetails.sessionName, firstSession);
+				assert.equal(freshDetails.managedSessionCwd, b);
+				const newSession = freshDetails.sessionName;
 				selected = a;
 				await call({ args: ["get", "title"], outputPath: "after-fresh.json" });
 				await runExtensionEvent(
@@ -522,15 +564,17 @@ console.log(JSON.stringify({success:true, data}));
 				harness = createExtensionHarness(options);
 				await runExtensionEvent(harness.handlers, "session_start", {}, harness.ctx);
 				const replay = await call({ args: ["get", "title"], outputPath: "after-replay.json" });
-				assert.equal(replay.details?.sessionName, newSession);
-				assert.equal(replay.details?.managedSessionCwd, b);
+				const replayDetails = readRecord(replay.details);
+				assert.equal(replayDetails.sessionName, newSession);
+				assert.equal(replayDetails.managedSessionCwd, b);
 				assert.ok((await readFile(join(a, "after-replay.json"))).length > 0);
-				calls = (await readInvocationLog(log)) as typeof calls;
+				calls = readArray(await readInvocationLog(log)).map(readRecord);
 				const newCalls = calls.filter(
-					(row) => row.session === newSession && !row.args.includes("info"),
+					(row) =>
+						row.session === newSession && !readArray(row.args).map(readString).includes("info"),
 				);
 				assert.ok(newCalls.length >= 3);
-				assert.match(newCalls[0].restore, /^piab-r2-/);
+				assert.match(readString(newCalls[0].restore), /^piab-r2-/);
 				assert.notEqual(newCalls[0].restore, firstRestore, "fresh B gets B's Git restore identity");
 				assert.ok(
 					newCalls.every(
@@ -538,8 +582,14 @@ console.log(JSON.stringify({success:true, data}));
 					),
 				);
 				assert.ok(
-					newCalls.every((row) => row.args.includes("--no-startup-window,--disable-extensions")),
-					"native B launch settings remain stable",
+					newCalls.every(
+						(row) =>
+							row.configPath === join(b, "agent-browser.json") &&
+							row.configArgs === "--disable-extensions" &&
+							row.environmentArgs === null &&
+							!readArray(row.args).map(readString).includes("--args"),
+					),
+					"native B configuration remains stable without wrapper args overriding it",
 				);
 				await runExtensionEvent(
 					harness.handlers,

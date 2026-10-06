@@ -3,6 +3,7 @@
  */
 
 import assert from "node:assert/strict";
+import { readRecord, readArray, readString } from "./helpers/assertions.js";
 import { mkdtemp, mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -85,9 +86,9 @@ async function withTemporaryCwd<T>(cwd: string, run: () => Promise<T>): Promise<
 	}
 }
 
-async function withTemporaryArgv<T>(argv: string[], run: () => Promise<T>): Promise<T> {
+async function withTemporaryArgv<T>(argv: readonly string[], run: () => Promise<T>): Promise<T> {
 	const previousArgv = process.argv;
-	process.argv = argv;
+	process.argv = [...argv];
 	try {
 		return await run();
 	} finally {
@@ -139,9 +140,14 @@ test("trusted project web-search config registers the companion tool on session 
 				assert.ok(tool);
 				await withFakeFetch(
 					(input, init) => {
-						assert.equal(new URL(String(input)).searchParams.get("q"), "project only");
 						assert.equal(
-							init?.headers && (init.headers as Record<string, string>)["X-Subscription-Token"],
+							new URL(input instanceof Request ? input.url : input.toString()).searchParams.get(
+								"q",
+							),
+							"project only",
+						);
+						assert.equal(
+							new Headers(init?.headers).get("X-Subscription-Token"),
 							"plaintext-project-secret",
 						);
 						return new Response(
@@ -165,7 +171,7 @@ test("trusted project web-search config registers the companion tool on session 
 							query: "project only",
 							provider: "brave",
 						});
-						assert.equal(result.details?.provider, "brave");
+						assert.equal(readRecord(result.details).provider, "brave");
 						assert.doesNotMatch(JSON.stringify(result), /plaintext-project-secret/);
 					},
 				);
@@ -246,13 +252,13 @@ test("project web-search plaintext config passes through at execution without ex
 				});
 				await withFakeFetch(
 					(input, init) => {
-						const url = new URL(String(input));
+						const url = new URL(input instanceof Request ? input.url : input.toString());
 						assert.equal(
 							url.origin + url.pathname,
 							"https://api.search.brave.com/res/v1/web/search",
 						);
 						assert.equal(
-							init?.headers && (init.headers as Record<string, string>)["X-Subscription-Token"],
+							new Headers(init?.headers).get("X-Subscription-Token"),
 							"plaintext-project-secret",
 						);
 						return new Response(
@@ -276,7 +282,7 @@ test("project web-search plaintext config passes through at execution without ex
 							query: "must pass through project config",
 							provider: "brave",
 						});
-						assert.equal(result.details?.provider, "brave");
+						assert.equal(readRecord(result.details).provider, "brave");
 						assert.doesNotMatch(JSON.stringify(result), /plaintext-project-secret/);
 					},
 				);
@@ -304,15 +310,12 @@ test("--no-approve prevents project config from disabling env-backed agent_brows
 					assert.ok(harness.getTool("agent_browser"));
 					await withFakeFetch(
 						(input, init) => {
-							const url = new URL(String(input));
+							const url = new URL(input instanceof Request ? input.url : input.toString());
 							assert.equal(
 								url.origin + url.pathname,
 								"https://api.search.brave.com/res/v1/web/search",
 							);
-							assert.equal(
-								init?.headers && (init.headers as Record<string, string>)["X-Subscription-Token"],
-								"env-secret",
-							);
+							assert.equal(new Headers(init?.headers).get("X-Subscription-Token"), "env-secret");
 							return new Response(
 								JSON.stringify({
 									query: { original: "no-approve execution" },
@@ -335,8 +338,8 @@ test("--no-approve prevents project config from disabling env-backed agent_brows
 								count: 1,
 							});
 							assert.equal(result.isError, false, JSON.stringify(result));
-							assert.equal(result.details?.provider, "brave");
-							assert.match(result.content[0]?.text ?? "", /Env Backed Result/);
+							assert.equal(readRecord(result.details).provider, "brave");
+							assert.match(result.content.at(0)?.text ?? "", /Env Backed Result/);
 							assert.doesNotMatch(
 								JSON.stringify(result),
 								/agent_browser_web_search is disabled by pi-agent-browser-native config/,
@@ -370,11 +373,11 @@ test("agent_browser_web_search registration and execution ignore project config 
 					assert.ok(tool);
 					await withFakeFetch(
 						(input, init) => {
-							assert.equal(String(input), "https://api.exa.ai/search");
 							assert.equal(
-								init?.headers && (init.headers as Record<string, string>)["x-api-key"],
-								"exa-secret",
+								input instanceof Request ? input.url : input.toString(),
+								"https://api.exa.ai/search",
 							);
+							assert.equal(new Headers(init?.headers).get("x-api-key"), "exa-secret");
 							return new Response(
 								JSON.stringify({
 									requestId: "req-untrusted",
@@ -391,7 +394,7 @@ test("agent_browser_web_search registration and execution ignore project config 
 								provider: "auto",
 								count: 1,
 							});
-							assert.equal(result.details?.provider, "exa");
+							assert.equal(readRecord(result.details).provider, "exa");
 						},
 					);
 				});
@@ -429,11 +432,15 @@ test("registers agent_browser_web_search with actionable search-type and rate-li
 			assert.match(guidelines, /Do not run parallel agent_browser_web_search calls/);
 			assert.match(guidelines, /HTTP 429/);
 			assert.match(tool.description, /deep-lite/);
-			const schema = tool.parameters as {
-				properties?: Record<string, { description?: string; maxItems?: number }>;
-			};
-			assert.match(schema.properties?.searchType?.description ?? "", /deep-lite.*4s/);
-			assert.match(schema.properties?.searchType?.description ?? "", /Pass searchType/);
+			const schemaProperties = readRecord(readRecord(tool.parameters).properties);
+			assert.match(
+				readString(readRecord(schemaProperties.searchType).description),
+				/deep-lite.*4s/,
+			);
+			assert.match(
+				readString(readRecord(schemaProperties.searchType).description),
+				/Pass searchType/,
+			);
 			for (const field of [
 				"includeDomains",
 				"excludeDomains",
@@ -441,11 +448,13 @@ test("registers agent_browser_web_search with actionable search-type and rate-li
 				"additionalQueries",
 				"highlightsDynamic",
 			]) {
-				assert.ok(schema.properties?.[field], `missing ${field} from web-search schema`);
+				// Every required field in this fixed nonempty schema inventory must be published.
+				// oxlint-disable-next-line node-test/no-conditional-assertion
+				assert.ok(schemaProperties[field] !== undefined, `missing ${field} from web-search schema`);
 			}
-			assert.equal(schema.properties?.includeDomains?.maxItems, 20);
-			assert.equal(schema.properties?.excludeDomains?.maxItems, 20);
-			assert.equal(schema.properties?.additionalQueries?.maxItems, 10);
+			assert.equal(readRecord(schemaProperties.includeDomains).maxItems, 20);
+			assert.equal(readRecord(schemaProperties.excludeDomains).maxItems, 20);
+			assert.equal(readRecord(schemaProperties.additionalQueries).maxItems, 10);
 		},
 	);
 });
@@ -465,13 +474,10 @@ test("auto provider uses Brave when only BRAVE_API_KEY is configured", async () 
 			assert.ok(tool);
 			await withFakeFetch(
 				(input, init) => {
-					const url = new URL(String(input));
+					const url = new URL(input instanceof Request ? input.url : input.toString());
 					assert.equal(url.origin + url.pathname, "https://api.search.brave.com/res/v1/web/search");
 					assert.equal(url.searchParams.get("q"), "brave only");
-					assert.equal(
-						init?.headers && (init.headers as Record<string, string>)["X-Subscription-Token"],
-						"brave-secret",
-					);
+					assert.equal(new Headers(init?.headers).get("X-Subscription-Token"), "brave-secret");
 					return new Response(
 						JSON.stringify({
 							query: { original: "brave only" },
@@ -495,21 +501,18 @@ test("auto provider uses Brave when only BRAVE_API_KEY is configured", async () 
 						count: 1,
 						searchType: "deep",
 					});
-					const text = result.content[0]?.text ?? "";
+					const text = result.content.at(0)?.text ?? "";
 					assert.match(text, /Brave web search results/);
 					assert.match(text, /Brave Only/);
-					assert.equal(result.details?.provider, "brave");
-					assert.equal(result.details?.searchType, undefined);
-					const observation = result.structuredContent as {
-						success: boolean;
-						resultCategory: string;
-						data: Record<string, unknown>;
-					};
+					assert.equal(readRecord(result.details).provider, "brave");
+					assert.equal(readRecord(result.details).searchType, undefined);
+					const observation = readRecord(result.structuredContent);
+					const observationData = readRecord(observation.data);
 					assert.equal(observation.success, true);
 					assert.equal(observation.resultCategory, "success");
-					assert.equal(observation.data.provider, "brave");
-					assert.equal(observation.data.query, "brave only");
-					assert.deepEqual(observation.data.results, [
+					assert.equal(observationData.provider, "brave");
+					assert.equal(observationData.query, "brave only");
+					assert.deepEqual(observationData.results, [
 						{ title: "Brave Only", url: "https://example.com/brave", description: "Brave result" },
 					]);
 					assert.equal(result.isError, false);
@@ -557,11 +560,11 @@ test("registers command-sourced config without executing command until search ex
 			);
 			await withFakeFetch(
 				(input, init) => {
-					assert.equal(new URL(String(input)).searchParams.get("q"), "pi browser docs");
 					assert.equal(
-						init?.headers && (init.headers as Record<string, string>)["X-Subscription-Token"],
-						"runtime-secret",
+						new URL(input instanceof Request ? input.url : input.toString()).searchParams.get("q"),
+						"pi browser docs",
 					);
+					assert.equal(new Headers(init?.headers).get("X-Subscription-Token"), "runtime-secret");
 					return new Response(
 						JSON.stringify({
 							query: { original: "pi browser docs" },
@@ -583,10 +586,10 @@ test("registers command-sourced config without executing command until search ex
 						query: "pi browser docs",
 						count: 1,
 					});
-					const text = result.content[0]?.text ?? "";
+					const text = result.content.at(0)?.text ?? "";
 					assert.match(text, /Pi Browser/);
 					assert.doesNotMatch(JSON.stringify(result), /runtime-secret/);
-					assert.equal(result.details?.provider, "brave");
+					assert.equal(readRecord(result.details).provider, "brave");
 					assert.equal(
 						await pathExists(markerPath),
 						true,
@@ -618,7 +621,7 @@ test("uses the configured default Exa search type when the call omits it", async
 			await withFakeFetch(
 				(_input, init) => {
 					assert.equal(new Headers(init?.headers).has("Exa-Beta"), false);
-					assert.deepEqual(JSON.parse(String(init?.body)), {
+					assert.deepEqual(readRecord(JSON.parse(readString(init?.body))), {
 						query: "research defaults",
 						type: "deep-lite",
 						numResults: 1,
@@ -646,9 +649,9 @@ test("uses the configured default Exa search type when the call omits it", async
 						count: 1,
 						additionalQueries: ["second angle"],
 					});
-					assert.equal(result.details?.provider, "exa");
-					assert.equal(result.details?.searchType, "deep-lite");
-					assert.equal(result.details?.requestId, "req-default");
+					assert.equal(readRecord(result.details).provider, "exa");
+					assert.equal(readRecord(result.details).searchType, "deep-lite");
+					assert.equal(readRecord(result.details).requestId, "req-default");
 					assert.doesNotMatch(JSON.stringify(result), /exa-secret/);
 				},
 			);
@@ -675,13 +678,13 @@ test("per-call Exa search type overrides the configured default and normalizes h
 			assert.ok(tool);
 			await withFakeFetch(
 				(input, init) => {
-					assert.equal(String(input), "https://api.exa.ai/search");
-					assert.equal(init?.method, "POST");
 					assert.equal(
-						init?.headers && (init.headers as Record<string, string>)["x-api-key"],
-						"exa-secret",
+						input instanceof Request ? input.url : input.toString(),
+						"https://api.exa.ai/search",
 					);
-					const body = JSON.parse(String(init?.body));
+					assert.equal(init?.method, "POST");
+					assert.equal(new Headers(init.headers).get("x-api-key"), "exa-secret");
+					const body = readRecord(JSON.parse(readString(init.body)));
 					assert.equal(body.query, "pi browser docs");
 					assert.equal(body.type, "fast");
 					assert.equal(body.numResults, 2);
@@ -689,7 +692,7 @@ test("per-call Exa search type overrides the configured default and normalizes h
 					assert.equal(body.category, "news");
 					assert.deepEqual(body.includeDomains, ["example.com"]);
 					assert.deepEqual(body.excludeDomains, ["noise.example"]);
-					assert.equal(new Headers(init?.headers).get("Exa-Beta"), "dynamic-highlights-2026-08-28");
+					assert.equal(new Headers(init.headers).get("Exa-Beta"), "dynamic-highlights-2026-08-28");
 					return new Response(
 						JSON.stringify({
 							requestId: "req-123",
@@ -719,14 +722,14 @@ test("per-call Exa search type overrides the configured default and normalizes h
 						excludeDomains: ["noise.example"],
 						highlightsDynamic: true,
 					});
-					const text = result.content[0]?.text ?? "";
+					const text = result.content.at(0)?.text ?? "";
 					assert.match(text, /Exa web search results/);
 					assert.match(text, /Relevant Exa highlight/);
 					assert.match(text, /Published: 2026-01-01/);
 					assert.doesNotMatch(JSON.stringify(result), /exa-secret|brave-secret/);
-					assert.equal(result.details?.provider, "exa");
-					assert.equal(result.details?.searchType, "fast");
-					assert.equal(result.details?.requestId, "req-123");
+					assert.equal(readRecord(result.details).provider, "exa");
+					assert.equal(readRecord(result.details).searchType, "fast");
+					assert.equal(readRecord(result.details).requestId, "req-123");
 				},
 			);
 		},
@@ -748,7 +751,10 @@ test("search execution removes exact normalized URL duplicates without collapsin
 			assert.ok(tool);
 			await withFakeFetch(
 				(_input, init) => {
-					assert.equal(JSON.parse(String(init?.body)).systemPrompt, EXA_SEARCH_SYSTEM_PROMPT);
+					assert.equal(
+						readRecord(JSON.parse(readString(init?.body))).systemPrompt,
+						EXA_SEARCH_SYSTEM_PROMPT,
+					);
 					return new Response(
 						JSON.stringify({
 							results: [
@@ -766,7 +772,7 @@ test("search execution removes exact normalized URL duplicates without collapsin
 						query: "dedupe docs",
 						count: 4,
 					});
-					const results = result.details?.results as Array<{ title?: string; url?: string }>;
+					const results = readArray(readRecord(result.details).results).map(readRecord);
 					assert.deepEqual(
 						results.map(({ title, url }) => ({ title, url })),
 						[
@@ -775,8 +781,8 @@ test("search execution removes exact normalized URL duplicates without collapsin
 							{ title: "View B", url: "https://example.com/docs?view=b" },
 						],
 					);
-					assert.equal(result.details?.duplicatesRemoved, 1);
-					assert.match(result.content[0]?.text ?? "", /Duplicate URLs removed: 1/);
+					assert.equal(readRecord(result.details).duplicatesRemoved, 1);
+					assert.match(result.content.at(0)?.text ?? "", /Duplicate URLs removed: 1/);
 				},
 			);
 		},
@@ -813,24 +819,24 @@ test("provider adapters expose provider-agnostic request and normalization contr
 		offset: 1,
 		query: "adapter exa",
 		searchType: "deep",
-	}) as { body: Record<string, unknown>; timeoutMs: number };
-	assert.equal(exaRequest.body.query, "adapter exa");
-	assert.equal(exaRequest.body.type, "deep");
-	assert.equal(exaRequest.timeoutMs, 60_000);
+	});
+	assert.equal(readRecord(readRecord(exaRequest).body).query, "adapter exa");
+	assert.equal(readRecord(readRecord(exaRequest).body).type, "deep");
+	assert.equal(readRecord(exaRequest).timeoutMs, 60_000);
 	const deepLiteRequest = exa.buildRequest({
 		count: 1,
 		offset: 0,
 		query: "adapter exa",
 		searchType: "deep-lite",
-	}) as { timeoutMs: number };
+	});
 	const deepReasoningRequest = exa.buildRequest({
 		count: 1,
 		offset: 0,
 		query: "adapter exa",
 		searchType: "deep-reasoning",
-	}) as { timeoutMs: number };
-	assert.equal(deepLiteRequest.timeoutMs, 45_000);
-	assert.equal(deepReasoningRequest.timeoutMs, 90_000);
+	});
+	assert.equal(readRecord(deepLiteRequest).timeoutMs, 45_000);
+	assert.equal(readRecord(deepReasoningRequest).timeoutMs, 90_000);
 	const exaNormalized = exa.normalizeResponse(
 		{
 			requestId: "req",
@@ -883,12 +889,20 @@ test("Brave pagination skips results rather than pages, including partial pages 
 	] as const) {
 		const params = { query: "pagination", count, offset };
 		const request = brave.buildRequest(params);
+		// Every fixed pagination boundary must produce a native URL.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.ok(request instanceof URL);
+		// Every boundary must request enough results for its local window.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.equal(request.searchParams.get("count"), String(count + offset));
+		// Every boundary must keep upstream offset zero.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.equal(request.searchParams.get("offset"), "0");
 		const response = {
 			web: { results: rankedResults.slice(0, Math.min(count + offset, available)) },
 		};
+		// Every fixed boundary must normalize exactly its expected result window.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.deepEqual(
 			brave.normalizeResponse(response, params).results.map((result) => result.title),
 			expected.map((rank) => `Result ${rank}`),
@@ -943,6 +957,8 @@ test("builds Exa search request body with highlights and provider-compatible opt
 
 test("rejects Exa filter combinations the upstream API does not support", () => {
 	for (const searchType of ["auto", "fast", "instant"] as const) {
+		// Every fixed unsupported Exa type/filter combination must fail before dispatch.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.throws(
 			() =>
 				buildExaSearchRequestBody({
@@ -1086,11 +1102,33 @@ test("provider fetch helpers do not call fetch when already aborted", async () =
 				() => fetchExaSearchJson({ query: "test" }, "exa-secret", exaController.signal),
 				/cancelled before exa/,
 			);
+			const primitiveController = new AbortController();
+			const primitiveReason = "caller-owned abort reason";
+			primitiveController.abort(primitiveReason);
+			await assert.rejects(
+				() =>
+					fetchBraveSearchJson(
+						buildBraveSearchUrl({ query: "test", count: 1, offset: 0 }),
+						"brave-secret",
+						primitiveController.signal,
+					),
+				(reason: unknown) => {
+					assert.equal(reason, primitiveReason);
+					return true;
+				},
+			);
+			await assert.rejects(
+				() => fetchExaSearchJson({ query: "test" }, "exa-secret", primitiveController.signal),
+				(reason: unknown) => {
+					assert.equal(reason, primitiveReason);
+					return true;
+				},
+			);
 		},
 	);
 });
 
-test("search execution reports API and JSON failures without leaking key", async () => {
+test("search execution reports API and JSON failures without leaking key", async (t) => {
 	const fixture = await createFixture();
 	await withPatchedEnv(
 		{
@@ -1107,53 +1145,59 @@ test("search execution reports API and JSON failures without leaking key", async
 				"upstream failed secret-that-must-not-leak",
 				"upstream failed secret&#45;that&#45;must&#45;not&#45;leak",
 			]) {
-				await withFakeFetch(
-					() => new Response(responseBody, { status: 429, statusText: "Too Many Requests" }),
-					async () => {
-						await assert.rejects(
-							() =>
-								fetchBraveSearchJson(
-									buildBraveSearchUrl({ query: "rate limit", count: 1, offset: 0 }),
-									"secret-that-must-not-leak",
-								),
-							(error: Error) => {
-								assert.match(error.message, /Brave search rate limit exceeded \(HTTP 429\)/);
-								assert.match(
-									error.message,
-									/Do not issue parallel or repeated agent_browser_web_search calls/,
-								);
-								assert.doesNotMatch(error.message, /secret-that-must-not-leak/);
-								return true;
-							},
-						);
-						await assert.rejects(
-							() =>
-								fetchExaSearchJson(
-									{ query: "rate limit", contents: { highlights: true } },
-									"secret-that-must-not-leak",
-								),
-							(error: Error) => {
-								assert.match(error.message, /Exa search rate limit exceeded \(HTTP 429\)/);
-								assert.match(
-									error.message,
-									/Do not issue parallel or repeated agent_browser_web_search calls/,
-								);
-								assert.doesNotMatch(error.message, /secret-that-must-not-leak/);
-								return true;
-							},
-						);
-						const result = await executeRegisteredTool(tool, harness.ctx, {
-							query: "rate limit",
-							count: 1,
-						});
-						assert.equal(result.isError, true);
-						assert.match(
-							JSON.stringify(result.structuredContent),
-							/"success":false.*Brave search rate limit exceeded/,
-						);
-						assert.doesNotMatch(JSON.stringify(result), /secret-that-must-not-leak/);
-					},
-				);
+				// The fetch stub is process-global; finish one response case before replacing it.
+				// oxlint-disable-next-line no-await-in-loop
+				await t.test(responseBody, async () => {
+					await withFakeFetch(
+						() => new Response(responseBody, { status: 429, statusText: "Too Many Requests" }),
+						async () => {
+							await assert.rejects(
+								() =>
+									fetchBraveSearchJson(
+										buildBraveSearchUrl({ query: "rate limit", count: 1, offset: 0 }),
+										"secret-that-must-not-leak",
+									),
+								(error: unknown) => {
+									assert.ok(error instanceof Error);
+									assert.match(error.message, /Brave search rate limit exceeded \(HTTP 429\)/);
+									assert.match(
+										error.message,
+										/Do not issue parallel or repeated agent_browser_web_search calls/,
+									);
+									assert.doesNotMatch(error.message, /secret-that-must-not-leak/);
+									return true;
+								},
+							);
+							await assert.rejects(
+								() =>
+									fetchExaSearchJson(
+										{ query: "rate limit", contents: { highlights: true } },
+										"secret-that-must-not-leak",
+									),
+								(error: unknown) => {
+									assert.ok(error instanceof Error);
+									assert.match(error.message, /Exa search rate limit exceeded \(HTTP 429\)/);
+									assert.match(
+										error.message,
+										/Do not issue parallel or repeated agent_browser_web_search calls/,
+									);
+									assert.doesNotMatch(error.message, /secret-that-must-not-leak/);
+									return true;
+								},
+							);
+							const result = await executeRegisteredTool(tool, harness.ctx, {
+								query: "rate limit",
+								count: 1,
+							});
+							assert.equal(result.isError, true);
+							assert.match(
+								JSON.stringify(result.structuredContent),
+								/"success":false.*Brave search rate limit exceeded/,
+							);
+							assert.doesNotMatch(JSON.stringify(result), /secret-that-must-not-leak/);
+						},
+					);
+				});
 			}
 			await withFakeFetch(
 				() => new Response("invalid JSON", { status: 200 }),
@@ -1163,9 +1207,39 @@ test("search execution reports API and JSON failures without leaking key", async
 						count: 1,
 					});
 					assert.equal(result.isError, true);
-					assert.equal((result.structuredContent as { success: boolean }).success, false);
+					assert.equal(readRecord(result.structuredContent).success, false);
 				},
 			);
+			for (const { provider, response } of [
+				{ provider: "brave", response: { web: { results: "invalid" } } },
+				{ provider: "brave", response: { web: { results: [{ profile: [] }] } } },
+
+				{ provider: "exa", response: { results: 42 } },
+			]) {
+				// Provider cases share the global fetch stub and credential environment.
+				// oxlint-disable-next-line no-await-in-loop
+				await t.test(`${provider}: ${JSON.stringify(response)}`, async () => {
+					await withPatchedEnv({ [EXA_API_KEY_ENV]: "secret-that-must-not-leak" }, () =>
+						withFakeFetch(
+							() => new Response(JSON.stringify(response), { status: 200 }),
+							async () => {
+								const result = await executeRegisteredTool(tool, harness.ctx, {
+									query: "malformed success",
+									count: 1,
+									provider,
+								});
+								assert.equal(result.isError, true);
+								assert.equal(readRecord(result.details).failureCategory, "upstream-error");
+								const observation = readRecord(result.structuredContent);
+								assert.equal(observation.success, false);
+								assert.equal(observation.resultCategory, "failure");
+								assert.match(readString(observation.error), /invalid result structure/i);
+								assert.doesNotMatch(JSON.stringify(result), /secret-that-must-not-leak/);
+							},
+						),
+					);
+				});
+			}
 			const controller = new AbortController();
 			controller.abort(new Error("cancelled search"));
 			await withFakeFetch(
@@ -1178,7 +1252,7 @@ test("search execution reports API and JSON failures without leaking key", async
 						controller.signal,
 					);
 					assert.equal(result.isError, true);
-					assert.equal(result.details?.failureCategory, "aborted");
+					assert.equal(readRecord(result.details).failureCategory, "aborted");
 					assert.match(JSON.stringify(result.structuredContent), /"success":false/);
 				},
 			);
@@ -1215,31 +1289,22 @@ test("large search results keep formatted prose inline and compact only the stru
 						query: "large caps",
 						count: 10,
 					});
-					const text = result.content[0]?.text ?? "";
+					const text = result.content.at(0)?.text ?? "";
 					assert.match(text, /Exa web search results for: large caps/);
 					assert.ok(text.includes(`10. ${capTitle}`), "last capped result must stay inline");
 					assert.doesNotMatch(text, /Browser observation compacted/);
-					const structured = result.structuredContent as {
-						compacted?: boolean;
-						observationPath?: string;
-					};
+					const structured = readRecord(result.structuredContent);
 					assert.equal(structured.compacted, true);
 					assert.equal(typeof structured.observationPath, "string");
-					const spill = JSON.parse(
-						await readFile(structured.observationPath as string, "utf8"),
-					) as { data: { results: unknown[] } };
-					assert.equal(spill.data.results.length, 10);
-					assert.equal((result.details as { results?: unknown[] }).results?.length, 10);
-					const manifest = (
-						result.details as {
-							artifactManifest?: {
-								entries?: Array<{ path?: string; storageScope?: string; retentionState?: string }>;
-							};
-						}
-					).artifactManifest;
-					const spillEntry = manifest?.entries?.find(
-						(entry) => entry.path === structured.observationPath,
+					const spill = readRecord(
+						JSON.parse(await readFile(readString(structured.observationPath), "utf8")),
 					);
+					assert.equal(readArray(readRecord(spill.data).results).length, 10);
+					assert.equal(readArray(readRecord(result.details).results).length, 10);
+					const manifest = readRecord(readRecord(result.details).artifactManifest);
+					const spillEntry = readArray(manifest.entries)
+						.map(readRecord)
+						.find((entry) => entry.path === structured.observationPath);
 					assert.ok(
 						spillEntry,
 						"oversized search spill keeps its invocation artifact receipt in details",
@@ -1271,7 +1336,7 @@ test("local validation failures report validation-error while provider failures 
 				async () => {
 					const result = await executeRegisteredTool(tool, harness.ctx, { query: "   " });
 					assert.equal(result.isError, true);
-					assert.equal(result.details?.failureCategory, "validation-error");
+					assert.equal(readRecord(result.details).failureCategory, "validation-error");
 					assert.match(
 						JSON.stringify(result.structuredContent),
 						/"failureCategory":"validation-error"/,
@@ -1286,7 +1351,7 @@ test("local validation failures report validation-error while provider failures 
 						count: 1,
 					});
 					assert.equal(result.isError, true);
-					assert.equal(result.details?.failureCategory, "upstream-error");
+					assert.equal(readRecord(result.details).failureCategory, "upstream-error");
 				},
 			);
 		},
@@ -1310,7 +1375,7 @@ test("local validation failures report validation-error while provider failures 
 						includeDomains: ["example.com"],
 					});
 					assert.equal(result.isError, true);
-					assert.equal(result.details?.failureCategory, "validation-error");
+					assert.equal(readRecord(result.details).failureCategory, "validation-error");
 					assert.match(
 						JSON.stringify(result.structuredContent),
 						/"success":false.*includeDomains requires provider exa; resolved provider was brave/,

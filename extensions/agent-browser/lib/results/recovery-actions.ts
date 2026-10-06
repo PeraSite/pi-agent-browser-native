@@ -4,20 +4,8 @@ import {
 	withOptionalSessionArgs,
 } from "./next-actions.js";
 
-export type AgentBrowserRecoveryKind =
-	| "about-blank"
-	| "connected-session"
-	| "no-active-page"
-	| "tab-drift";
-
-export interface AgentBrowserRecoveryContext {
-	kind: AgentBrowserRecoveryKind;
-	recoveryApplied?: boolean;
-	selectedTab?: string;
-	sessionName?: string;
-	targetTitle?: string;
-	targetUrl?: string;
-}
+import type { AgentBrowserRecoveryContext } from "./action-contracts.js";
+export type { AgentBrowserRecoveryContext, AgentBrowserRecoveryKind } from "./action-contracts.js";
 
 export const AGENT_BROWSER_RECOVERY_NEXT_ACTION_IDS = {
 	aboutBlankListTabs: "list-tabs-for-about-blank-recovery",
@@ -79,12 +67,12 @@ function isStableTabId(tab: string | undefined): tab is string {
 }
 
 function buildTabSnapshotRecoveryAction(options: {
-	id: string;
-	reason: string;
-	recovery: AgentBrowserRecoveryContext;
-	safety: string;
-	sessionArgs: (args: string[]) => string[];
-	tabId: string;
+	readonly id: string;
+	readonly reason: string;
+	readonly recovery: AgentBrowserRecoveryContext;
+	readonly safety: string;
+	readonly sessionArgs: (args: readonly string[]) => readonly string[];
+	readonly tabId: string;
 }): AgentBrowserNextAction {
 	if (options.recovery.recoveryApplied === true) {
 		return buildNextToolAction({
@@ -110,7 +98,8 @@ function buildTabSnapshotRecoveryAction(options: {
 export function buildRecoveryNextActions(
 	recovery: AgentBrowserRecoveryContext,
 ): AgentBrowserNextAction[] {
-	const sessionArgs = (args: string[]) => withOptionalSessionArgs(recovery.sessionName, args);
+	const sessionArgs = (args: readonly string[]) =>
+		withOptionalSessionArgs(recovery.sessionName, args);
 	if (recovery.kind === "connected-session") {
 		return [
 			buildNextToolAction({

@@ -6,7 +6,7 @@ import { writeSecureTempFile } from "./temp.js";
 const isolatedAgentBrowserEnvironment = new AsyncLocalStorage<string>();
 const agentBrowserProcessEnvironment = new AsyncLocalStorage<{
 	env: NodeJS.ProcessEnv;
-	booleanArgs: Array<[string, string]>;
+	booleanArgs: readonly (readonly [string, string])[];
 }>();
 const PROXY_ENV_NAMES = new Set(["ALL_PROXY", "HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY"]);
 
@@ -28,21 +28,21 @@ export function getAgentBrowserProcessEnvironment(
 	};
 }
 
-export function getAgentBrowserProcessArgs(args: string[]): string[] {
+export function getAgentBrowserProcessArgs(args: readonly string[]): string[] {
 	if (isolatedAgentBrowserEnvironment.getStore() !== undefined) {
-		return args;
+		return [...args];
 	}
 	const overrides = agentBrowserProcessEnvironment.getStore()?.booleanArgs ?? [];
 	const missing = overrides.flatMap(([flag, value]) =>
 		getBooleanFlagValue(args, flag) === undefined ? [flag, value] : [],
 	);
-	return missing.length ? [...missing, ...args] : args;
+	return missing.length > 0 ? [...missing, ...args] : [...args];
 }
 
 export function withAgentBrowserProcessEnvironment<T>(
 	env: NodeJS.ProcessEnv,
 	run: () => T,
-	booleanArgs?: Array<[string, string]>,
+	booleanArgs?: readonly (readonly [string, string])[],
 ): T {
 	const parent = agentBrowserProcessEnvironment.getStore();
 	return agentBrowserProcessEnvironment.run(

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readRecord } from "./helpers/assertions.js";
 import childProcess, { execFile } from "node:child_process";
 import { syncBuiltinESMExports } from "node:module";
 import { existsSync } from "node:fs";
@@ -27,7 +28,7 @@ for (const cancel of [false, true]) {
 			"execFile",
 			(
 				_file: string,
-				_args: string[],
+				_args: readonly string[],
 				options: Parameters<typeof execFile>[2],
 				callback: Parameters<typeof execFile>[3],
 			) => {
@@ -45,7 +46,11 @@ for (const cancel of [false, true]) {
 		);
 		syncBuiltinESMExports();
 		const controller = new AbortController();
-		const timer = cancel ? setTimeout(() => controller.abort(), 50) : undefined;
+		const timer = cancel
+			? setTimeout(() => {
+					controller.abort();
+				}, 50)
+			: undefined;
 		const started = Date.now();
 		try {
 			assert.equal(
@@ -66,7 +71,9 @@ for (const cancel of [false, true]) {
 			t.mock.restoreAll();
 			syncBuiltinESMExports();
 			for (const probe of probes) {
-				if (probe.exitCode === null) probe.kill("SIGKILL");
+				if (probe.exitCode === null) {
+					probe.kill("SIGKILL");
+				}
 			}
 		}
 	});
@@ -74,7 +81,8 @@ for (const cancel of [false, true]) {
 
 const systemPs = ["/bin/ps", "/usr/bin/ps"].find(existsSync);
 // Explicit modes verify the layout when run in a disposable Linux environment.
-const psLocation = process.env.PI_AGENT_BROWSER_TEST_PS ?? (systemPs ? "system" : "path");
+const psLocation =
+	process.env.PI_AGENT_BROWSER_TEST_PS ?? (systemPs !== undefined ? "system" : "path");
 
 test(
 	`real POSIX ${psLocation} ps preserves process identity and lock integrity`,
@@ -96,10 +104,16 @@ test(
 		let recovered: typeof lock;
 		try {
 			if (psLocation === "missing") {
+				// The explicit missing-ps variant must fail closed before returning.
+				// oxlint-disable-next-line node-test/no-conditional-assertion
 				assert.equal(await readProcessStartIdentity(process.pid), undefined);
+				// The same missing-ps variant must also refuse lock acquisition.
+				// oxlint-disable-next-line node-test/no-conditional-assertion
 				assert.equal(await acquireManagedSessionPolicyLock({ sessionName, namespace }), undefined);
 				return;
 			}
+			// Node's execFile custom promisify symbol preserves its callback-bearing overload.
+			// oxlint-disable-next-line typescript/strict-void-return
 			const { stdout } = await promisify(execFile)(systemPs ?? "ps", [
 				"-p",
 				String(process.pid),
@@ -107,7 +121,7 @@ test(
 				"lstart=",
 			]);
 			const expected = normalizeProcessStartIdentity(stdout);
-			assert.ok(expected);
+			assert.ok(expected !== undefined && expected !== "");
 			const identity = await readProcessStartIdentity(process.pid);
 			lock = await acquireManagedSessionPolicyLock({ sessionName, namespace });
 			assert.deepEqual(
@@ -132,8 +146,8 @@ test(
 				name.startsWith(`${basename(basePath)}.claim-`),
 			);
 			assert.equal(claimNames.length, 1);
-			const ownerPath = join(dirname(basePath), claimNames[0]!, "owner.json");
-			const owner = JSON.parse(await readFile(ownerPath, "utf8"));
+			const ownerPath = join(dirname(basePath), claimNames[0], "owner.json");
+			const owner = readRecord(JSON.parse(await readFile(ownerPath, "utf8")));
 			assert.equal(owner.startIdentity, expected);
 			// A live PID with a different recorded start time represents PID reuse, not a live lock owner.
 			await writeFile(

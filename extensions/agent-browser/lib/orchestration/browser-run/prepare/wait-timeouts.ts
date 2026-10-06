@@ -16,13 +16,17 @@ function parseMillisecondsToken(token: string | undefined): number | undefined {
 	return Number.isSafeInteger(parsed) ? parsed : undefined;
 }
 
-function findCommandTimeoutMs(commandTokens: string[]): number | undefined {
+function supportsCommandTimeout(commandTokens: readonly string[]): boolean {
 	const [command, subcommand] = commandTokens;
-	if (
-		command !== "wait" &&
-		command !== "read" &&
-		!(command === "webmcp" && ["invoke", "result"].includes(subcommand ?? ""))
-	) {
+	return (
+		command === "wait" ||
+		command === "read" ||
+		(command === "webmcp" && ["invoke", "result"].includes(subcommand))
+	);
+}
+
+function findCommandTimeoutMs(commandTokens: readonly string[]): number | undefined {
+	if (!supportsCommandTimeout(commandTokens)) {
 		return undefined;
 	}
 	for (let index = 1; index < commandTokens.length; index += 1) {
@@ -34,13 +38,15 @@ function findCommandTimeoutMs(commandTokens: string[]): number | undefined {
 			return parseMillisecondsToken(token.slice("--timeout=".length));
 		}
 	}
-	const firstWaitArgument = commandTokens[0] === "wait" ? commandTokens[1] : undefined;
-	return firstWaitArgument && !firstWaitArgument.startsWith("-")
+	const firstWaitArgument = commandTokens[0] === "wait" ? commandTokens.at(1) : undefined;
+	return firstWaitArgument !== undefined &&
+		firstWaitArgument !== "" &&
+		!firstWaitArgument.startsWith("-")
 		? parseMillisecondsToken(firstWaitArgument)
 		: undefined;
 }
 
-export function findFirstPositionalArgument(commandTokens: string[]): string | undefined {
+export function findFirstPositionalArgument(commandTokens: readonly string[]): string | undefined {
 	for (let index = 1; index < commandTokens.length; index += 1) {
 		const token = commandTokens[index];
 		const flag = token.split("=", 1)[0];
@@ -64,7 +70,7 @@ export function findFirstPositionalArgument(commandTokens: string[]): string | u
 	return undefined;
 }
 
-function readUsesActivePageUrl(commandTokens: string[]): boolean {
+function readUsesActivePageUrl(commandTokens: readonly string[]): boolean {
 	return (
 		!isBrowserIndependentRead(commandTokens) &&
 		commandTokens.some(
@@ -73,7 +79,10 @@ function readUsesActivePageUrl(commandTokens: string[]): boolean {
 	);
 }
 
-function readRequestBudget(commandTokens: string[], activePageUrl: string | undefined): number {
+function readRequestBudget(
+	commandTokens: readonly string[],
+	activePageUrl: string | undefined,
+): number {
 	const target = getExplicitReadUrl(commandTokens) ?? activePageUrl;
 	if (target === undefined) {
 		return 1;
@@ -95,7 +104,7 @@ function readRequestBudget(commandTokens: string[], activePageUrl: string | unde
 }
 
 function commandTimeoutBudgetMs(
-	commandTokens: string[],
+	commandTokens: readonly string[],
 	activePageUrl: string | undefined,
 ): number | undefined {
 	const timeoutMs = findCommandTimeoutMs(commandTokens);
@@ -108,7 +117,7 @@ function commandTimeoutBudgetMs(
 }
 
 function findCommandTimeoutBudgetMs(
-	commandTokens: string[],
+	commandTokens: readonly string[],
 	stdin: string | undefined,
 	activePageUrl: string | undefined,
 ): number | undefined {
@@ -130,29 +139,30 @@ function findCommandTimeoutBudgetMs(
 	return batchTimeoutTotal === 0 ? undefined : batchTimeoutTotal;
 }
 
+function activeReadNeedsPageUrl(commandTokens: readonly string[]): boolean {
+	return (
+		commandTokens[0] === "read" &&
+		findCommandTimeoutMs(commandTokens) !== undefined &&
+		readUsesActivePageUrl(commandTokens)
+	);
+}
+
 export function commandTimeoutNeedsActivePageUrl(
-	commandTokens: string[],
+	commandTokens: readonly string[],
 	stdin: string | undefined,
 ): boolean {
 	if (commandTokens[0] === "read") {
-		return (
-			findCommandTimeoutMs(commandTokens) !== undefined && readUsesActivePageUrl(commandTokens)
-		);
+		return activeReadNeedsPageUrl(commandTokens);
 	}
 	if (commandTokens[0] !== "batch") {
 		return false;
 	}
 	let hasKnownPageUrl = false;
 	for (const step of getUpstreamEffectiveBatchSteps(commandTokens, stdin)) {
-		if (isOpenNavigationCommand(step[0]) && findFirstPositionalArgument(step)) {
+		if (isOpenNavigationCommand(step[0]) && (findFirstPositionalArgument(step) ?? "") !== "") {
 			hasKnownPageUrl = true;
 		}
-		if (
-			!hasKnownPageUrl &&
-			findCommandTimeoutMs(step) !== undefined &&
-			step[0] === "read" &&
-			readUsesActivePageUrl(step)
-		) {
+		if (!hasKnownPageUrl && activeReadNeedsPageUrl(step)) {
 			return true;
 		}
 	}
@@ -160,7 +170,7 @@ export function commandTimeoutNeedsActivePageUrl(
 }
 
 export function getCommandAwareProcessTimeoutMs(
-	commandTokens: string[],
+	commandTokens: readonly string[],
 	stdin: string | undefined,
 	activePageUrl?: string,
 ): number | undefined {

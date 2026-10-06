@@ -9,6 +9,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { readRecord, readArray, readString } from "./helpers/assertions.js";
 import { runInNewContext } from "node:vm";
 
 import {
@@ -53,6 +54,7 @@ for (const mode of [
 	"abort",
 	"expiry",
 ] as const) {
+	const probeExpected = mode === "match" || mode === "expiry";
 	test(
 		`click dispatch identity ${mode} cleans up the exact candidate`,
 		{ concurrency: false },
@@ -101,21 +103,33 @@ if (args.includes("attr") && mode === "abort") {
 						try {
 							const deadline = Date.now() + 5000;
 							while (
+								// Poll the observed dispatch/exit state before waiting again; parallel polls would race cancellation.
+								// oxlint-disable-next-line no-await-in-loop
 								!(await readInvocationLog(logPath)).some((entry) => entry.args.includes("attr"))
 							) {
+								// This deadline assertion fails closed during polling; dispatch and cleanup are checked after the loop.
+								// oxlint-disable-next-line node-test/no-conditional-assertion
 								assert.ok(Date.now() < deadline, "identity lookup must start before abort");
-								await new Promise((resolve) => setTimeout(resolve, 10));
+								// Poll the observed dispatch/exit state before waiting again; parallel polls would race cancellation.
+								// oxlint-disable-next-line no-await-in-loop
+								await new Promise<void>((resolve) => {
+									setTimeout(resolve, 10);
+								});
 							}
 						} finally {
 							controller.abort();
 						}
 					}
 					const probe = await pending;
-					if (mode === "match" || mode === "expiry") {
+					if (probeExpected) {
+						// Fixed probe/guard variants validate their applicable receipts; final marker, timer, and listener cleanup is unconditional.
+						// oxlint-disable-next-line node-test/no-conditional-assertion
 						assert.ok(probe);
 					}
 					if (mode === "match") {
 						const diagnostic = await collectClickDispatchDiagnostic({ ...options, probe });
+						// Fixed probe/guard variants validate their applicable receipts; final marker, timer, and listener cleanup is unconditional.
+						// oxlint-disable-next-line node-test/no-conditional-assertion
 						assert.equal(
 							diagnostic?.status,
 							"no-native-event-observed",
@@ -123,6 +137,8 @@ if (args.includes("attr") && mode === "abort") {
 						);
 						await cleanupClickDispatchProbe({ ...options, probe });
 					} else if (mode !== "expiry") {
+						// Fixed probe/guard variants validate their applicable receipts; final marker, timer, and listener cleanup is unconditional.
+						// oxlint-disable-next-line node-test/no-conditional-assertion
 						assert.equal(
 							probe,
 							undefined,
@@ -132,9 +148,17 @@ if (args.includes("attr") && mode === "abort") {
 					const invocations = await readInvocationLog(logPath);
 					const identityCall = invocations.find((entry) => entry.args.includes("attr"));
 					if (mode !== "install-failure") {
+						// Fixed probe/guard variants validate their applicable receipts; final marker, timer, and listener cleanup is unconditional.
+						// oxlint-disable-next-line node-test/no-conditional-assertion
 						assert.ok(identityCall);
+						// Fixed probe/guard variants validate their applicable receipts; final marker, timer, and listener cleanup is unconditional.
+						// oxlint-disable-next-line node-test/no-conditional-assertion
 						assert.deepEqual(identityCall.args.slice(-4, -1), ["get", "attr", "@e1"]);
+						// Fixed probe/guard variants validate their applicable receipts; final marker, timer, and listener cleanup is unconditional.
+						// oxlint-disable-next-line node-test/no-conditional-assertion
 						assert.ok(identityCall.args.includes("identity-fixture"));
+						// Fixed probe/guard variants validate their applicable receipts; final marker, timer, and listener cleanup is unconditional.
+						// oxlint-disable-next-line node-test/no-conditional-assertion
 						assert.ok(identityCall.args.includes("click-fixture"));
 					}
 					const scripts = invocations
@@ -205,14 +229,16 @@ if (args.includes("attr") && mode === "abort") {
 							removeEventListener: (type: string) => listeners.delete(type),
 						},
 					};
-					const installed = runInNewContext(scripts[0], context);
+					const installed = readRecord(runInNewContext(scripts[0], context));
 					assert.equal(installed.status, "installed");
 					const attribute = [...copy.attributes.keys()].find((key) =>
 						key.startsWith("data-pi-click-dispatch-"),
 					);
-					assert.ok(attribute);
+					assert.ok(typeof attribute === "string" && attribute.length > 0);
 					assert.equal(copy.getAttribute(attribute), installed.marker);
 					if (identityCall) {
+						// Fixed probe/guard variants validate their applicable receipts; final marker, timer, and listener cleanup is unconditional.
+						// oxlint-disable-next-line node-test/no-conditional-assertion
 						assert.equal(identityCall.args.at(-1), attribute);
 					}
 					assert.equal(save.getAttribute(attribute), null);
@@ -221,15 +247,21 @@ if (args.includes("attr") && mode === "abort") {
 					for (const script of scripts.slice(1)) {
 						runInNewContext(script, context);
 						if (script.includes('status: "identity-marker-removed"')) {
+							// Fixed probe/guard variants validate their applicable receipts; final marker, timer, and listener cleanup is unconditional.
+							// oxlint-disable-next-line node-test/no-conditional-assertion
 							assert.equal(
 								copy.getAttribute(attribute),
 								null,
 								"marker is removed before the click",
 							);
+							// Fixed probe/guard variants validate their applicable receipts; final marker, timer, and listener cleanup is unconditional.
+							// oxlint-disable-next-line node-test/no-conditional-assertion
 							assert.equal(listeners.size, 5, "identity confirmation retains event monitoring");
 						}
 					}
 					if (mode === "expiry") {
+						// Fixed probe/guard variants validate their applicable receipts; final marker, timer, and listener cleanup is unconditional.
+						// oxlint-disable-next-line node-test/no-conditional-assertion
 						assert.ok(
 							expire,
 							"lost or confirmation-blocked cleanup must not leave permanent listeners",
@@ -239,7 +271,7 @@ if (args.includes("attr") && mode === "abort") {
 					assert.equal(timers.size, 0, "normal cleanup cancels the expiry timer too");
 					assert.equal(copy.getAttribute(attribute), null);
 					assert.equal(copy.getAttribute("aria-labelledby"), "copy-label");
-					assert.equal(window[installed.marker], undefined);
+					assert.equal(window[readString(installed.marker)], undefined);
 					assert.equal(listeners.size, 0);
 				});
 			} finally {
@@ -302,7 +334,7 @@ if (args.includes("eval")) {
 						args: ["click", "@e1"],
 					});
 					assert.equal(click.isError, true);
-					assert.equal(click.details?.clickDispatch, undefined);
+					assert.equal(readRecord(click.details).clickDispatch, undefined);
 
 					const invocations = await readInvocationLog(logPath);
 					const evalInvocations = invocations.filter((entry) => entry.args.includes("eval"));
@@ -378,7 +410,7 @@ if (args.includes("eval")) {
 						args: ["click", "@e1"],
 					});
 					assert.equal(click.isError, false);
-					assert.equal(click.details?.clickDispatch, undefined);
+					assert.equal(readRecord(click.details).clickDispatch, undefined);
 
 					const invocations = await readInvocationLog(logPath);
 					const evalInvocations = invocations.filter((entry) => entry.args.includes("eval"));
@@ -464,16 +496,13 @@ if (args.includes("snapshot")) {
 						args: ["click", "@e4"],
 					});
 					assert.equal(click.isError, true);
-					assert.match((click.content[0] as { text: string }).text, /Click dispatch diagnostic:/);
-					assert.deepEqual(
-						(click.details?.clickDispatch as { target?: unknown } | undefined)?.target,
-						{
-							kind: "accessible",
-							name: "RPS (3)",
-							refId: "e4",
-							role: "button",
-						},
-					);
+					assert.match(readString(readRecord(click.content[0]).text), /Click dispatch diagnostic:/);
+					assert.deepEqual(readRecord(readRecord(click.details).clickDispatch).target, {
+						kind: "accessible",
+						name: "RPS (3)",
+						refId: "e4",
+						role: "button",
+					});
 
 					const invocations = await readInvocationLog(logPath);
 					assert.ok(
@@ -541,29 +570,51 @@ process.stdout.write(JSON.stringify({ success: true, data }));
 							],
 						});
 						for (const selector of ["@e1", "xpath=//button"]) {
+							// Complete snapshot, click, and confirmation in order on the same guarded session.
+							// oxlint-disable-next-line no-await-in-loop
 							await executeRegisteredTool(harness.tool, harness.ctx, {
 								args: [...prefix, "snapshot", "-i"],
 							});
+							// Complete snapshot, click, and confirmation in order on the same guarded session.
+							// oxlint-disable-next-line no-await-in-loop
 							const clicked = await executeRegisteredTool(harness.tool, harness.ctx, {
 								args: [...prefix, "click", selector],
 							});
-							assert.equal(clicked.isError, guardedClick, clicked.content[0]?.text);
+							// Fixed probe/guard variants validate their applicable receipts; final marker, timer, and listener cleanup is unconditional.
+							// oxlint-disable-next-line node-test/no-conditional-assertion
+							assert.equal(
+								clicked.isError,
+								guardedClick,
+								readString(readRecord(clicked.content[0]).text),
+							);
 							if (guardedClick) {
+								// Fixed probe/guard variants validate their applicable receipts; final marker, timer, and listener cleanup is unconditional.
+								// oxlint-disable-next-line node-test/no-conditional-assertion
 								assert.equal(
-									(clicked.details?.readConfirmation as { action: string }).action,
+									readRecord(readRecord(clicked.details).readConfirmation).action,
 									"click",
 									"native click policy remains enforced, rather than approving the diagnostic",
 								);
-								const action = (
-									clicked.details?.nextActions as Array<{ id: string; params: { args: string[] } }>
-								).find((row) => row.id === "approve-confirmation");
-								assert.ok(action);
+								const action = readArray(readRecord(clicked.details).nextActions).find(
+									(row) => readRecord(row).id === "approve-confirmation",
+								);
+								// Fixed probe/guard variants validate their applicable receipts; final marker, timer, and listener cleanup is unconditional.
+								// oxlint-disable-next-line node-test/no-conditional-assertion
+								assert.ok(action !== undefined);
+								// Complete snapshot, click, and confirmation in order on the same guarded session.
+								// oxlint-disable-next-line no-await-in-loop
 								const completed = await executeRegisteredTool(
 									harness.tool,
 									harness.ctx,
-									action.params,
+									readRecord(action).params,
 								);
-								assert.equal(completed.isError, false, completed.content[0]?.text);
+								// Fixed probe/guard variants validate their applicable receipts; final marker, timer, and listener cleanup is unconditional.
+								// oxlint-disable-next-line node-test/no-conditional-assertion
+								assert.equal(
+									completed.isError,
+									false,
+									readString(readRecord(completed.content[0]).text),
+								);
 							}
 						}
 						const invocations = await readInvocationLog(logPath);
@@ -573,7 +624,7 @@ process.stdout.write(JSON.stringify({ success: true, data }));
 							"both native targets must dispatch",
 						);
 						assert.equal(
-							invocations.some((row) => row.stdin?.includes("window[marker] = state")),
+							invocations.some((row) => row.stdin?.includes("window[marker] = state") === true),
 							false,
 							"retained evaluate policy must not cause a retry loop in optional probe installation",
 						);
@@ -653,7 +704,7 @@ if (args.includes("snapshot")) {
 						args: ["click", "@e2"],
 					});
 					assert.equal(click.isError, false);
-					assert.equal(click.details?.clickDispatch, undefined);
+					assert.equal(readRecord(click.details).clickDispatch, undefined);
 
 					const invocations = await readInvocationLog(logPath);
 					assert.equal(
@@ -704,7 +755,7 @@ if (args.includes("eval")) {
 					args: ["find", "text", "Add to cart", "click"],
 				});
 				assert.equal(click.isError, false);
-				assert.equal(click.details?.clickDispatch, undefined);
+				assert.equal(readRecord(click.details).clickDispatch, undefined);
 				const invocations = await readInvocationLog(logPath);
 				assert.equal(
 					invocations.some(
@@ -768,32 +819,33 @@ if (args.includes("snapshot")) {
 					args: ["click", "xpath=//*[@id='add-to-cart']"],
 				});
 				assert.equal(click.isError, true);
-				assert.match((click.content[0] as { text: string }).text, /Click dispatch diagnostic:/);
+				assert.match(readString(readRecord(click.content[0]).text), /Click dispatch diagnostic:/);
 				assert.equal(
-					(click.details?.clickDispatch as { status?: string } | undefined)?.status,
+					readRecord(readRecord(click.details).clickDispatch).status,
 					"no-native-event-observed",
 				);
-				assert.deepEqual(
-					(click.details?.clickDispatch as { target?: unknown } | undefined)?.target,
-					{ kind: "xpath", selector: "//*[@id='add-to-cart']" },
+				assert.deepEqual(readRecord(readRecord(click.details).clickDispatch).target, {
+					kind: "xpath",
+					selector: "//*[@id='add-to-cart']",
+				});
+				assert.deepEqual(readRecord(readRecord(click.details).clickDispatch).scrollContainer, {
+					selector: "#todos",
+					summary:
+						"Target appears outside nested scroll container #todos; use scrollintoview on the target or scroll that container before retrying.",
+					targetOutsideContainer: true,
+					targetOutsideViewport: true,
+				});
+				assert.match(
+					readString(readRecord(click.content[0]).text),
+					/nested scroll container #todos/,
 				);
-				assert.deepEqual(
-					(click.details?.clickDispatch as { scrollContainer?: unknown } | undefined)
-						?.scrollContainer,
-					{
-						selector: "#todos",
-						summary:
-							"Target appears outside nested scroll container #todos; use scrollintoview on the target or scroll that container before retrying.",
-						targetOutsideContainer: true,
-						targetOutsideViewport: true,
-					},
+				const nextActionIds = new Set(
+					readArray(readRecord(click.details).nextActions ?? []).map(
+						(action) => readRecord(action).id,
+					),
 				);
-				assert.match(click.content[0]?.text ?? "", /nested scroll container #todos/);
-				const nextActionIds = (
-					(click.details?.nextActions as Array<{ id?: string }> | undefined) ?? []
-				).map((action) => action.id);
-				assert.ok(nextActionIds.includes("scroll-target-into-view-after-dispatch-miss"));
-				assert.ok(nextActionIds.includes("retry-click-after-dispatch-miss"));
+				assert.ok(nextActionIds.has("scroll-target-into-view-after-dispatch-miss"));
+				assert.ok(nextActionIds.has("retry-click-after-dispatch-miss"));
 
 				const invocations = await readInvocationLog(logPath);
 				assert.equal(invocations.filter((entry) => entry.args.includes("click")).length, 1);
@@ -862,7 +914,7 @@ if (args.includes("open")) {
 				});
 				assert.equal(opened.isError, false);
 				assert.equal(
-					(opened.details?.sessionTabTarget as { url?: string } | undefined)?.url,
+					readRecord(readRecord(opened.details).sessionTabTarget).url,
 					"https://shop.example/login",
 				);
 
@@ -870,18 +922,17 @@ if (args.includes("open")) {
 					args: ["click", "#login-button"],
 				});
 				assert.equal(click.isError, false);
-				assert.equal(click.details?.clickDispatch, undefined);
-				assert.deepEqual(click.details?.sessionTabTarget, {
+				assert.equal(readRecord(click.details).clickDispatch, undefined);
+				assert.deepEqual(readRecord(click.details).sessionTabTarget, {
 					title: "Inventory",
 					url: "https://shop.example/inventory",
 				});
 				assert.equal(
-					(click.details?.pageChangeSummary as { changeType?: string; url?: string } | undefined)
-						?.changeType,
+					readRecord(readRecord(click.details).pageChangeSummary).changeType,
 					"navigation",
 				);
 				assert.equal(
-					(click.details?.pageChangeSummary as { url?: string } | undefined)?.url,
+					readRecord(readRecord(click.details).pageChangeSummary).url,
 					"https://shop.example/inventory",
 				);
 

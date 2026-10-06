@@ -13,18 +13,13 @@ import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { readRecord, readArray, readString, readNumber } from "./helpers/assertions.js";
 
 import { Check } from "typebox/value";
 
 import { compileAgentBrowserElectron } from "../extensions/agent-browser/lib/input-modes/electron.js";
-import {
-	cleanupElectronLaunchResources,
-	type ElectronLaunchStatus,
-} from "../extensions/agent-browser/lib/electron/cleanup.js";
-import {
-	launchElectronApp,
-	type ElectronLaunchRecord,
-} from "../extensions/agent-browser/lib/electron/launch.js";
+import { cleanupElectronLaunchResources } from "../extensions/agent-browser/lib/electron/cleanup.js";
+import { launchElectronApp } from "../extensions/agent-browser/lib/electron/launch.js";
 
 import { getBrowserRecord } from "../extensions/agent-browser/lib/browser-transcript.js";
 import { isRecord } from "../extensions/agent-browser/lib/parsing.js";
@@ -62,10 +57,16 @@ async function waitForLoggedCommand(
 ): Promise<void> {
 	const deadline = Date.now() + timeoutMs;
 	while (Date.now() < deadline) {
+		// Poll the observed dispatch/exit state before waiting again; parallel polls would race cancellation.
+		// oxlint-disable-next-line no-await-in-loop
 		if ((await readInvocationLog(logPath)).some((entry) => entry.args.includes(command))) {
 			return;
 		}
-		await new Promise((resolve) => setTimeout(resolve, 10));
+		// Poll the observed dispatch/exit state before waiting again; parallel polls would race cancellation.
+		// oxlint-disable-next-line no-await-in-loop
+		await new Promise<void>((resolve) => {
+			setTimeout(resolve, 10);
+		});
 	}
 	throw new Error(`Timed out waiting for ${command} invocation.`);
 }
@@ -104,7 +105,9 @@ process.stdout.write(JSON.stringify({ success: true, data: "should not run" }));
 		try {
 			await withPatchedEnv({ HOME: tempDir, PATH: `${tempDir}:${basePath}` }, async () => {
 				const harness = createExtensionHarness({ cwd: tempDir });
-				const schema = harness.getTool("agent_browser_electron")!.parameters;
+				const tool = harness.getTool("agent_browser_electron");
+				assert.ok(tool !== undefined);
+				const schema = tool.parameters;
 				assert.equal(Check(schema, { action: "list" }), true);
 				assert.equal(Check(schema, { action: "list", maxResults: 10, query: "code" }), true);
 				assert.equal(
@@ -163,75 +166,85 @@ process.stdout.write(JSON.stringify({ success: true, data: "should not run" }));
 					electron: { action: "list", maxResults: 1, query: "__piab_no_matching_electron_app__" },
 				});
 				assert.equal(listResult.isError, false);
-				assert.match(listResult.content[0]?.text ?? "", /Electron apps \(0 found\):/);
-				assert.deepEqual(listResult.details?.compiledElectron, {
+				assert.match(
+					readString(readRecord(listResult.content[0]).text),
+					/Electron apps \(0 found\):/,
+				);
+				assert.deepEqual(readRecord(listResult.details).compiledElectron, {
 					action: "list",
 					maxResults: 1,
 					query: "__piab_no_matching_electron_app__",
 				});
-				assert.equal(
-					(listResult.details?.electron as { action?: string; status?: string } | undefined)
-						?.action,
-					"list",
-				);
-				assert.equal(
-					(listResult.details?.electron as { action?: string; status?: string } | undefined)
-						?.status,
-					"succeeded",
-				);
-				assert.equal(listResult.details?.resultCategory, "success");
+				assert.equal(readRecord(readRecord(listResult.details).electron).action, "list");
+				assert.equal(readRecord(readRecord(listResult.details).electron).status, "succeeded");
+				assert.equal(readRecord(listResult.details).resultCategory, "success");
 				if (process.platform === "darwin" || process.platform === "linux") {
 					const sensitiveListResult = await executeRegisteredTool(harness.tool, harness.ctx, {
 						electron: { action: "list", maxResults: 5, query: "Obsidian" },
 					});
+					// Fixed Electron platform/action/status variants require their applicable assertions; common schema/outcome checks remain unconditional.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
 					assert.equal(sensitiveListResult.isError, false);
+					// Fixed Electron platform/action/status variants require their applicable assertions; common schema/outcome checks remain unconditional.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
 					assert.match(
-						sensitiveListResult.content[0]?.text ?? "",
+						readString(readRecord(sensitiveListResult.content[0]).text),
 						/Obsidian.*\[likely sensitive: notes\]/,
 					);
+					// Fixed Electron platform/action/status variants require their applicable assertions; common schema/outcome checks remain unconditional.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
 					assert.match(
-						sensitiveListResult.content[0]?.text ?? "",
+						readString(readRecord(sensitiveListResult.content[0]).text),
 						/Review likely-sensitive apps and use caller-owned allow\/deny policy before launch\./,
 					);
+					// Fixed Electron platform/action/status variants require their applicable assertions; common schema/outcome checks remain unconditional.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
 					assert.match(
-						sensitiveListResult.content[0]?.text ?? "",
+						readString(readRecord(sensitiveListResult.content[0]).text),
 						/Profile note: electron\.launch starts an isolated temporary profile/,
 					);
+					// Fixed Electron platform/action/status variants require their applicable assertions; common schema/outcome checks remain unconditional.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
 					assert.match(
-						sensitiveListResult.content[0]?.text ?? "",
+						readString(readRecord(sensitiveListResult.content[0]).text),
 						/For already-authenticated desktop app content, do not stop here/,
 					);
+					// Fixed Electron platform/action/status variants require their applicable assertions; common schema/outcome checks remain unconditional.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
 					assert.match(
-						sensitiveListResult.content[0]?.text ?? "",
+						readString(readRecord(sensitiveListResult.content[0]).text),
 						/launch the normal app with --remote-debugging-port=<port>/,
 					);
-					const electronDetails = sensitiveListResult.details?.electron as
-						| {
-								apps?: Array<{
-									name?: string;
-									sensitivity?: { categories?: string[]; level?: string };
-								}>;
-								profileIsolation?: {
-									reusesExistingSignedInProfile?: boolean;
-									attachesToAlreadyRunningApp?: boolean;
-									hostDebugLaunchExample?: string;
-								};
-								sensitiveAppCount?: number;
-						  }
-						| undefined;
-					assert.ok((electronDetails?.sensitiveAppCount ?? 0) >= 1);
-					assert.equal(electronDetails?.profileIsolation?.reusesExistingSignedInProfile, false);
-					assert.equal(electronDetails?.profileIsolation?.attachesToAlreadyRunningApp, false);
+					const electronDetails = readRecord(readRecord(sensitiveListResult.details).electron);
+					// Fixed Electron platform/action/status variants require their applicable assertions; common schema/outcome checks remain unconditional.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
+					assert.ok(readNumber(electronDetails.sensitiveAppCount ?? 0) >= 1);
+					// Fixed Electron platform/action/status variants require their applicable assertions; common schema/outcome checks remain unconditional.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
+					assert.equal(
+						readRecord(electronDetails.profileIsolation).reusesExistingSignedInProfile,
+						false,
+					);
+					// Fixed Electron platform/action/status variants require their applicable assertions; common schema/outcome checks remain unconditional.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
+					assert.equal(
+						readRecord(electronDetails.profileIsolation).attachesToAlreadyRunningApp,
+						false,
+					);
+					// Fixed Electron platform/action/status variants require their applicable assertions; common schema/outcome checks remain unconditional.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
 					assert.match(
-						electronDetails?.profileIsolation?.hostDebugLaunchExample ?? "",
+						readString(readRecord(electronDetails.profileIsolation).hostDebugLaunchExample ?? ""),
 						/open -a <App Name> --args --remote-debugging-port=9222/,
 					);
+					// Fixed Electron platform/action/status variants require their applicable assertions; common schema/outcome checks remain unconditional.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
 					assert.ok(
-						electronDetails?.apps?.some(
+						readArray(electronDetails.apps).some(
 							(app) =>
-								app.name === "Obsidian" &&
-								app.sensitivity?.level === "likely-sensitive" &&
-								app.sensitivity.categories?.includes("notes"),
+								readRecord(app).name === "Obsidian" &&
+								readRecord(readRecord(app).sensitivity).level === "likely-sensitive" &&
+								readArray(readRecord(readRecord(app).sensitivity).categories).includes("notes"),
 						),
 					);
 				}
@@ -242,33 +255,47 @@ process.stdout.write(JSON.stringify({ success: true, data: "should not run" }));
 				});
 				assert.equal(missingAction.isError, true);
 				assert.match(
-					missingAction.content[0]?.text ?? "",
+					readString(readRecord(missingAction.content[0]).text),
 					/electron\.action must be one of: list, launch, status, cleanup, probe/,
 				);
-				assert.equal(missingAction.details?.failureCategory, "validation-error");
+				assert.equal(readRecord(missingAction.details).failureCategory, "validation-error");
 
 				const unknownAction = await executeRegisteredTool(harness.tool, harness.ctx, {
 					electron: { action: "bogus" },
 				});
 				assert.equal(unknownAction.isError, true);
-				assert.match(unknownAction.content[0]?.text ?? "", /electron\.action must be one of/);
+				assert.match(
+					readString(readRecord(unknownAction.content[0]).text),
+					/electron\.action must be one of/,
+				);
 
 				const statusWithHandoff = await executeRegisteredTool(harness.tool, harness.ctx, {
 					electron: { action: "status", handoff: "tabs" },
 				});
 				assert.equal(statusWithHandoff.isError, true);
 				assert.match(
-					statusWithHandoff.content[0]?.text ?? "",
+					readString(readRecord(statusWithHandoff.content[0]).text),
 					/electron\.status does not support electron\.handoff/,
 				);
 
 				for (const action of ["status", "cleanup"] as const) {
+					// Complete each replay/status subtest before changing the shared live Electron launch state.
+					// oxlint-disable-next-line no-await-in-loop
 					const allFalse = await executeRegisteredTool(harness.tool, harness.ctx, {
 						electron: { action, all: false },
 					});
+					// Fixed Electron platform/action/status variants require their applicable assertions; common schema/outcome checks remain unconditional.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
 					assert.equal(allFalse.isError, true, action);
-					assert.match(allFalse.content[0]?.text ?? "", /electron\.all must be true when provided/);
-					assert.equal(allFalse.details?.failureCategory, "validation-error");
+					// Fixed Electron platform/action/status variants require their applicable assertions; common schema/outcome checks remain unconditional.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
+					assert.match(
+						readString(readRecord(allFalse.content[0]).text),
+						/electron\.all must be true when provided/,
+					);
+					// Fixed Electron platform/action/status variants require their applicable assertions; common schema/outcome checks remain unconditional.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
+					assert.equal(readRecord(allFalse.details).failureCategory, "validation-error");
 				}
 
 				const probeWithListField = await executeRegisteredTool(harness.tool, harness.ctx, {
@@ -276,7 +303,7 @@ process.stdout.write(JSON.stringify({ success: true, data: "should not run" }));
 				});
 				assert.equal(probeWithListField.isError, true);
 				assert.match(
-					probeWithListField.content[0]?.text ?? "",
+					readString(readRecord(probeWithListField.content[0]).text),
 					/electron\.probe only supports action, launchId, and timeoutMs; remove electron\.query/,
 				);
 
@@ -284,28 +311,31 @@ process.stdout.write(JSON.stringify({ success: true, data: "should not run" }));
 					electron: { action: "probe", launchId: "launch-1" },
 				});
 				assert.equal(probeWithoutSession.isError, true);
-				assert.deepEqual(probeWithoutSession.details?.compiledElectron, {
+				assert.deepEqual(readRecord(probeWithoutSession.details).compiledElectron, {
 					action: "probe",
 					launchId: "launch-1",
 				});
 				assert.match(
-					probeWithoutSession.content[0]?.text ?? "",
+					readString(readRecord(probeWithoutSession.content[0]).text),
 					/No wrapper-tracked Electron launch found for launchId launch-1/,
 				);
-				assert.equal(probeWithoutSession.details?.failureCategory, "validation-error");
+				assert.equal(readRecord(probeWithoutSession.details).failureCategory, "validation-error");
 
 				const badQuery = await executeRegisteredTool(harness.tool, harness.ctx, {
 					electron: { action: "list", query: 7 },
 				});
 				assert.equal(badQuery.isError, true);
-				assert.match(badQuery.content[0]?.text ?? "", /electron\.query must be a non-empty string/);
+				assert.match(
+					readString(readRecord(badQuery.content[0]).text),
+					/electron\.query must be a non-empty string/,
+				);
 
 				const listWithLaunchField = await executeRegisteredTool(harness.tool, harness.ctx, {
 					electron: { action: "list", appName: "Code" },
 				});
 				assert.equal(listWithLaunchField.isError, true);
 				assert.match(
-					listWithLaunchField.content[0]?.text ?? "",
+					readString(readRecord(listWithLaunchField.content[0]).text),
 					/electron\.list only supports query and maxResults; remove electron\.appName/,
 				);
 
@@ -314,10 +344,10 @@ process.stdout.write(JSON.stringify({ success: true, data: "should not run" }));
 				});
 				assert.equal(missingLaunchTarget.isError, true);
 				assert.match(
-					missingLaunchTarget.content[0]?.text ?? "",
+					readString(readRecord(missingLaunchTarget.content[0]).text),
 					/electron\.launch requires exactly one of appPath, appName, bundleId, or executablePath/,
 				);
-				assert.equal(missingLaunchTarget.details?.failureCategory, "validation-error");
+				assert.equal(readRecord(missingLaunchTarget.details).failureCategory, "validation-error");
 				const ambiguousLaunchTarget = await executeRegisteredTool(harness.tool, harness.ctx, {
 					electron: {
 						action: "launch",
@@ -327,7 +357,7 @@ process.stdout.write(JSON.stringify({ success: true, data: "should not run" }));
 				});
 				assert.equal(ambiguousLaunchTarget.isError, true);
 				assert.match(
-					ambiguousLaunchTarget.content[0]?.text ?? "",
+					readString(readRecord(ambiguousLaunchTarget.content[0]).text),
 					/electron\.launch requires exactly one of appPath, appName, bundleId, or executablePath/,
 				);
 
@@ -340,10 +370,10 @@ process.stdout.write(JSON.stringify({ success: true, data: "should not run" }));
 				});
 				assert.equal(reservedAppArg.isError, true);
 				assert.match(
-					reservedAppArg.content[0]?.text ?? "",
+					readString(readRecord(reservedAppArg.content[0]).text),
 					/electron\.appArgs must not include wrapper-owned launch flag --remote-debugging-port=9222/,
 				);
-				assert.equal(reservedAppArg.details?.failureCategory, "validation-error");
+				assert.equal(readRecord(reservedAppArg.details).failureCategory, "validation-error");
 			});
 		} finally {
 			await rm(tempDir, { force: true, recursive: true });
@@ -358,17 +388,23 @@ test("Electron list timeout guidance never recommends an unsupported nested time
 			timeoutMs: 1_000,
 			...(action === "launch" ? { appName: "Demo" } : {}),
 		});
+		// Fixed Electron platform/action/status variants require their applicable assertions; common schema/outcome checks remain unconditional.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.equal(result.error, undefined, action);
+		// Fixed Electron platform/action/status variants require their applicable assertions; common schema/outcome checks remain unconditional.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.ok(result.compiled && result.compiled.action !== "list");
+		// Fixed Electron platform/action/status variants require their applicable assertions; common schema/outcome checks remain unconditional.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.equal(result.compiled.timeoutMs, 1_000, action);
 	}
 	const harness = createExtensionHarness({ cwd: process.cwd() });
 	const nested = await executeRegisteredTool(harness.tool, harness.ctx, {
 		electron: { action: "list", timeoutMs: 1_000 },
 	});
-	assert.equal(nested.details?.failureCategory, "validation-error");
+	assert.equal(readRecord(nested.details).failureCategory, "validation-error");
 	assert.match(
-		nested.content[0]?.text ?? "",
+		readString(readRecord(nested.content[0]).text),
 		/list only supports query and maxResults; remove electron\.timeoutMs/,
 	);
 	const top = await executeRegisteredTool(harness.tool, harness.ctx, {
@@ -376,15 +412,18 @@ test("Electron list timeout guidance never recommends an unsupported nested time
 		timeoutMs: 1_000,
 	});
 	assert.equal(top.isError, true);
-	assert.equal(top.details?.failureCategory, "validation-error");
-	assert.match(top.content[0]?.text ?? "", /electron\.list has no configurable timeout/);
-	assert.doesNotMatch(top.content[0]?.text ?? "", /Use electron\.timeoutMs/);
+	assert.equal(readRecord(top.details).failureCategory, "validation-error");
+	assert.match(
+		readString(readRecord(top.content[0]).text),
+		/electron\.list has no configurable timeout/,
+	);
+	assert.doesNotMatch(readString(readRecord(top.content[0]).text), /Use electron\.timeoutMs/);
 	const status = await executeRegisteredTool(harness.tool, harness.ctx, {
 		electron: { action: "status" },
 		timeoutMs: 1_000,
 	});
 	assert.equal(status.isError, true);
-	assert.match(status.content[0]?.text ?? "", /Use electron\.timeoutMs/);
+	assert.match(readString(readRecord(status.content[0]).text), /Use electron\.timeoutMs/);
 });
 
 test(
@@ -417,15 +456,17 @@ test(
 						},
 					});
 					assert.equal(launched.isError, false, JSON.stringify(launched));
-					const launch = (launched.details?.electron as { launch: ElectronLaunchRecord }).launch;
+					const launch = readRecord(readRecord(launched.details).electron).launch;
 					for (const cleanupState of ["active", "partial", "dead", "failed", "cleaned"] as const) {
+						// Complete each replay/status subtest before changing the shared live Electron launch state.
+						// oxlint-disable-next-line no-await-in-loop
 						await t.test(`${cleanupState} history with a currently live PID and port`, async () => {
 							// Replay old cleanup history while the fixture's PID and port are independently live.
-							const record = { ...launch, cleanupState, sessionName: undefined };
+							const record = { ...readRecord(launch), cleanupState, sessionName: undefined };
 							const replay = createExtensionHarness({
 								cwd: tempDir,
 								branch: [
-									createToolBranchEntry({ details: launched.details as Record<string, unknown> }),
+									createToolBranchEntry({ details: readRecord(launched.details) }),
 									createToolBranchEntry({
 										details: { electron: { cleanup: { records: [record] } } },
 									}),
@@ -438,50 +479,66 @@ test(
 								replay.ctx,
 							);
 							const result = await executeRegisteredTool(replay.tool, replay.ctx, {
-								electron: { action: "status", launchId: launch.launchId },
+								electron: { action: "status", launchId: readRecord(launch).launchId },
 							});
 							assert.equal(result.isError, false, JSON.stringify(result));
-							const details = result.details?.electron as {
-								launches: ElectronLaunchRecord[];
-								statuses: ElectronLaunchStatus[];
-							};
-							assert.equal(details.statuses[0]?.cleanupState, cleanupState);
-							assert.equal(details.statuses[0]?.pidAlive, true);
-							assert.equal(details.statuses[0]?.portAlive, true);
-							assert.match(result.content[0]?.text ?? "", /debug port alive, pid alive/);
+							const details = readRecord(readRecord(result.details).electron);
+							assert.equal(readRecord(readArray(details.statuses)[0]).cleanupState, cleanupState);
+							assert.equal(readRecord(readArray(details.statuses)[0]).pidAlive, true);
+							assert.equal(readRecord(readArray(details.statuses)[0]).portAlive, true);
+							assert.match(
+								readString(readRecord(result.content[0]).text),
+								/debug port alive, pid alive/,
+							);
 							for (const all of [undefined, true]) {
+								// Complete each replay/status subtest before changing the shared live Electron launch state.
+								// oxlint-disable-next-line no-await-in-loop
 								const selected = await executeRegisteredTool(replay.tool, replay.ctx, {
-									electron: { action: "status", ...(all ? { all } : {}) },
+									electron: { action: "status", ...(all === true ? { all } : {}) },
 								});
+								// Fixed Electron platform/action/status variants require their applicable assertions; common schema/outcome checks remain unconditional.
+								// oxlint-disable-next-line node-test/no-conditional-assertion
 								assert.equal(selected.isError, false, JSON.stringify(selected));
+								// Fixed Electron platform/action/status variants require their applicable assertions; common schema/outcome checks remain unconditional.
+								// oxlint-disable-next-line node-test/no-conditional-assertion
 								assert.equal(
-									(selected.details?.electron as { statuses: unknown[] }).statuses.length,
+									readArray(readRecord(readRecord(selected.details).electron).statuses).length,
 									cleanupState === "cleaned" ? 0 : 1,
 								);
 							}
 							assert.deepEqual(
-								(result.details?.nextActions as Array<{ id: string }> | undefined)?.map(
-									(action) => action.id,
-								) ?? [],
+								readArray(readRecord(result.details).nextActions ?? []).map(
+									(action) => readRecord(action).id,
+								),
 								cleanupState === "cleaned"
 									? []
 									: ["status-electron-launch", "probe-electron-launch", "cleanup-electron-launch"],
 							);
 							if (cleanupState === "cleaned") {
-								assert.match(result.content[0]?.text ?? "", /historical cleaned launch record/);
+								// Fixed Electron platform/action/status variants require their applicable assertions; common schema/outcome checks remain unconditional.
+								// oxlint-disable-next-line node-test/no-conditional-assertion
+								assert.match(
+									readString(readRecord(result.content[0]).text),
+									/historical cleaned launch record/,
+								);
 							} else {
+								// Fixed Electron platform/action/status variants require their applicable assertions; common schema/outcome checks remain unconditional.
+								// oxlint-disable-next-line node-test/no-conditional-assertion
 								assert.doesNotMatch(
-									result.content[0]?.text ?? "",
+									readString(readRecord(result.content[0]).text),
 									/historical|cleaned launch record/,
 								);
 							}
-							assert.equal(details.statuses[0]?.userDataDirState, "present");
-							assert.match(result.content[0]?.text ?? "", /Tracked profile path: present/);
-							assert.equal("userDataDirState" in details.launches[0]!, false);
+							assert.equal(readRecord(readArray(details.statuses)[0]).userDataDirState, "present");
+							assert.match(
+								readString(readRecord(result.content[0]).text),
+								/Tracked profile path: present/,
+							);
+							assert.equal("userDataDirState" in readRecord(readArray(details.launches)[0]), false);
 						});
 					}
 					const cleaned = await executeRegisteredTool(owner.tool, owner.ctx, {
-						electron: { action: "cleanup", launchId: launch.launchId },
+						electron: { action: "cleanup", launchId: readRecord(launch).launchId },
 					});
 					assert.equal(cleaned.isError, false, JSON.stringify(cleaned));
 					await t.test(
@@ -498,17 +555,22 @@ test(
 								replay.ctx,
 							);
 							const result = await executeRegisteredTool(replay.tool, replay.ctx, {
-								electron: { action: "status", launchId: launch.launchId },
+								electron: { action: "status", launchId: readRecord(launch).launchId },
 							});
 							assert.equal(result.isError, false);
-							const status = (result.details?.electron as { statuses: ElectronLaunchStatus[] })
-								.statuses[0];
-							assert.equal(status?.cleanupState, "cleaned");
-							assert.equal(status?.pidAlive, false);
-							assert.equal(status?.portAlive, false);
-							assert.equal(status?.userDataDirState, "absent");
-							assert.match(result.content[0]?.text ?? "", /historical cleaned launch record/);
-							assert.match(result.content[0]?.text ?? "", /Tracked profile path: absent/);
+							const status = readArray(readRecord(readRecord(result.details).electron).statuses)[0];
+							assert.equal(readRecord(status).cleanupState, "cleaned");
+							assert.equal(readRecord(status).pidAlive, false);
+							assert.equal(readRecord(status).portAlive, false);
+							assert.equal(readRecord(status).userDataDirState, "absent");
+							assert.match(
+								readString(readRecord(result.content[0]).text),
+								/historical cleaned launch record/,
+							);
+							assert.match(
+								readString(readRecord(result.content[0]).text),
+								/Tracked profile path: absent/,
+							);
 						},
 					);
 				} finally {
@@ -570,16 +632,13 @@ if (args.includes("session") && args.includes("info")) {
 					});
 					assert.equal(result.isError, true, JSON.stringify(result));
 					assert.match(
-						result.content[0]?.text ?? "",
+						readString(readRecord(result.content[0]).text),
 						/does not match the requested managed-restore policy/,
 					);
-					const launch = JSON.parse((await readFile(launchLogPath, "utf8")).trim()) as {
-						pid: number;
-						userDataDir: string;
-					};
-					launchPid = launch.pid;
-					await waitForTestPidExit(launch.pid);
-					await assert.rejects(stat(launch.userDataDir));
+					const launch = readRecord(JSON.parse((await readFile(launchLogPath, "utf8")).trim()));
+					launchPid = readNumber(launch.pid);
+					await waitForTestPidExit(readNumber(launch.pid));
+					await assert.rejects(stat(readString(launch.userDataDir)));
 					const invocations = await readInvocationLog(upstreamLogPath);
 					assert.equal(
 						invocations.some((entry) => entry.args.includes("connect")),
@@ -588,7 +647,7 @@ if (args.includes("session") && args.includes("info")) {
 				},
 			);
 		} finally {
-			if (launchPid) {
+			if (launchPid !== undefined && launchPid !== 0) {
 				await stopTestPid(launchPid);
 			}
 			await rm(tempDir, { force: true, recursive: true });
@@ -645,31 +704,28 @@ test(
 						),
 						true,
 					);
-					const launch = JSON.parse((await readFile(launchLogPath, "utf8")).trim()) as {
-						pid: number;
-						userDataDir: string;
-					};
-					launchPid = launch.pid;
-					assert.match(String(result.details?.sessionName), /^piab-/);
+					const launch = readRecord(JSON.parse((await readFile(launchLogPath, "utf8")).trim()));
+					launchPid = readNumber(launch.pid);
+					assert.match(readString(readRecord(result.details).sessionName), /^piab-/);
 					assert.equal(
 						invocations.some((entry) => entry.args.includes("shared-default")),
 						false,
 						"Electron's owned launch must not attach the shared default browser session",
 					);
-					const launchId = (
-						result.details?.electron as { identifiers?: { launchId?: string } } | undefined
-					)?.identifiers?.launchId;
-					assert.ok(launchId);
+					const launchId = readRecord(
+						readRecord(readRecord(result.details).electron).identifiers,
+					).launchId;
+					assert.ok(typeof launchId === "string" && launchId.length > 0);
 					const cleanup = await executeRegisteredTool(harness.tool, harness.ctx, {
 						electron: { action: "cleanup", launchId },
 					});
 					assert.equal(cleanup.isError, false, JSON.stringify(cleanup));
-					assert.equal(await waitForTestPidExit(launch.pid), true);
-					await assert.rejects(stat(launch.userDataDir));
+					assert.equal(await waitForTestPidExit(readNumber(launch.pid)), true);
+					await assert.rejects(stat(readString(launch.userDataDir)));
 				},
 			);
 		} finally {
-			if (launchPid) {
+			if (launchPid !== undefined && launchPid !== 0) {
 				await stopTestPid(launchPid);
 			}
 			await rm(tempDir, { force: true, recursive: true });
@@ -726,17 +782,14 @@ else {
 				controller.abort();
 				const result = await resultPromise;
 				assert.equal(result.isError, true, JSON.stringify(result));
-				assert.equal(result.details?.failureCategory, "aborted");
-				const launch = JSON.parse((await readFile(launchLogPath, "utf8")).trim()) as {
-					pid: number;
-					userDataDir: string;
-				};
-				launchPid = launch.pid;
-				assert.equal(await waitForTestPidExit(launch.pid), true);
-				await assert.rejects(stat(launch.userDataDir));
+				assert.equal(readRecord(result.details).failureCategory, "aborted");
+				const launch = readRecord(JSON.parse((await readFile(launchLogPath, "utf8")).trim()));
+				launchPid = readNumber(launch.pid);
+				assert.equal(await waitForTestPidExit(readNumber(launch.pid)), true);
+				await assert.rejects(stat(readString(launch.userDataDir)));
 			});
 		} finally {
-			if (launchPid) {
+			if (launchPid !== undefined && launchPid !== 0) {
 				await stopTestPid(launchPid);
 			}
 			await rm(tempDir, { force: true, recursive: true });
@@ -782,117 +835,114 @@ test(
 					});
 					assert.equal(launchResult.isError, false);
 					assert.match(
-						launchResult.content[0]?.text ?? "",
+						readString(readRecord(launchResult.content[0]).text),
 						/Electron launch: Demo Electron attached/,
 					);
 					assert.match(
-						launchResult.content[0]?.text ?? "",
+						readString(readRecord(launchResult.content[0]).text),
 						/Identifiers: launchId .* sessionName .* for browser snapshot\/tab commands/,
 					);
 					assert.match(
-						launchResult.content[0]?.text ?? "",
+						readString(readRecord(launchResult.content[0]).text),
 						/Profile note: electron\.launch starts an isolated temporary profile/,
 					);
 					assert.match(
-						launchResult.content[0]?.text ?? "",
+						readString(readRecord(launchResult.content[0]).text),
 						/does not reuse the app's normal signed-in profile/,
 					);
 					assert.match(
-						launchResult.content[0]?.text ?? "",
+						readString(readRecord(launchResult.content[0]).text),
 						/do not stop here: if host tools are allowed/,
 					);
 					assert.match(
-						launchResult.content[0]?.text ?? "",
+						readString(readRecord(launchResult.content[0]).text),
 						/then run agent_browser connect <port>/,
 					);
-					assert.match(launchResult.content[0]?.text ?? "", /Snapshot handoff: 1 interactive ref/);
 					assert.match(
-						launchResult.content[0]?.text ?? "",
+						readString(readRecord(launchResult.content[0]).text),
+						/Snapshot handoff: 1 interactive ref/,
+					);
+					assert.match(
+						readString(readRecord(launchResult.content[0]).text),
 						/Cleanup: use details\.nextActions cleanup-electron-launch or call electron\.cleanup with launchId/,
 					);
-					const launchDetails = launchResult.details as {
-						effectiveArgs: string[];
-						electron: {
-							handoff?: { refSnapshot?: { refIds: string[] } };
-							identifiers?: { appName?: string; launchId?: string; sessionName?: string };
-							launch: { launchId: string; port: number; sessionName: string; userDataDir: string };
-							profileIsolation?: {
-								reusesExistingSignedInProfile?: boolean;
-								attachesToAlreadyRunningApp?: boolean;
-								hostDebugLaunchExample?: string;
-							};
-						};
-						nextActions: Array<{
-							id: string;
-							params?: { args?: string[]; action?: string; launchId?: string };
-						}>;
-						refSnapshot: { refIds: string[] };
-						sessionMode: string;
-					};
+					const launchDetails = readRecord(launchResult.details);
+					const launchRecord = readRecord(readRecord(launchDetails.electron).launch);
 					assert.equal(launchDetails.sessionMode, "fresh");
-					assert.deepEqual(launchDetails.electron.identifiers, {
+					assert.deepEqual(readRecord(launchDetails.electron).identifiers, {
 						appName: "Demo Electron",
-						launchId: launchDetails.electron.launch.launchId,
-						sessionName: launchDetails.electron.launch.sessionName,
+						launchId: launchRecord.launchId,
+						sessionName: launchRecord.sessionName,
 					});
 					assert.equal(
-						launchDetails.electron.profileIsolation?.reusesExistingSignedInProfile,
+						readRecord(readRecord(launchDetails.electron).profileIsolation)
+							.reusesExistingSignedInProfile,
 						false,
 					);
-					assert.equal(launchDetails.electron.profileIsolation?.attachesToAlreadyRunningApp, false);
+					assert.equal(
+						readRecord(readRecord(launchDetails.electron).profileIsolation)
+							.attachesToAlreadyRunningApp,
+						false,
+					);
 					assert.match(
-						launchDetails.electron.profileIsolation?.hostDebugLaunchExample ?? "",
+						readString(
+							readRecord(readRecord(launchDetails.electron).profileIsolation)
+								.hostDebugLaunchExample ?? "",
+						),
 						/agent_browser connect 9222/,
 					);
-					assert.equal(launchDetails.effectiveArgs.at(-2), "connect");
-					assert.match(launchDetails.effectiveArgs.at(-1) ?? "", /\/devtools\/page\/page-1$/);
-					assert.deepEqual(launchDetails.refSnapshot.refIds, ["e1"]);
-					assert.deepEqual(launchDetails.electron.handoff?.refSnapshot?.refIds, ["e1"]);
+					assert.equal(readArray(launchDetails.effectiveArgs).at(-2), "connect");
+					assert.match(
+						readString(readArray(launchDetails.effectiveArgs).at(-1) ?? ""),
+						/\/devtools\/page\/page-1$/,
+					);
+					assert.deepEqual(readRecord(launchDetails.refSnapshot).refIds, ["e1"]);
+					assert.deepEqual(
+						readRecord(readRecord(readRecord(launchDetails.electron).handoff).refSnapshot).refIds,
+						["e1"],
+					);
 					assert.ok(
-						launchDetails.nextActions.some(
+						readArray(launchDetails.nextActions).some(
 							(action) =>
-								action.id === "cleanup-electron-launch" &&
-								action.params?.launchId === launchDetails.electron.launch.launchId,
+								readRecord(action).id === "cleanup-electron-launch" &&
+								readRecord(readRecord(action).params).launchId === launchRecord.launchId,
 						),
 					);
 					assert.ok(
-						launchDetails.nextActions.some(
+						readArray(launchDetails.nextActions).some(
 							(action) =>
-								action.id === "snapshot-electron-session" &&
-								action.params?.args?.includes("snapshot"),
+								readRecord(action).id === "snapshot-electron-session" &&
+								readArray(readRecord(readRecord(action).params).args).includes("snapshot"),
 						),
 					);
 
 					const launchLog = (await readFile(launchLogPath, "utf8"))
 						.trim()
 						.split("\n")
-						.map((line) => JSON.parse(line) as { args: string[]; userDataDir: string });
+						.map((line) => readRecord(JSON.parse(line)));
 					assert.equal(launchLog.length, 1);
-					assert.equal(launchLog[0]?.args.includes("--remote-debugging-port=0"), true);
-					assert.equal(launchLog[0]?.args.includes("--fixture-mode"), true);
-					assert.equal(launchLog[0]?.userDataDir, launchDetails.electron.launch.userDataDir);
-					assert.match(launchDetails.electron.launch.userDataDir, /electron-profile-/);
-					await stat(launchDetails.electron.launch.userDataDir);
+					assert.equal(readArray(launchLog[0].args).includes("--remote-debugging-port=0"), true);
+					assert.equal(readArray(launchLog[0].args).includes("--fixture-mode"), true);
+					assert.equal(launchLog[0].userDataDir, launchRecord.userDataDir);
+					assert.match(readString(launchRecord.userDataDir), /electron-profile-/);
+					await stat(readString(launchRecord.userDataDir));
 
 					const invocationsAfterLaunch = await readInvocationLog(upstreamLogPath);
 					assert.deepEqual(
 						invocationsAfterLaunch.map((entry) => entry.args.at(-2)),
 						["connect", "get", "tab", "snapshot"],
 					);
-					assert.equal(invocationsAfterLaunch[1]?.args.at(-1), "url");
-					assert.equal(invocationsAfterLaunch[0]?.args.includes("--session"), true);
+					assert.equal(invocationsAfterLaunch[1].args.at(-1), "url");
+					assert.equal(invocationsAfterLaunch[0].args.includes("--session"), true);
 
 					const snapshotResult = await executeRegisteredTool(harness.tool, harness.ctx, {
 						args: ["snapshot", "-i"],
 					});
 					assert.equal(snapshotResult.isError, false, JSON.stringify(snapshotResult));
-					assert.equal(
-						snapshotResult.details?.sessionName,
-						launchDetails.electron.launch.sessionName,
-					);
-					assert.equal(snapshotResult.details?.namespace, undefined);
-					assert.equal(snapshotResult.details?.usedImplicitSession, true);
-					assert.equal(snapshotResult.details?.attachedBrowserSession, true);
+					assert.equal(readRecord(snapshotResult.details).sessionName, launchRecord.sessionName);
+					assert.equal(readRecord(snapshotResult.details).namespace, undefined);
+					assert.equal(readRecord(snapshotResult.details).usedImplicitSession, true);
+					assert.equal(readRecord(snapshotResult.details).attachedBrowserSession, true);
 					const snapshotInvocations = (await readInvocationLog(upstreamLogPath)).slice(
 						invocationsAfterLaunch.length,
 					);
@@ -908,8 +958,7 @@ test(
 					assert.equal(
 						snapshotInvocations.every(
 							(entry) =>
-								entry.args[entry.args.indexOf("--session") + 1] ===
-								launchDetails.electron.launch.sessionName,
+								entry.args[entry.args.indexOf("--session") + 1] === launchRecord.sessionName,
 						),
 						true,
 					);
@@ -917,22 +966,24 @@ test(
 					await rm(upstreamLogPath, { force: true });
 					const statusResult = await withPatchedEnv({ AGENT_BROWSER_NAMESPACE: "redirected" }, () =>
 						executeRegisteredTool(harness.tool, harness.ctx, {
-							electron: { action: "status", launchId: launchDetails.electron.launch.launchId },
+							electron: {
+								action: "status",
+								launchId: launchRecord.launchId,
+							},
 						}),
 					);
 					assert.equal(statusResult.isError, false);
-					assert.match(statusResult.content[0]?.text ?? "", /debug port alive/);
+					assert.match(readString(readRecord(statusResult.content[0]).text), /debug port alive/);
 					assert.match(
-						statusResult.content[0]?.text ?? "",
+						readString(readRecord(statusResult.content[0]).text),
 						/Identifiers: launchId .*; sessionName/,
 					);
 					assert.deepEqual(
-						(statusResult.details?.electron as { identifiers?: unknown } | undefined)?.identifiers,
-						launchDetails.electron.identifiers,
+						readRecord(readRecord(statusResult.details).electron).identifiers,
+						readRecord(launchDetails.electron).identifiers,
 					);
 					assert.equal(
-						((statusResult.details?.electron as { targets?: unknown[] } | undefined)?.targets ?? [])
-							.length,
+						readArray(readRecord(readRecord(statusResult.details).electron).targets ?? []).length,
 						1,
 					);
 					const statusInvocations = await readInvocationLog(upstreamLogPath);
@@ -948,9 +999,7 @@ test(
 						true,
 					);
 					assert.equal(
-						statusInvocations.every(
-							(entry) => (entry as { restore?: string | null }).restore === null,
-						),
+						statusInvocations.every((entry) => readRecord(entry).restore === null),
 						true,
 					);
 
@@ -962,44 +1011,40 @@ test(
 					);
 					assert.equal(probeResult.isError, false);
 					assert.match(
-						probeResult.content[0]?.text ?? "",
+						readString(readRecord(probeResult.content[0]).text),
 						/Electron probe: Demo Electron — app:\/\/demo/,
 					);
 					assert.match(
-						probeResult.content[0]?.text ?? "",
+						readString(readRecord(probeResult.content[0]).text),
 						/Focused: button\/button "Run" \(#run-button\)/,
 					);
-					assert.match(probeResult.content[0]?.text ?? "", /Snapshot: 1 interactive ref\(s\)/);
-					const probeDetails = probeResult.details as {
-						electron: {
-							action?: string;
-							identifiers?: { appName?: string; launchId?: string; sessionName?: string };
-							probe?: {
-								focusedElement?: { id?: string };
-								refSnapshot?: unknown;
-								snapshot?: { refIds?: string[] };
-								title?: string;
-								url?: string;
-							};
-						};
-						namespace?: string;
-						refSnapshot?: { refIds?: string[] };
-						sessionName?: string;
-						sessionTabTarget?: { title?: string; url?: string };
-					};
-					assert.deepEqual(probeResult.details?.compiledElectron, {
+					assert.match(
+						readString(readRecord(probeResult.content[0]).text),
+						/Snapshot: 1 interactive ref\(s\)/,
+					);
+					const probeDetails = readRecord(probeResult.details);
+					assert.deepEqual(readRecord(probeResult.details).compiledElectron, {
 						action: "probe",
 						timeoutMs: 10_000,
 					});
-					assert.equal(probeDetails.electron.action, "probe");
-					assert.deepEqual(probeDetails.electron.identifiers, launchDetails.electron.identifiers);
-					assert.equal(probeDetails.electron.probe?.title, "Demo Electron");
-					assert.equal(probeDetails.electron.probe?.url, "app://demo");
-					assert.equal(probeDetails.electron.probe?.focusedElement?.id, "run-button");
-					assert.deepEqual(probeDetails.electron.probe?.snapshot?.refIds, ["e1"]);
-					assert.equal(probeDetails.electron.probe?.refSnapshot, undefined);
-					assert.deepEqual(probeDetails.refSnapshot?.refIds, ["e1"]);
-					assert.equal(probeDetails.sessionName, launchDetails.electron.launch.sessionName);
+					assert.equal(readRecord(probeDetails.electron).action, "probe");
+					assert.deepEqual(
+						readRecord(probeDetails.electron).identifiers,
+						readRecord(launchDetails.electron).identifiers,
+					);
+					assert.equal(readRecord(readRecord(probeDetails.electron).probe).title, "Demo Electron");
+					assert.equal(readRecord(readRecord(probeDetails.electron).probe).url, "app://demo");
+					assert.equal(
+						readRecord(readRecord(readRecord(probeDetails.electron).probe).focusedElement).id,
+						"run-button",
+					);
+					assert.deepEqual(
+						readRecord(readRecord(readRecord(probeDetails.electron).probe).snapshot).refIds,
+						["e1"],
+					);
+					assert.equal(readRecord(readRecord(probeDetails.electron).probe).refSnapshot, undefined);
+					assert.deepEqual(readRecord(probeDetails.refSnapshot).refIds, ["e1"]);
+					assert.equal(probeDetails.sessionName, launchRecord.sessionName);
 					assert.deepEqual(probeDetails.sessionTabTarget, {
 						title: "Demo Electron",
 						url: "app://demo",
@@ -1020,9 +1065,7 @@ test(
 						true,
 					);
 					assert.equal(
-						probeInvocations.every(
-							(entry) => (entry as { restore?: string | null }).restore === null,
-						),
+						probeInvocations.every((entry) => readRecord(entry).restore === null),
 						true,
 					);
 
@@ -1033,8 +1076,7 @@ test(
 						}
 						const state = record.event.state;
 						const { id: _id, parentId: _parentId, ...newEntry } = entry;
-						return {
-							...newEntry,
+						return Object.assign(newEntry, {
 							data: {
 								...record,
 								event: {
@@ -1059,13 +1101,16 @@ test(
 												}
 											: {}),
 									},
-									pages: record.event.pages?.map((page) => ({
-										...page,
-										key: getSessionPageStateKey(launchDetails.electron.launch.sessionName, "team")!,
-									})),
+									pages: record.event.pages?.map((page) =>
+										Object.assign({}, page, {
+											key: readString(
+												getSessionPageStateKey(readString(launchRecord.sessionName), "team"),
+											),
+										}),
+									),
 								},
 							},
-						};
+						});
 					});
 					harness.setBranch(namespacedBranch);
 					await runExtensionEvent(
@@ -1078,37 +1123,42 @@ test(
 						electron: { action: "probe" },
 					});
 					assert.equal(namespacedProbe.isError, false, JSON.stringify(namespacedProbe));
-					assert.equal(namespacedProbe.details?.namespace, "team");
-					assert.deepEqual(
-						(namespacedProbe.details?.refSnapshot as { refIds?: string[] } | undefined)?.refIds,
-						["e1"],
-					);
+					assert.equal(readRecord(namespacedProbe.details).namespace, "team");
+					assert.deepEqual(readRecord(readRecord(namespacedProbe.details).refSnapshot).refIds, [
+						"e1",
+					]);
 					const restoredPageState = SessionPageState.fromBranch(
 						harness.ctx.sessionManager.getBranch(),
 					);
 					const namespacedPageStateKey = getSessionPageStateKey(
-						String(namespacedProbe.details?.sessionName),
+						readString(readRecord(namespacedProbe.details).sessionName),
 						"team",
 					);
-					assert.ok(namespacedPageStateKey);
+					assert.ok(
+						typeof namespacedPageStateKey === "string" && namespacedPageStateKey.length > 0,
+					);
 					assert.deepEqual(restoredPageState.get(namespacedPageStateKey).refSnapshot?.refIds, [
 						"e1",
 					]);
 					assert.equal(
-						restoredPageState.get(String(namespacedProbe.details?.sessionName)).refSnapshot,
+						restoredPageState.get(readString(readRecord(namespacedProbe.details).sessionName))
+							.refSnapshot,
 						undefined,
 					);
 
 					await rm(upstreamLogPath, { force: true });
 					const namespacedLaunchIdProbe = await executeRegisteredTool(harness.tool, harness.ctx, {
-						electron: { action: "probe", launchId: launchDetails.electron.launch.launchId },
+						electron: {
+							action: "probe",
+							launchId: launchRecord.launchId,
+						},
 					});
 					assert.equal(
 						namespacedLaunchIdProbe.isError,
 						false,
 						JSON.stringify(namespacedLaunchIdProbe),
 					);
-					assert.equal(namespacedLaunchIdProbe.details?.namespace, "team");
+					assert.equal(readRecord(namespacedLaunchIdProbe.details).namespace, "team");
 					const namespacedLaunchIdProbeInvocations = await readInvocationLog(upstreamLogPath);
 					assert.equal(namespacedLaunchIdProbeInvocations.length, 5);
 					assert.equal(
@@ -1123,27 +1173,24 @@ test(
 					});
 					assert.equal(broadTextResult.isError, false);
 					assert.match(
-						broadTextResult.content[0]?.text ?? "",
+						readString(readRecord(broadTextResult.content[0]).text),
 						/Broad Electron get text selector warning: selector "body" may read the entire app shell/,
 					);
-					const broadTextDetails = broadTextResult.details as {
-						electronGetTextScopeWarning?: {
-							electronContext?: { launchId?: string; sessionName?: string };
-							selector?: string;
-						};
-						nextActions?: Array<{ id?: string; params?: { args?: string[] } }>;
-					};
-					assert.equal(broadTextDetails.electronGetTextScopeWarning?.selector, "body");
-					assert.deepEqual(broadTextDetails.electronGetTextScopeWarning?.electronContext, {
-						launchId: launchDetails.electron.launch.launchId,
-						sessionName: launchDetails.electron.launch.sessionName,
-						url: "app://demo",
-					});
+					const broadTextDetails = readRecord(broadTextResult.details);
+					assert.equal(readRecord(broadTextDetails.electronGetTextScopeWarning).selector, "body");
+					assert.deepEqual(
+						readRecord(broadTextDetails.electronGetTextScopeWarning).electronContext,
+						{
+							launchId: launchRecord.launchId,
+							sessionName: launchRecord.sessionName,
+							url: "app://demo",
+						},
+					);
 					assert.ok(
-						broadTextDetails.nextActions?.some(
+						readArray(broadTextDetails.nextActions).some(
 							(action) =>
-								action.id === "snapshot-for-electron-text-scope" &&
-								action.params?.args?.includes("snapshot"),
+								readRecord(action).id === "snapshot-for-electron-text-scope" &&
+								readArray(readRecord(readRecord(action).params).args).includes("snapshot"),
 						),
 					);
 
@@ -1152,46 +1199,52 @@ test(
 					});
 					assert.equal(recordingResult.isError, false, JSON.stringify(recordingResult));
 					const blockedCleanup = await executeRegisteredTool(harness.tool, harness.ctx, {
-						electron: { action: "cleanup", launchId: launchDetails.electron.launch.launchId },
+						electron: {
+							action: "cleanup",
+							launchId: launchRecord.launchId,
+						},
 						outputPath: "electron-cleanup.webm",
 					});
 					assert.equal(blockedCleanup.isError, true);
 					assert.match(
-						blockedCleanup.content[0]?.text ?? "",
+						readString(readRecord(blockedCleanup.content[0]).text),
 						/electron-cleanup\.webm is reserved by an active recording/,
 					);
 					const stillActive = await executeRegisteredTool(harness.tool, harness.ctx, {
-						electron: { action: "status", launchId: launchDetails.electron.launch.launchId },
+						electron: {
+							action: "status",
+							launchId: launchRecord.launchId,
+						},
 					});
 					assert.equal(stillActive.isError, false);
 					assert.equal(
-						(
-							stillActive.details?.electron as
-								| { statuses?: Array<{ portAlive?: boolean }> }
-								| undefined
-						)?.statuses?.[0]?.portAlive,
+						readRecord(readArray(readRecord(readRecord(stillActive.details).electron).statuses)[0])
+							.portAlive,
 						true,
 					);
 					const cleanupResult = await executeRegisteredTool(harness.tool, harness.ctx, {
-						electron: { action: "cleanup", launchId: launchDetails.electron.launch.launchId },
+						electron: {
+							action: "cleanup",
+							launchId: launchRecord.launchId,
+						},
 					});
 					assert.equal(cleanupResult.isError, false);
-					assert.match(cleanupResult.content[0]?.text ?? "", /fully cleaned/);
-					const cleanupManifest = cleanupResult.details?.artifactManifest as
-						| { entries?: Array<{ subcommand?: string }> }
-						| undefined;
+					assert.match(readString(readRecord(cleanupResult.content[0]).text), /fully cleaned/);
+					const cleanupManifest = readRecord(readRecord(cleanupResult.details).artifactManifest);
 					assert.equal(
-						(cleanupManifest?.entries ?? []).some((entry) => entry.subcommand === "start"),
+						readArray(cleanupManifest.entries ?? []).some(
+							(entry) => readRecord(entry).subcommand === "start",
+						),
 						false,
 					);
 					const releasedRecordingPath = await executeRegisteredTool(harness.tool, harness.ctx, {
 						args: ["pdf", "electron-cleanup.webm"],
 					});
 					assert.doesNotMatch(
-						releasedRecordingPath.content[0]?.text ?? "",
+						readString(readRecord(releasedRecordingPath.content[0]).text),
 						/reserved by an active recording/,
 					);
-					await assert.rejects(stat(launchDetails.electron.launch.userDataDir));
+					await assert.rejects(stat(readString(launchRecord.userDataDir)));
 					const finalInvocations = await readInvocationLog(upstreamLogPath);
 					const cleanupClose = finalInvocations.find((entry) => entry.args.at(-1) === "close");
 					assert.ok(cleanupClose);
@@ -1220,9 +1273,6 @@ for (const terminateBeforeCleanup of [false, true]) {
 				});
 				const launched = await launchElectronApp({ appPath: app.appPath, appArgs: app.appArgs });
 				assert.equal(launched.ok, true, launched.ok ? undefined : JSON.stringify(launched.failure));
-				if (!launched.ok) {
-					return;
-				}
 				child = launched.value.child;
 				let exited = false;
 				child.once("exit", () => {
@@ -1241,7 +1291,9 @@ for (const terminateBeforeCleanup of [false, true]) {
 					true,
 					"tracked process must exit before cleanup returns, not merely stop responding to PID probes",
 				);
-				assert.throws(() => process.kill(launched.value.record.pid!, 0), { code: "ESRCH" });
+				assert.throws(() => process.kill(readNumber(launched.value.record.pid), 0), {
+					code: "ESRCH",
+				});
 				await assert.rejects(stat(launched.value.record.userDataDir), { code: "ENOENT" });
 				// In particular, Windows must release the running executable without rm retries.
 				await rm(app.executablePath);
@@ -1299,14 +1351,10 @@ test(
 						},
 					});
 					assert.equal(launchResult.isError, false, JSON.stringify(launchResult));
-					assert.equal(launchResult.details?.managedSessionHeadedAutosaveDisabled, true);
-					const launch = (
-						launchResult.details?.electron as
-							| { launch?: { launchId?: string; pid?: number; userDataDir?: string } }
-							| undefined
-					)?.launch;
-					assert.equal(typeof launch?.launchId, "string");
-					launchedPid = launch?.pid;
+					assert.equal(readRecord(launchResult.details).managedSessionHeadedAutosaveDisabled, true);
+					const launch = readRecord(readRecord(launchResult.details).electron).launch;
+					assert.equal(typeof readRecord(launch).launchId, "string");
+					launchedPid = readNumber(readRecord(launch).pid);
 
 					const fork = createExtensionHarness({
 						cwd: tempDir,
@@ -1319,8 +1367,10 @@ test(
 						electron: { action: "cleanup", all: true },
 					});
 					assert.equal(
-						(foreignCleanup.details?.electron as { cleanup?: { records?: unknown[] } })?.cleanup
-							?.records?.length ?? 0,
+						readArray(
+							readRecord(readRecord(readRecord(foreignCleanup.details).electron).cleanup).records ??
+								[],
+						).length,
 						0,
 					);
 					await runExtensionEvent(fork.handlers, "session_shutdown", { reason: "quit" }, fork.ctx);
@@ -1332,23 +1382,23 @@ test(
 						"copied launch facts cannot give a new Pi UUID cleanup ownership",
 					);
 					assert.equal(typeof launchedPid, "number");
-					process.kill(launchedPid!, 0);
+					process.kill(launchedPid, 0);
 					assert.ok(
-						(await stat(launch!.userDataDir!)).isDirectory(),
+						(await stat(readString(readRecord(launch).userDataDir))).isDirectory(),
 						"the parent's live profile survives fork quit",
 					);
 
 					await rm(upstreamLogPath, { force: true });
 					const statusResult = await executeRegisteredTool(harness.tool, harness.ctx, {
-						electron: { action: "status", launchId: launch?.launchId },
+						electron: { action: "status", launchId: readRecord(launch).launchId },
 					});
 					assert.equal(statusResult.isError, false, JSON.stringify(statusResult));
 					const probeResult = await executeRegisteredTool(harness.tool, harness.ctx, {
-						electron: { action: "probe", launchId: launch?.launchId },
+						electron: { action: "probe", launchId: readRecord(launch).launchId },
 					});
 					assert.equal(probeResult.isError, false, JSON.stringify(probeResult));
 					const cleanupResult = await executeRegisteredTool(harness.tool, harness.ctx, {
-						electron: { action: "cleanup", launchId: launch?.launchId },
+						electron: { action: "cleanup", launchId: readRecord(launch).launchId },
 					});
 					assert.equal(cleanupResult.isError, false, JSON.stringify(cleanupResult));
 					const helperInvocations = await readInvocationLog(upstreamLogPath);
@@ -1358,13 +1408,18 @@ test(
 						true,
 						JSON.stringify(helperInvocations),
 					);
-					if (launch?.userDataDir) {
-						await assert.rejects(stat(launch.userDataDir));
+					if (
+						typeof readRecord(launch).userDataDir === "string" &&
+						readRecord(launch).userDataDir !== ""
+					) {
+						// The profile was validated as present before cleanup; this branch verifies removal of that same tracked path.
+						// oxlint-disable-next-line node-test/no-conditional-assertion
+						await assert.rejects(stat(readString(readRecord(launch).userDataDir)));
 					}
 				},
 			);
 		} finally {
-			if (launchedPid) {
+			if (launchedPid !== undefined && launchedPid !== 0) {
 				await stopTestPid(launchedPid);
 			}
 			await rm(tempDir, { force: true, recursive: true });
@@ -1414,20 +1469,17 @@ test(
 						electron: { action: "probe" },
 					});
 					assert.equal(probe.isError, false, JSON.stringify(probe));
-					const invocations = (await readInvocationLog(upstreamLogPath)) as Array<{
-						args: string[];
-						restore?: string | null;
-					}>;
+					const invocations = readArray(await readInvocationLog(upstreamLogPath));
 					assert.deepEqual(
-						invocations.map((entry) => entry.args.at(-2)),
+						invocations.map((entry) => readArray(readRecord(entry).args).at(-2)),
 						["get", "get", "eval", "tab", "snapshot"],
 					);
 					const restoreKey = createManagedSessionRestoreKey(
 						tempDir,
-						getManagedSessionRestoreScope(opened.details?.sessionName as string),
+						getManagedSessionRestoreScope(readString(readRecord(opened.details).sessionName)),
 					);
 					assert.equal(
-						invocations.every((entry) => entry.restore === restoreKey),
+						invocations.every((entry) => readRecord(entry).restore === restoreKey),
 						true,
 					);
 
@@ -1445,8 +1497,11 @@ if (args.includes("session") && args.includes("info")) {
 						electron: { action: "probe" },
 					});
 					assert.equal(failedProbe.isError, true, JSON.stringify(failedProbe));
-					assert.equal(failedProbe.details?.failureCategory, "upstream-error");
-					assert.match(failedProbe.content[0]?.text ?? "", /Electron probe failed/);
+					assert.equal(readRecord(failedProbe.details).failureCategory, "upstream-error");
+					assert.match(
+						readString(readRecord(failedProbe.content[0]).text),
+						/Electron probe failed/,
+					);
 				},
 			);
 		} finally {
@@ -1494,7 +1549,7 @@ process.stdout.write(JSON.stringify({ success: true, data }));`,
 					args: ["get", "text", "body"],
 				});
 				assert.equal(textResult.isError, false, JSON.stringify(textResult));
-				assert.match(textResult.content[0]?.text ?? "", /normal page text/);
+				assert.match(readString(readRecord(textResult.content[0]).text), /normal page text/);
 				const probeResult = await executeRegisteredTool(harness.tool, harness.ctx, {
 					electron: { action: "probe" },
 				});
@@ -1546,12 +1601,14 @@ process.stdout.write(JSON.stringify({ success: true, data }));`,
 				});
 				assert.equal(probeResult.isError, false, JSON.stringify(probeResult));
 				assert.match(JSON.stringify(probeResult), /SECRET LOCAL TITLE/);
-				const invocations = (await readInvocationLog(logPath)) as Array<{
-					command?: string;
-					subcommand?: string;
-				}>;
+				const invocations = (await readFile(logPath, "utf8"))
+					.trim()
+					.split("\n")
+					.map((line) => readRecord(JSON.parse(line)));
 				assert.deepEqual(
-					invocations.slice(0, 2).map((entry) => [entry.command, entry.subcommand]),
+					invocations
+						.slice(0, 2)
+						.map((entry) => [readRecord(entry).command, readRecord(entry).subcommand]),
 					[
 						["get", "url"],
 						["get", "title"],
@@ -1600,13 +1657,12 @@ test(
 					electron: { action: "launch", appPath: app.appPath, appArgs: app.appArgs },
 				});
 				assert.equal(launchResult.isError, false);
-				const launchDetails = launchResult.details as {
-					electron: {
-						launch: { launchId: string; pid: number; sessionName: string; userDataDir: string };
-					};
-				};
-				launchedPid = launchDetails.electron.launch.pid;
-				const { launchId, sessionName } = launchDetails.electron.launch;
+				const launchDetails = readRecord(launchResult.details);
+				const launchRecord = readRecord(readRecord(launchDetails.electron).launch);
+				launchedPid = readNumber(launchRecord.pid);
+				const launch = launchRecord;
+				const launchId = readString(launch.launchId);
+				const sessionName = readString(launch.sessionName);
 
 				await rm(upstreamLogPath, { force: true });
 				const currentUrlResult = await executeRegisteredTool(harness.tool, harness.ctx, {
@@ -1614,30 +1670,25 @@ test(
 				});
 				assert.equal(currentUrlResult.isError, false);
 				assert.match(
-					currentUrlResult.content[0]?.text ?? "",
+					readString(readRecord(currentUrlResult.content[0]).text),
 					/Electron session mismatch: managed session .* is on about:blank, but launch .* still has live target Demo Electron/,
 				);
-				const currentUrlDetails = currentUrlResult.details as {
-					electronSessionMismatch?: {
-						launchId?: string;
-						reason?: string;
-						managedSession?: { url?: string };
-						liveTarget?: { url?: string };
-					};
-					nextActions?: Array<{
-						id: string;
-						params?: { args?: string[]; action?: string; launchId?: string; sessionMode?: string };
-					}>;
-				};
-				assert.equal(currentUrlDetails.electronSessionMismatch?.launchId, launchId);
+				const currentUrlDetails = readRecord(currentUrlResult.details);
+				assert.equal(readRecord(currentUrlDetails.electronSessionMismatch).launchId, launchId);
 				assert.equal(
-					currentUrlDetails.electronSessionMismatch?.reason,
+					readRecord(currentUrlDetails.electronSessionMismatch).reason,
 					"managed-session-about-blank-while-launch-target-live",
 				);
-				assert.equal(currentUrlDetails.electronSessionMismatch?.managedSession?.url, "about:blank");
-				assert.equal(currentUrlDetails.electronSessionMismatch?.liveTarget?.url, "app://demo");
+				assert.equal(
+					readRecord(readRecord(currentUrlDetails.electronSessionMismatch).managedSession).url,
+					"about:blank",
+				);
+				assert.equal(
+					readRecord(readRecord(currentUrlDetails.electronSessionMismatch).liveTarget).url,
+					"app://demo",
+				);
 				const currentUrlActionIds = new Set(
-					currentUrlDetails.nextActions?.map((action) => action.id),
+					readArray(currentUrlDetails.nextActions).map((action) => readRecord(action).id),
 				);
 				for (const actionId of [
 					"status-electron-launch",
@@ -1646,14 +1697,16 @@ test(
 					"cleanup-electron-launch",
 					"snapshot-electron-session",
 				]) {
+					// Fixed Electron platform/action/status variants require their applicable assertions; common schema/outcome checks remain unconditional.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
 					assert.equal(currentUrlActionIds.has(actionId), true, actionId);
 				}
 				assert.ok(
-					currentUrlDetails.nextActions?.some(
+					readArray(currentUrlDetails.nextActions).some(
 						(action) =>
-							action.id === "reattach-electron-launch" &&
-							action.params?.sessionMode === "fresh" &&
-							action.params?.args?.[0] === "connect",
+							readRecord(action).id === "reattach-electron-launch" &&
+							readRecord(readRecord(action).params).sessionMode === "fresh" &&
+							readArray(readRecord(readRecord(action).params).args)[0] === "connect",
 					),
 				);
 
@@ -1662,32 +1715,37 @@ test(
 				});
 				assert.equal(statusResult.isError, false);
 				assert.match(
-					statusResult.content[0]?.text ?? "",
+					readString(readRecord(statusResult.content[0]).text),
 					/Electron session mismatch: managed session .* is on about:blank, but launch .* still has live target Demo Electron/,
 				);
-				const statusDetails = statusResult.details as {
-					electron?: {
-						managedSession?: { url?: string };
-						sessionMismatch?: { reason?: string; liveTarget?: { url?: string } };
-					};
-					nextActions?: Array<{ id: string; params?: { action?: string; launchId?: string } }>;
-				};
-				assert.equal(statusDetails.electron?.managedSession?.url, "about:blank");
+				const statusDetails = readRecord(statusResult.details);
 				assert.equal(
-					statusDetails.electron?.sessionMismatch?.reason,
+					readRecord(readRecord(statusDetails.electron).managedSession).url,
+					"about:blank",
+				);
+				assert.equal(
+					readRecord(readRecord(statusDetails.electron).sessionMismatch).reason,
 					"managed-session-about-blank-while-launch-target-live",
 				);
-				assert.equal(statusDetails.electron?.sessionMismatch?.liveTarget?.url, "app://demo");
+				assert.equal(
+					readRecord(readRecord(readRecord(statusDetails.electron).sessionMismatch).liveTarget).url,
+					"app://demo",
+				);
 				assert.ok(
-					statusDetails.nextActions?.some(
+					readArray(statusDetails.nextActions).some(
 						(action) =>
-							action.id === "probe-electron-launch" && action.params?.launchId === launchId,
+							readRecord(action).id === "probe-electron-launch" &&
+							readRecord(readRecord(action).params).launchId === launchId,
 					),
 				);
 				assert.ok(
-					statusDetails.nextActions?.some((action) => action.id === "reattach-electron-launch"),
+					readArray(statusDetails.nextActions).some(
+						(action) => readRecord(action).id === "reattach-electron-launch",
+					),
 				);
-				const statusActionIds = statusDetails.nextActions?.map((action) => action.id) ?? [];
+				const statusActionIds = readArray(statusDetails.nextActions ?? []).map(
+					(action) => readRecord(action).id,
+				);
 				assert.deepEqual(statusActionIds.slice(0, 3), [
 					"status-electron-launch",
 					"probe-electron-launch",
@@ -1704,24 +1762,28 @@ test(
 				});
 				assert.equal(currentProbeResult.isError, false);
 				assert.match(
-					currentProbeResult.content[0]?.text ?? "",
+					readString(readRecord(currentProbeResult.content[0]).text),
 					/Probe context: current managed session .* maps to Electron launch/,
 				);
 				assert.match(
-					currentProbeResult.content[0]?.text ?? "",
+					readString(readRecord(currentProbeResult.content[0]).text),
 					/Electron session mismatch: managed session .* is on about:blank, but launch .* still has live target Demo Electron/,
 				);
-				const currentProbeDetails = currentProbeResult.details as {
-					electron?: {
-						probeContext?: { launchId?: string; mode?: string; sessionName?: string };
-						sessionMismatch?: { reason?: string };
-					};
-				};
-				assert.equal(currentProbeDetails.electron?.probeContext?.mode, "current-managed-session");
-				assert.equal(currentProbeDetails.electron?.probeContext?.launchId, launchId);
-				assert.equal(currentProbeDetails.electron?.probeContext?.sessionName, sessionName);
+				const currentProbeDetails = readRecord(currentProbeResult.details);
 				assert.equal(
-					currentProbeDetails.electron?.sessionMismatch?.reason,
+					readRecord(readRecord(currentProbeDetails.electron).probeContext).mode,
+					"current-managed-session",
+				);
+				assert.equal(
+					readRecord(readRecord(currentProbeDetails.electron).probeContext).launchId,
+					launchId,
+				);
+				assert.equal(
+					readRecord(readRecord(currentProbeDetails.electron).probeContext).sessionName,
+					sessionName,
+				);
+				assert.equal(
+					readRecord(readRecord(currentProbeDetails.electron).sessionMismatch).reason,
 					"managed-session-about-blank-while-launch-target-live",
 				);
 
@@ -1731,21 +1793,23 @@ test(
 				});
 				assert.equal(launchProbeResult.isError, false);
 				assert.match(
-					launchProbeResult.content[0]?.text ?? "",
+					readString(readRecord(launchProbeResult.content[0]).text),
 					/Probe context: wrapper launch .* session/,
 				);
-				const launchProbeDetails = launchProbeResult.details as {
-					compiledElectron?: { action?: string; launchId?: string; timeoutMs?: number };
-					electron?: { probeContext?: { launchId?: string; mode?: string; sessionName?: string } };
-					usedImplicitSession?: boolean;
-				};
+				const launchProbeDetails = readRecord(launchProbeResult.details);
 				assert.deepEqual(launchProbeDetails.compiledElectron, {
 					action: "probe",
 					launchId,
 					timeoutMs: 5_000,
 				});
-				assert.equal(launchProbeDetails.electron?.probeContext?.mode, "launchId");
-				assert.equal(launchProbeDetails.electron?.probeContext?.sessionName, sessionName);
+				assert.equal(
+					readRecord(readRecord(launchProbeDetails.electron).probeContext).mode,
+					"launchId",
+				);
+				assert.equal(
+					readRecord(readRecord(launchProbeDetails.electron).probeContext).sessionName,
+					sessionName,
+				);
 				assert.equal(launchProbeDetails.usedImplicitSession, false);
 				const launchProbeInvocations = await readInvocationLog(upstreamLogPath);
 				assert.equal(
@@ -1759,9 +1823,9 @@ test(
 					electron: { action: "cleanup", launchId },
 				});
 				assert.equal(cleanupResult.isError, false);
-				await assert.rejects(stat(launchDetails.electron.launch.userDataDir));
+				await assert.rejects(stat(readString(launchRecord.userDataDir)));
 				assert.equal(
-					await waitForTestPidExit(launchDetails.electron.launch.pid),
+					await waitForTestPidExit(readNumber(launchRecord.pid)),
 					true,
 					"electron.cleanup should terminate the launched fake Electron process",
 				);
@@ -1822,7 +1886,7 @@ else if (command === "get" && subcommand === "url") write({ result: currentPage(
 else if (command === "get" && subcommand === "value") write({ result: "" });
 else if (command === "eval") write({ result: { focusedElement: { id: "name-input", role: "textbox", tagName: "input", valueLength: 0 } } });
 else if (command === "tab" && subcommand === "list") write({ tabs: [{ active: true, index: 0, tabId: "page-1", title: currentPage().title, type: "page", url: currentPage().url }] });
-else if (command === "snapshot") write({ origin: currentPage().url, title: currentPage().title, url: currentPage().url, refs: { e1: { role: "textbox", name: "File name" } }, snapshot: "- textbox \\\"File name\\\" [ref=e1]" });
+else if (command === "snapshot") write({ origin: currentPage().url, title: currentPage().title, url: currentPage().url, refs: { e1: { role: "textbox", name: "File name" } }, snapshot: "- textbox \\"File name\\" [ref=e1]" });
 else if (command === "fill") write({ filled: subcommand, title: "Demo Electron", url: "app://demo" });
 else if (command === "click") {
 	const launch = readLaunch();
@@ -1845,32 +1909,19 @@ else write({ ok: true, title: currentPage().title, url: currentPage().url });`,
 					electron: { action: "launch", appPath: app.appPath, appArgs: app.appArgs },
 				});
 				assert.equal(launchResult.isError, false);
-				const launch = (
-					launchResult.details?.electron as {
-						launch: { launchId: string; pid: number; sessionName: string; userDataDir: string };
-					}
-				).launch;
-				launchedPid = launch.pid;
+				const launch = readRecord(readRecord(launchResult.details).electron).launch;
+				launchedPid = readNumber(readRecord(launch).pid);
 
 				const fillResult = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: ["fill", "@e1", "agent-browser-smoke.txt"],
 				});
 				assert.equal(fillResult.isError, false);
 				assert.match(
-					fillResult.content[0]?.text ?? "",
+					readString(readRecord(fillResult.content[0]).text),
 					/Fill verification warning: fill @e1 reported success/,
 				);
-				assert.match(fillResult.content[0]?.text ?? "", /Electron ref freshness:/);
-				const fillDetails = fillResult.details as {
-					fillVerification?: {
-						actual?: string;
-						expected?: string;
-						selector?: string;
-						status?: string;
-					};
-					electronRefFreshness?: { launchId?: string };
-					nextActions?: Array<{ id: string; params?: { args?: string[] } }>;
-				};
+				assert.match(readString(readRecord(fillResult.content[0]).text), /Electron ref freshness:/);
+				const fillDetails = readRecord(fillResult.details);
 				assert.deepEqual(fillDetails.fillVerification, {
 					actual: "",
 					expected: "agent-browser-smoke.txt",
@@ -1882,17 +1933,20 @@ else write({ ok: true, title: currentPage().title, url: currentPage().url });`,
 					summary:
 						"Fill verification warning: fill @e1 reported success, but get value returned an empty value.",
 				});
-				assert.equal(fillDetails.electronRefFreshness?.launchId, launch.launchId);
+				assert.equal(
+					readRecord(fillDetails.electronRefFreshness).launchId,
+					readRecord(launch).launchId,
+				);
 				assert.ok(
-					fillDetails.nextActions?.some(
+					readArray(fillDetails.nextActions).some(
 						(action) =>
-							action.id === "inspect-after-fill-verification" &&
-							action.params?.args?.includes("snapshot"),
+							readRecord(action).id === "inspect-after-fill-verification" &&
+							readArray(readRecord(readRecord(action).params).args).includes("snapshot"),
 					),
 				);
 				assert.ok(
-					fillDetails.nextActions?.some(
-						(action) => action.id === "refresh-electron-refs-after-rerender",
+					readArray(fillDetails.nextActions).some(
+						(action) => readRecord(action).id === "refresh-electron-refs-after-rerender",
 					),
 				);
 
@@ -1900,43 +1954,49 @@ else write({ ok: true, title: currentPage().title, url: currentPage().url });`,
 					args: ["click", "@e1"],
 				});
 				assert.equal(clickResult.isError, true);
-				assert.equal(clickResult.details?.failureCategory, "tab-drift");
+				assert.equal(readRecord(clickResult.details).failureCategory, "tab-drift");
 				assert.match(
-					clickResult.content[0]?.text ?? "",
+					readString(readRecord(clickResult.content[0]).text),
 					/Electron lifecycle warning: click command completed, but launch .* is no longer healthy/,
 				);
-				assert.match(clickResult.content[0]?.text ?? "", /debug port dead, pid dead/);
-				const clickDetails = clickResult.details as {
-					electronPostCommandHealth?: {
-						launchId?: string;
-						reason?: string;
-						status?: { pidAlive?: boolean; portAlive?: boolean };
-					};
-					nextActions?: Array<{ id: string; params?: { action?: string; launchId?: string } }>;
-				};
-				assert.equal(clickDetails.electronPostCommandHealth?.launchId, launch.launchId);
-				assert.equal(clickDetails.electronPostCommandHealth?.reason, "process-dead");
-				assert.equal(clickDetails.electronPostCommandHealth?.status?.pidAlive, false);
-				assert.equal(clickDetails.electronPostCommandHealth?.status?.portAlive, false);
+				assert.match(
+					readString(readRecord(clickResult.content[0]).text),
+					/debug port dead, pid dead/,
+				);
+				const clickDetails = readRecord(clickResult.details);
+				assert.equal(
+					readRecord(clickDetails.electronPostCommandHealth).launchId,
+					readRecord(launch).launchId,
+				);
+				assert.equal(readRecord(clickDetails.electronPostCommandHealth).reason, "process-dead");
+				assert.equal(
+					readRecord(readRecord(clickDetails.electronPostCommandHealth).status).pidAlive,
+					false,
+				);
+				assert.equal(
+					readRecord(readRecord(clickDetails.electronPostCommandHealth).status).portAlive,
+					false,
+				);
 				assert.ok(
-					clickDetails.nextActions?.some(
+					readArray(clickDetails.nextActions).some(
 						(action) =>
-							action.id === "status-electron-launch" && action.params?.launchId === launch.launchId,
+							readRecord(action).id === "status-electron-launch" &&
+							readRecord(readRecord(action).params).launchId === readRecord(launch).launchId,
 					),
 				);
 				assert.ok(
-					clickDetails.nextActions?.some(
+					readArray(clickDetails.nextActions).some(
 						(action) =>
-							action.id === "cleanup-electron-launch" &&
-							action.params?.launchId === launch.launchId,
+							readRecord(action).id === "cleanup-electron-launch" &&
+							readRecord(readRecord(action).params).launchId === readRecord(launch).launchId,
 					),
 				);
 
 				const cleanupResult = await executeRegisteredTool(harness.tool, harness.ctx, {
-					electron: { action: "cleanup", launchId: launch.launchId },
+					electron: { action: "cleanup", launchId: readRecord(launch).launchId },
 				});
 				assert.equal(cleanupResult.isError, false);
-				await assert.rejects(stat(launch.userDataDir));
+				await assert.rejects(stat(readString(readRecord(launch).userDataDir)));
 			});
 		} finally {
 			await stopTestPid(launchedPid);
@@ -1993,17 +2053,15 @@ process.stdout.write(JSON.stringify({ success: true, data: { result: "late" } })
 					args: ["connect", "9222"],
 				});
 				assert.equal(connectResult.isError, false);
-				const connectNextActions = connectResult.details?.nextActions as
-					| Array<{ id: string; params?: { args?: string[] } }>
-					| undefined;
-				const connectedSessionName = connectResult.details?.sessionName as string | undefined;
-				assert.ok(connectedSessionName);
+				const connectNextActions = readArray(readRecord(connectResult.details).nextActions);
+				const connectedSessionName = readString(readRecord(connectResult.details).sessionName);
+				assert.ok(typeof connectedSessionName === "string" && connectedSessionName.length > 0);
 				assert.deepEqual(
-					connectNextActions?.map((action) => action.id),
+					connectNextActions.map((action) => readRecord(action).id),
 					["verify-connected-session-url", "list-connected-session-tabs"],
 				);
 				assert.deepEqual(
-					connectNextActions?.map((action) => action.params?.args),
+					connectNextActions.map((action) => readRecord(readRecord(action).params).args),
 					[
 						["--session", connectedSessionName, "get", "url"],
 						["--session", connectedSessionName, "tab", "list"],
@@ -2020,21 +2078,18 @@ process.stdout.write(JSON.stringify({ success: true, data: { result: "late" } })
 				});
 				assert.equal(probeResult.isError, true, JSON.stringify(probeResult));
 				assert.deepEqual(
-					probeResult.details?.compiledElectron,
+					readRecord(probeResult.details).compiledElectron,
 					{ action: "probe", timeoutMs: 1_000 },
 					JSON.stringify(probeResult),
 				);
 				assert.equal(
-					probeResult.details?.failureCategory,
+					readRecord(probeResult.details).failureCategory,
 					"upstream-error",
 					JSON.stringify(probeResult),
 				);
-				assert.equal(
-					(probeResult.details?.electron as { status?: string } | undefined)?.status,
-					"failed",
-				);
+				assert.equal(readRecord(readRecord(probeResult.details).electron).status, "failed");
 				assert.match(
-					probeResult.content[0]?.text ?? "",
+					readString(readRecord(probeResult.content[0]).text),
 					/Electron probe failed: get url: agent-browser process exited with code 124/,
 				);
 
@@ -2044,15 +2099,13 @@ process.stdout.write(JSON.stringify({ success: true, data: { result: "late" } })
 					electron: { action: "probe", timeoutMs: 5_000 },
 				});
 				assert.equal(controlResult.isError, false, JSON.stringify(controlResult));
-				assert.deepEqual(controlResult.details?.compiledElectron, {
+				assert.deepEqual(readRecord(controlResult.details).compiledElectron, {
 					action: "probe",
 					timeoutMs: 5_000,
 				});
-				const controlElectron = controlResult.details?.electron as
-					| { probe?: { status?: string; url?: string } }
-					| undefined;
-				assert.equal(controlElectron?.probe?.status, "succeeded");
-				assert.equal(controlElectron?.probe?.url, "late");
+				const controlElectron = readRecord(readRecord(controlResult.details).electron);
+				assert.equal(readRecord(controlElectron.probe).status, "succeeded");
+				assert.equal(readRecord(controlElectron.probe).url, "late");
 			});
 		} finally {
 			await rm(tempDir, { force: true, recursive: true });

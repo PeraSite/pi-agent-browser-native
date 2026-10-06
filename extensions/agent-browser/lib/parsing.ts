@@ -6,11 +6,12 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
 export function parseRefId(selector: string): string | undefined {
 	const trimmed = selector.trim();
 	const prefixed = trimmed.startsWith("@") || trimmed.startsWith("ref=");
-	const candidate = trimmed.startsWith("@")
-		? trimmed.slice(1)
-		: trimmed.startsWith("ref=")
-			? trimmed.slice(4)
-			: trimmed;
+	let candidate = trimmed;
+	if (trimmed.startsWith("@")) {
+		candidate = trimmed.slice(1);
+	} else if (trimmed.startsWith("ref=")) {
+		candidate = trimmed.slice(4);
+	}
 	return (prefixed ? /^e\d*$/ : /^e\d+$/).test(candidate) ? candidate : undefined;
 }
 

@@ -1,34 +1,23 @@
-export interface AgentBrowserNextAction {
-	artifactPath?: string;
-	id: string;
-	params?: {
-		args?: string[];
-		action?: "cleanup" | "list" | "launch" | "probe" | "status";
-		all?: boolean;
-		handoff?: "connect" | "snapshot" | "tabs";
-		launchId?: string;
-		filter?: string;
-		namespace?: string;
-		requestId?: string;
-		session?: string;
-		url?: string;
-		sessionMode?: "auto" | "fresh";
-		stdin?: string;
-	};
-	reason: string;
-	safety?: string;
-	tool: "agent_browser" | "agent_browser_electron" | "agent_browser_network_source";
-}
+import type { AgentBrowserNextAction } from "./action-contracts.js";
 
-export function withOptionalNamespaceArgs(namespace: string | undefined, args: string[]): string[] {
+export type { AgentBrowserNextAction } from "./action-contracts.js";
+
+export function withOptionalNamespaceArgs(
+	namespace: string | undefined,
+	args: readonly string[],
+): readonly string[] {
 	return namespace !== undefined && args[0] !== "--namespace"
 		? ["--namespace", namespace, ...args]
 		: args;
 }
 
-export function withOptionalSessionArgs(sessionName: string | undefined, args: string[]): string[] {
+export function withOptionalSessionArgs(
+	sessionName: string | undefined,
+	args: readonly string[],
+): readonly string[] {
 	if (
-		!sessionName ||
+		sessionName === undefined ||
+		sessionName.length === 0 ||
 		args[0] === "--session" ||
 		(args[0] === "--namespace" && args[2] === "--session")
 	) {
@@ -41,9 +30,9 @@ export function withOptionalSessionArgs(sessionName: string | undefined, args: s
 }
 
 export function applyNamespaceToNextActions(
-	actions: AgentBrowserNextAction[] | undefined,
+	actions: readonly AgentBrowserNextAction[] | undefined,
 	namespace: string | undefined,
-): AgentBrowserNextAction[] | undefined {
+): readonly AgentBrowserNextAction[] | undefined {
 	if (namespace === undefined || !actions) {
 		return actions;
 	}
@@ -62,10 +51,10 @@ export function applyNamespaceToNextActions(
 }
 
 export function applySessionToNextActions(
-	actions: AgentBrowserNextAction[] | undefined,
+	actions: readonly AgentBrowserNextAction[] | undefined,
 	sessionName: string | undefined,
-): AgentBrowserNextAction[] | undefined {
-	if (!sessionName || !actions) {
+): readonly AgentBrowserNextAction[] | undefined {
+	if (sessionName === undefined || sessionName.length === 0 || !actions) {
 		return actions;
 	}
 	return actions.map((action) => {
@@ -85,22 +74,24 @@ export function applySessionToNextActions(
 }
 
 export function buildNextToolAction(options: {
-	args: string[];
-	id: string;
-	reason: string;
-	safety?: string;
-	sessionMode?: "auto" | "fresh";
-	stdin?: string;
+	readonly args: readonly string[];
+	readonly id: string;
+	readonly reason: string;
+	readonly safety?: string;
+	readonly sessionMode?: "auto" | "fresh";
+	readonly stdin?: string;
 }): AgentBrowserNextAction {
 	return {
 		id: options.id,
 		params: {
 			args: options.args,
-			...(options.sessionMode ? { sessionMode: options.sessionMode } : {}),
-			...(options.stdin ? { stdin: options.stdin } : {}),
+			...(options.sessionMode !== undefined ? { sessionMode: options.sessionMode } : {}),
+			...(options.stdin !== undefined && options.stdin.length > 0 ? { stdin: options.stdin } : {}),
 		},
 		reason: options.reason,
-		...(options.safety ? { safety: options.safety } : {}),
+		...(options.safety !== undefined && options.safety.length > 0
+			? { safety: options.safety }
+			: {}),
 		tool: "agent_browser",
 	};
 }
@@ -116,9 +107,12 @@ export function buildInspectOverlayStateAction(sessionName?: string): AgentBrows
 	});
 }
 
+// This accumulator is caller-owned mutable state; append preserves its identity and side effects.
+export type AgentBrowserNextActionAccumulator = AgentBrowserNextAction[];
+
 export function appendUniqueAgentBrowserNextActions(
-	target: AgentBrowserNextAction[],
-	additions: AgentBrowserNextAction[] | undefined,
+	target: AgentBrowserNextActionAccumulator,
+	additions: readonly AgentBrowserNextAction[] | undefined,
 ): AgentBrowserNextAction[] {
 	if (!additions || additions.length === 0) {
 		return target;
@@ -136,7 +130,7 @@ export function appendUniqueAgentBrowserNextActions(
 
 export function isStandaloneSnapshotNextAction(action: AgentBrowserNextAction): boolean {
 	const args = action.params?.args;
-	if (!args || action.params?.stdin) {
+	if (!args || (action.params.stdin !== undefined && action.params.stdin.length > 0)) {
 		return false;
 	}
 	let commandIndex = args[0] === "--namespace" ? 2 : 0;
@@ -146,9 +140,11 @@ export function isStandaloneSnapshotNextAction(action: AgentBrowserNextAction): 
 	return args[commandIndex] === "snapshot";
 }
 
-export function alignPageChangeSummaryNextActionIds<T extends { nextActionIds?: string[] }>(
+export function alignPageChangeSummaryNextActionIds<
+	T extends { readonly nextActionIds?: readonly string[] },
+>(
 	summary: T | undefined,
-	nextActions: AgentBrowserNextAction[] | undefined,
+	nextActions: readonly AgentBrowserNextAction[] | undefined,
 ): T | undefined {
 	if (!summary?.nextActionIds || !nextActions) {
 		return summary;

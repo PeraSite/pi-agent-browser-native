@@ -8,9 +8,9 @@ export const TOOL_PROMPT_GUIDELINES_PREFIX = [
 ] as const;
 
 export function buildInstalledDocsGuideline(paths: {
-	readmePath: string;
-	commandReferencePath: string;
-	toolContractPath: string;
+	readonly readmePath: string;
+	readonly commandReferencePath: string;
+	readonly toolContractPath: string;
 }): string {
 	return `For detailed agent_browser docs, read targeted sections: ${paths.readmePath} (setup), ${paths.commandReferencePath} (commands), ${paths.toolContractPath} (result/details). Do not load the full command reference unless needed.`;
 }
@@ -137,14 +137,16 @@ export const RUNTIME_PROMPT_GUIDELINES = [
 export function buildBrowserExecutablePathGuideline(
 	executablePath: string | undefined,
 ): string | undefined {
-	if (!executablePath) {
+	if (executablePath === undefined || executablePath.length === 0) {
 		return undefined;
 	}
 	return `agent_browser config sets browser.executablePath to ${JSON.stringify(executablePath)}. Global/override values bootstrap inactive automatic root Chrome browsers, not Lightpanda; bare calls preserve active native launch settings. Project-only values remain guidance for explicit --executable-path launches. Use sessionMode:fresh only for an intentionally separate managed browser, not routine root-group browsing. Upstream profiles lists Chrome profiles only; use a supported explicit profile path for other Chromium browsers.`;
 }
 
 export function buildBrowserDefaultProfileGuideline(
-	profile: { name: string; policy: "explicit-only" | "authenticated-only" | "always" } | undefined,
+	profile:
+		| { readonly name: string; readonly policy: "explicit-only" | "authenticated-only" | "always" }
+		| undefined,
 ): string | undefined {
 	if (!profile || profile.policy === "explicit-only") {
 		return undefined;
@@ -156,13 +158,17 @@ export function buildBrowserDefaultProfileGuideline(
 }
 
 export function buildToolPromptGuidelines(options: {
-	browserDefaultProfile?: {
-		name: string;
-		policy: "explicit-only" | "authenticated-only" | "always";
+	readonly browserDefaultProfile?: {
+		readonly name: string;
+		readonly policy: "explicit-only" | "authenticated-only" | "always";
 	};
-	browserExecutablePath?: string;
-	docs?: { readmePath: string; commandReferencePath: string; toolContractPath: string };
-	includeWebSearch: boolean;
+	readonly browserExecutablePath?: string;
+	readonly docs?: {
+		readonly readmePath: string;
+		readonly commandReferencePath: string;
+		readonly toolContractPath: string;
+	};
+	readonly includeWebSearch: boolean;
 }): string[] {
 	const browserDefaultProfileGuideline = buildBrowserDefaultProfileGuideline(
 		options.browserDefaultProfile,
@@ -176,8 +182,8 @@ export function buildToolPromptGuidelines(options: {
 			: TOOL_PROMPT_GUIDELINES_PREFIX),
 		...(options.docs ? [buildInstalledDocsGuideline(options.docs)] : []),
 		...RUNTIME_PROMPT_GUIDELINES,
-		...(browserExecutablePathGuideline ? [browserExecutablePathGuideline] : []),
-		...(browserDefaultProfileGuideline ? [browserDefaultProfileGuideline] : []),
+		...(browserExecutablePathGuideline !== undefined ? [browserExecutablePathGuideline] : []),
+		...(browserDefaultProfileGuideline !== undefined ? [browserDefaultProfileGuideline] : []),
 		TOOL_PROMPT_GUIDELINES_SUFFIX[0],
 	];
 }

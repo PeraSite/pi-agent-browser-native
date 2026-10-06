@@ -1,9 +1,7 @@
 import { isOpenNavigationCommand } from "../../command-taxonomy.js";
-import {
-	extractUpstreamCommandTokens,
-	redactSensitiveText,
-	type CommandInfo,
-} from "../../runtime.js";
+import { isRecord } from "../../parsing.js";
+import { extractUpstreamCommandTokens, type CommandInfo } from "../../argv-descriptor.js";
+import { redactSensitiveText } from "../../runtime-redaction.js";
 import { buildBrowserProfileConfigRecovery } from "./browser-profile-recovery.js";
 import { redactModelFacingText } from "./common.js";
 import { buildAgentBrowserNextActions } from "../action-recommendations.js";
@@ -32,10 +30,6 @@ const KEYBOARD_PRESS_ERROR_HINT = [
 	"Agent-browser keyboard hint: upstream keyboard commands are `keyboard type <text>` and `keyboard inserttext <text>`; `keyboard press` is not a supported subcommand in the targeted upstream version.",
 	'For Enter in text fields, use `keyboard type "\\n"` after focusing the intended control, then verify with a fresh snapshot, URL, or page-state check.',
 ].join(" ");
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null;
-}
 
 function getSelectorRecoveryHint(errorText: string): string | undefined {
 	const normalized = errorText.trim();
@@ -101,7 +95,7 @@ function getKeyboardPressHint(commandInfo: CommandInfo, errorText: string): stri
 export function isOverlayBlockedClickError(
 	command: string | undefined,
 	errorText: string | undefined,
-	args?: string[],
+	args?: readonly string[],
 ): boolean {
 	const tokens = args ? extractUpstreamCommandTokens(args) : [];
 	const action =
@@ -191,58 +185,59 @@ export function redactClipboardPermissionErrorValue(
 }
 
 interface CommandSuggestion {
-	args?: string[];
-	description: string;
-	id?: string;
+	readonly args?: readonly string[];
+	readonly description: string;
+	readonly id?: string;
 }
 
-const UNKNOWN_COMMAND_SUGGESTIONS: Record<string, CommandSuggestion[]> = {
-	attr: [
-		{
-			description:
-				"Use `get attr <selector> <name>` to read an attribute from a selector or current `@ref`.",
-		},
-	],
-	count: [{ description: "Use `get count <selector>` to count matching elements." }],
-	html: [
-		{
-			description:
-				"Use `get html <selector>` to read element HTML from a selector or current `@ref`; use `get html body` when you need whole-page body HTML.",
-		},
-	],
-	text: [
-		{
-			description:
-				"Use `get text <selector>` to read text from a selector or current `@ref`; run `snapshot -i` first when you need a safe `@ref`.",
-		},
-	],
-	title: [
-		{
-			args: ["get", "title"],
-			description: "Use `get title` to read the current page title.",
-			id: "use-get-title",
-		},
-	],
-	url: [
-		{
-			args: ["get", "url"],
-			description: "Use `get url` to read the current page URL.",
-			id: "use-get-url",
-		},
-	],
-	value: [
-		{
-			description:
-				"Use `get value <selector>` to read form control value from a selector or current `@ref`.",
-		},
-	],
-};
+const UNKNOWN_COMMAND_SUGGESTIONS: Readonly<Partial<Record<string, readonly CommandSuggestion[]>>> =
+	{
+		attr: [
+			{
+				description:
+					"Use `get attr <selector> <name>` to read an attribute from a selector or current `@ref`.",
+			},
+		],
+		count: [{ description: "Use `get count <selector>` to count matching elements." }],
+		html: [
+			{
+				description:
+					"Use `get html <selector>` to read element HTML from a selector or current `@ref`; use `get html body` when you need whole-page body HTML.",
+			},
+		],
+		text: [
+			{
+				description:
+					"Use `get text <selector>` to read text from a selector or current `@ref`; run `snapshot -i` first when you need a safe `@ref`.",
+			},
+		],
+		title: [
+			{
+				args: ["get", "title"],
+				description: "Use `get title` to read the current page title.",
+				id: "use-get-title",
+			},
+		],
+		url: [
+			{
+				args: ["get", "url"],
+				description: "Use `get url` to read the current page URL.",
+				id: "use-get-url",
+			},
+		],
+		value: [
+			{
+				description:
+					"Use `get value <selector>` to read form control value from a selector or current `@ref`.",
+			},
+		],
+	};
 
 function getUnknownCommandSuggestions(
 	command: string | undefined,
 	errorText: string,
-): CommandSuggestion[] {
-	if (!command) {
+): readonly CommandSuggestion[] {
+	if (command === undefined || command.length === 0) {
 		return [];
 	}
 	const normalizedCommand = command.trim().toLowerCase();
@@ -254,7 +249,9 @@ function getUnknownCommandSuggestions(
 	return UNKNOWN_COMMAND_SUGGESTIONS[normalizedCommand] ?? [];
 }
 
-function formatUnknownCommandSuggestionText(suggestions: CommandSuggestion[]): string | undefined {
+function formatUnknownCommandSuggestionText(
+	suggestions: readonly CommandSuggestion[],
+): string | undefined {
 	if (suggestions.length === 0) {
 		return undefined;
 	}
@@ -265,13 +262,17 @@ function formatUnknownCommandSuggestionText(suggestions: CommandSuggestion[]): s
 }
 
 function buildUnknownCommandSuggestionActions(
-	suggestions: CommandSuggestion[],
+	suggestions: readonly CommandSuggestion[],
 	sessionName: string | undefined,
 ): AgentBrowserNextAction[] | undefined {
 	const actions = suggestions
 		.filter(
-			(suggestion): suggestion is CommandSuggestion & { args: string[]; id: string } =>
-				suggestion.args !== undefined && suggestion.id !== undefined,
+			(
+				suggestion,
+			): suggestion is CommandSuggestion & {
+				readonly args: readonly string[];
+				readonly id: string;
+			} => suggestion.args !== undefined && suggestion.id !== undefined,
 		)
 		.map((suggestion) => ({
 			id: suggestion.id,
@@ -288,9 +289,9 @@ function getLocalhostNavigationHint(
 	errorText: string,
 ): string | undefined {
 	if (
-		!commandInfo.command ||
 		!isOpenNavigationCommand(commandInfo.command) ||
-		!commandInfo.subcommand
+		commandInfo.subcommand === undefined ||
+		commandInfo.subcommand.length === 0
 	) {
 		return undefined;
 	}
@@ -322,24 +323,46 @@ function getLocalhostNavigationHint(
 
 export function appendSelectorRecoveryHint(errorText: string): string {
 	const hint = getSelectorRecoveryHint(errorText);
-	if (!hint || errorText.includes("Agent-browser hint:")) {
+	if (hint === undefined || hint.length === 0 || errorText.includes("Agent-browser hint:")) {
 		return errorText;
 	}
 	return `${errorText}\n\n${hint}`;
 }
 
+function buildHintedErrorText(
+	commandInfo: CommandInfo,
+	errorText: string,
+	unknownSuggestion: string | undefined,
+	profileHint: string | undefined,
+): string {
+	const selectorHinted = appendSelectorRecoveryHint(errorText);
+	return [
+		selectorHinted,
+		unknownSuggestion !== undefined &&
+		unknownSuggestion.length > 0 &&
+		!selectorHinted.includes("Agent-browser hint:")
+			? unknownSuggestion
+			: undefined,
+		profileHint,
+		getLocalhostNavigationHint(commandInfo, errorText),
+		getClipboardPermissionHint(commandInfo, errorText),
+		getKeyboardPressHint(commandInfo, errorText),
+	]
+		.filter((part) => part !== undefined && part.length > 0)
+		.join("\n\n");
+}
+
 export function buildErrorPresentation(options: {
-	args?: string[];
-	commandInfo: CommandInfo;
-	errorText: string;
-	presentationCommand?: string;
-	sessionName?: string;
+	readonly args?: readonly string[];
+	readonly commandInfo: CommandInfo;
+	readonly errorText: string;
+	readonly presentationCommand?: string;
+	readonly sessionName?: string;
 }): ToolPresentation {
 	const { args, commandInfo, errorText, presentationCommand, sessionName } = options;
 	const safeErrorText = redactModelFacingText(
 		redactSensitiveText(redactClipboardPermissionEcho(commandInfo, errorText)),
 	);
-	const selectorHintedErrorText = appendSelectorRecoveryHint(safeErrorText);
 	const unknownCommandSuggestions = getUnknownCommandSuggestions(
 		commandInfo.command,
 		safeErrorText,
@@ -351,20 +374,12 @@ export function buildErrorPresentation(options: {
 		commandInfo,
 		errorText: safeErrorText,
 	});
-	const localhostNavigationHint = getLocalhostNavigationHint(commandInfo, safeErrorText);
-	const clipboardPermissionHint = getClipboardPermissionHint(commandInfo, safeErrorText);
-	const keyboardPressHint = getKeyboardPressHint(commandInfo, safeErrorText);
-	const hintedErrorParts = [
-		selectorHintedErrorText,
-		unknownCommandSuggestionText && !selectorHintedErrorText.includes("Agent-browser hint:")
-			? unknownCommandSuggestionText
-			: undefined,
+	const hintedErrorText = buildHintedErrorText(
+		commandInfo,
+		safeErrorText,
+		unknownCommandSuggestionText,
 		browserProfileConfigRecovery?.hint,
-		localhostNavigationHint,
-		clipboardPermissionHint,
-		keyboardPressHint,
-	].filter((part): part is string => Boolean(part));
-	const hintedErrorText = hintedErrorParts.join("\n\n");
+	);
 	const categoryDetails = buildAgentBrowserResultCategoryDetails({
 		args: [commandInfo.command, commandInfo.subcommand].filter(
 			(item): item is string => item !== undefined,

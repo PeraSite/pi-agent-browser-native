@@ -1,3 +1,4 @@
+import { readArray, readRecord, readString } from "./helpers/assertions.js";
 /**
  * Purpose: Validate command-reference drift verification behavior for the local agent-browser documentation guard.
  * Responsibilities: Ensure metadata-driven token drift detection reports actionable failures for doc omissions and upstream/version mismatches without spawning real binaries in tests.
@@ -24,65 +25,82 @@ import {
 test("maintainer CLIs reject invalid options through encoded and symlink entrypoints", async (t) => {
 	const directory = await mkdtemp(join(tmpdir(), "piab-cli-"));
 	try {
-		for (const name of [
-			"agent-browser-capability-baseline.mjs",
-			"agent-browser-target.mjs",
-			"startup-measurement.mjs",
-		]) {
-			await copyFile(join("scripts", name), join(directory, name));
-		}
-		for (const [name, exitCode, diagnostic] of [
-			["verify-command-reference.mjs", 2, /Unknown option/],
-			["check-command-reference-baseline.mjs", 1, /Invalid arguments/],
-			["profile-startup.mjs", 2, /Unknown option/],
-		] as const) {
-			const script = join(directory, name);
-			const encodedScript = join(directory, `encoded % ${name}`);
-			const alias = join(directory, `alias-${name}`);
-			await copyFile(join("scripts", name), script);
-			await copyFile(script, encodedScript);
-			await symlink(script, alias);
-			for (const [kind, entrypoint] of [
-				["encoded path", encodedScript],
-				["symlink", alias],
-			] as const) {
-				await t.test(`${name}: ${kind}`, () => {
-					const result = spawnSync(process.execPath, [entrypoint, "--invalid-option"], {
-						encoding: "utf8",
-						timeout: 10_000,
-					});
-					assert.ifError(result.error);
-					assert.equal(
-						result.status,
-						exitCode,
-						`stdout=${JSON.stringify(result.stdout)} stderr=${JSON.stringify(result.stderr)}`,
-					);
-					assert.equal(result.stdout, "");
-					assert.match(result.stderr, diagnostic);
-				});
-			}
-		}
+		await Promise.all(
+			[
+				"agent-browser-capability-baseline.mjs",
+				"agent-browser-target.mjs",
+				"capability-core-commands.mjs",
+				"capability-options.mjs",
+				"capability-samples.mjs",
+				"capability-section.mjs",
+				"startup-measurement.mjs",
+			].map((name) => copyFile(join("scripts", name), join(directory, name))),
+		);
+		await Promise.all(
+			(
+				[
+					["verify-command-reference.mjs", 2, /Unknown option/],
+					["check-command-reference-baseline.mjs", 1, /Invalid arguments/],
+					["profile-startup.mjs", 2, /Unknown option/],
+				] as const
+			).map(async ([name, exitCode, diagnostic]) => {
+				const script = join(directory, name);
+				const encodedScript = join(directory, `encoded % ${name}`);
+				const alias = join(directory, `alias-${name}`);
+				await copyFile(join("scripts", name), script);
+				await Promise.all([copyFile(script, encodedScript), symlink(script, alias)]);
+				await Promise.all(
+					(
+						[
+							["encoded path", encodedScript],
+							["symlink", alias],
+						] as const
+					).map(([kind, entrypoint]) =>
+						t.test(`${name}: ${kind}`, () => {
+							const result = spawnSync(process.execPath, [entrypoint, "--invalid-option"], {
+								encoding: "utf8",
+								timeout: 10_000,
+							});
+							assert.ifError(result.error);
+							assert.equal(
+								result.status,
+								exitCode,
+								`stdout=${JSON.stringify(result.stdout)} stderr=${JSON.stringify(result.stderr)}`,
+							);
+							assert.equal(result.stdout, "");
+							assert.match(result.stderr, diagnostic);
+						}),
+					),
+				);
+			}),
+		);
 	} finally {
 		await rm(directory, { force: true, recursive: true });
 	}
 });
 
+const baseline = readRecord(CAPABILITY_BASELINE);
+const upstreamExpectations = readArray(baseline.upstreamExpectations).map(readRecord);
+const docRequiredTokens = readArray(baseline.docRequiredTokens).map(readString);
+const helpCommands = readArray(baseline.helpCommands).map(readRecord);
+const targetVersion = readString(baseline.targetVersion);
+
 function fakeHelpFor(label: string): string {
-	return CAPABILITY_BASELINE.upstreamExpectations
+	return upstreamExpectations
 		.filter((expectation) => expectation.help === label)
-		.map((expectation) => expectation.token)
+		.map((expectation) => readString(expectation.token))
 		.join("\n");
 }
 
 function completeDoc(): string {
-	return CAPABILITY_BASELINE.docRequiredTokens.join("\n");
+	return docRequiredTokens.join("\n");
 }
 
 function fakeRunWithVersion(version: string): (args: readonly string[]) => Promise<string> {
 	const helpByCommand = new Map(
-		CAPABILITY_BASELINE.helpCommands.map((command) => [
-			command.args.join(" "),
-			fakeHelpFor(command.label),
+		helpCommands.map((command) => [
+			readArray(command.args).map(readString).join(" "),
+			fakeHelpFor(readString(command.label)),
 		]),
 	);
 
@@ -100,7 +118,7 @@ function fakeRunWithVersion(version: string): (args: readonly string[]) => Promi
 }
 
 test("stripGeneratedCapabilityBaselineBlocks removes generated content before human-token checks", () => {
-	const generatedOnlyToken = CAPABILITY_BASELINE.docRequiredTokens[0];
+	const generatedOnlyToken = docRequiredTokens[0];
 	const content = [
 		"human content",
 		"<!-- agent-browser-capability-baseline:start capability-token-baseline -->",
@@ -108,29 +126,32 @@ test("stripGeneratedCapabilityBaselineBlocks removes generated content before hu
 		"<!-- agent-browser-capability-baseline:end capability-token-baseline -->",
 	].join("\n");
 
-	assert.equal(stripGeneratedCapabilityBaselineBlocks(content).includes(generatedOnlyToken), false);
+	assert.equal(
+		readString(stripGeneratedCapabilityBaselineBlocks(content)).includes(generatedOnlyToken),
+		false,
+	);
 });
 
 test("command reference clarifies get selector requirements", () => {
-	const doc = stripGeneratedCapabilityBaselineBlocks(
-		readFileSync("docs/COMMAND_REFERENCE.md", "utf8"),
+	const doc = readString(
+		stripGeneratedCapabilityBaselineBlocks(readFileSync("docs/COMMAND_REFERENCE.md", "utf8")),
 	);
 
-	assert.match(doc, /selector is not optional for DOM getters/);
-	assert.match(doc, /`get text\/html\/value\/count <selector>`/);
-	assert.match(doc, /`get attr <selector> <name>`/);
-	assert.doesNotMatch(doc, /`get <what> \[selector\]` \| `text`, `html`, `value`/);
+	assert.match(readString(doc), /selector is not optional for DOM getters/);
+	assert.match(readString(doc), /`get text\/html\/value\/count <selector>`/);
+	assert.match(readString(doc), /`get attr <selector> <name>`/);
+	assert.doesNotMatch(readString(doc), /`get <what> \[selector\]` \| `text`, `html`, `value`/);
 });
 
 test("verifyCommandReference passes for matching fake upstream and doc content", async () => {
 	assert.equal(
-		DOC_REQUIRED_TOKENS.length,
-		CAPABILITY_BASELINE.docRequiredTokens.length,
+		readArray(DOC_REQUIRED_TOKENS).length,
+		docRequiredTokens.length,
 		"the verifier must require every baseline doc token",
 	);
 	const failures = await verifyCommandReference({
 		cwd: "/repo",
-		run: fakeRunWithVersion(CAPABILITY_BASELINE.targetVersion),
+		run: fakeRunWithVersion(targetVersion),
 		readDoc: async () => completeDoc(),
 	});
 
@@ -144,18 +165,22 @@ test("verifyCommandReference reports version drift", async () => {
 		readDoc: async () => completeDoc(),
 	});
 
-	assert.ok(failures.some((entry) => entry.includes("agent-browser version drift")));
+	assert.ok(
+		readArray(failures).some((entry) => readString(entry).includes("agent-browser version drift")),
+	);
 });
 
 test("verifyCommandReference reports missing upstream token", async () => {
 	const run = async (args: readonly string[]) => {
 		const key = args.join(" ");
 		if (key === "--version") {
-			return `agent-browser ${CAPABILITY_BASELINE.targetVersion}`;
+			return `agent-browser ${targetVersion}`;
 		}
-		const command = CAPABILITY_BASELINE.helpCommands.find((entry) => entry.args.join(" ") === key);
+		const command = helpCommands.find(
+			(entry) => readArray(entry.args).map(readString).join(" ") === key,
+		);
 		if (command) {
-			const text = fakeHelpFor(command.label);
+			const text = fakeHelpFor(readString(command.label));
 			return command.label === "root help" ? text.replace("skills get core --full", "") : text;
 		}
 		throw new Error(`Unexpected command in fake run: ${key}`);
@@ -168,8 +193,8 @@ test("verifyCommandReference reports missing upstream token", async () => {
 	});
 
 	assert.ok(
-		failures.some((entry) =>
-			entry.includes("Upstream root help no longer includes expected token"),
+		readArray(failures).some((entry) =>
+			readString(entry).includes("Upstream root help no longer includes expected token"),
 		),
 	);
 });
@@ -178,13 +203,15 @@ test("verifyCommandReference reports missing doc token", async () => {
 	const docMissingToken = completeDoc().replace("skills list", "");
 	const failures = await verifyCommandReference({
 		cwd: "/repo",
-		run: fakeRunWithVersion(CAPABILITY_BASELINE.targetVersion),
+		run: fakeRunWithVersion(targetVersion),
 		readDoc: async () => docMissingToken,
 	});
 
 	assert.ok(
-		failures.some((entry) =>
-			entry.includes("docs/COMMAND_REFERENCE.md is missing human-authored token: skills list"),
+		readArray(failures).some((entry) =>
+			readString(entry).includes(
+				"docs/COMMAND_REFERENCE.md is missing human-authored token: skills list",
+			),
 		),
 	);
 });

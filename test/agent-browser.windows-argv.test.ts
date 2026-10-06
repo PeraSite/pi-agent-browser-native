@@ -6,6 +6,7 @@ import test from "node:test";
 
 import { runAgentBrowserProcess } from "../extensions/agent-browser/lib/process.js";
 import { withPatchedEnv, writeFakeAgentBrowserBinary } from "./helpers/agent-browser-harness.js";
+import { readRecord } from "./helpers/assertions.js";
 
 // The child must receive the original argv, without shell quoting or flag rewriting.
 const cases = [
@@ -88,17 +89,31 @@ process.stdout.write(Buffer.from(JSON.stringify({ args: process.argv.slice(2), s
 					PI_AGENT_BROWSER_TEST_PRESERVE_INTERNAL_LAUNCH_FLAGS: "1",
 				};
 				for (const item of cases) {
+					// Each transport case writes shared fixture evidence; finish it before replacing or reading the launcher fixture.
+					// oxlint-disable-next-line no-await-in-loop
 					const result = await runAgentBrowserProcess({
 						args: item.args,
 						stdin: item.stdin,
 						cwd: root,
 						env,
 					});
+					// The nonempty item fixture matrix exhaustively verifies each case; any failed assertion fails the test.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
 					assert.equal(result.spawnError, undefined);
+					// The nonempty item fixture matrix exhaustively verifies each case; any failed assertion fails the test.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
 					assert.equal(result.exitCode, 0, result.stderr);
+					// The nonempty item fixture matrix exhaustively verifies each case; any failed assertion fails the test.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
 					assert.equal(result.agentBrowserStarted, true);
+					// The nonempty item fixture matrix exhaustively verifies each case; any failed assertion fails the test.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
 					assert.equal(result.timedOut, false);
+					// The nonempty item fixture matrix exhaustively verifies each case; any failed assertion fails the test.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
 					assert.equal(result.aborted, false);
+					// The nonempty item fixture matrix exhaustively verifies each case; any failed assertion fails the test.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
 					assert.deepEqual(JSON.parse(Buffer.from(result.stdout.trim(), "base64").toString()), {
 						args: item.args,
 						stdin: item.stdin ?? "",
@@ -106,18 +121,30 @@ process.stdout.write(Buffer.from(JSON.stringify({ args: process.argv.slice(2), s
 					});
 				}
 				for (const exitCode of [1, 7]) {
+					// Each transport case writes shared fixture evidence; finish it before replacing or reading the launcher fixture.
+					// oxlint-disable-next-line no-await-in-loop
 					await writeFakeAgentBrowserBinary(
 						chosen,
 						`process.stderr.write('CLI failed'); process.exit(${exitCode});`,
 					);
+					// Each transport case writes shared fixture evidence; finish it before replacing or reading the launcher fixture.
+					// oxlint-disable-next-line no-await-in-loop
 					const failed = await runAgentBrowserProcess({
 						args: ["fill", "#field", ""],
 						cwd: root,
 						env,
 					});
+					// The nonempty exitCode fixture matrix exhaustively verifies each case; any failed assertion fails the test.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
 					assert.equal(failed.exitCode, exitCode);
+					// The nonempty exitCode fixture matrix exhaustively verifies each case; any failed assertion fails the test.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
 					assert.equal(failed.stderr, "CLI failed");
+					// The nonempty exitCode fixture matrix exhaustively verifies each case; any failed assertion fails the test.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
 					assert.equal(failed.spawnError, undefined);
+					// The nonempty exitCode fixture matrix exhaustively verifies each case; any failed assertion fails the test.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
 					assert.equal(failed.agentBrowserStarted, true);
 				}
 				const missing = await runAgentBrowserProcess({
@@ -126,7 +153,7 @@ process.stdout.write(Buffer.from(JSON.stringify({ args: process.argv.slice(2), s
 					env: { PATH: join(root, "missing") },
 				});
 				assert.equal(missing.exitCode, 127);
-				assert.equal((missing.spawnError as NodeJS.ErrnoException)?.code, "ENOENT");
+				assert.equal(readRecord(missing.spawnError).code, "ENOENT");
 				assert.equal(missing.agentBrowserStarted, false);
 			},
 		);

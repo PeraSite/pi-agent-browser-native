@@ -75,6 +75,7 @@ export function renderCommandReferenceBaselineBlock(id) {
 				"This generated block is review data for maintainers. The human-authored reference sections above remain the readable command guide.",
 				"",
 				"#### Source evidence",
+				"",
 				bullets([
 					`repository: \`${CAPABILITY_BASELINE.sourceEvidence.repository}\``,
 					`upstream HEAD: \`${CAPABILITY_BASELINE.sourceEvidence.upstreamHead}\``,
@@ -85,6 +86,7 @@ export function renderCommandReferenceBaselineBlock(id) {
 				]),
 				"",
 				"#### Upstream help commands sampled",
+				"",
 				bullets(
 					CAPABILITY_BASELINE.helpCommands.map(
 						(command) => `${command.label}: \`agent-browser ${command.args.join(" ")}\``,
@@ -92,6 +94,7 @@ export function renderCommandReferenceBaselineBlock(id) {
 				),
 				"",
 				"#### Inventory sections",
+				"",
 				bullets(
 					CAPABILITY_BASELINE.inventorySections.map(
 						(entry) =>
@@ -100,19 +103,24 @@ export function renderCommandReferenceBaselineBlock(id) {
 				),
 				"",
 				"#### Human-authored doc tokens required",
-				CAPABILITY_BASELINE.inventorySections
-					.map((entry) =>
-						[`##### ${entry.title}`, bullets(entry.docTokens.map((token) => `\`${token}\``))].join(
-							"\n",
-						),
-					)
-					.join("\n\n"),
 				"",
-				"#### Upstream help tokens expected",
 				CAPABILITY_BASELINE.inventorySections
 					.map((entry) =>
 						[
 							`##### ${entry.title}`,
+							"",
+							bullets(entry.docTokens.map((token) => `\`${token}\``)),
+						].join("\n"),
+					)
+					.join("\n\n"),
+				"",
+				"#### Upstream help tokens expected",
+				"",
+				CAPABILITY_BASELINE.inventorySections
+					.map((entry) =>
+						[
+							`##### ${entry.title}`,
+							"",
 							bullets(
 								entry.upstreamExpectations.map(
 									(expectation) => `${expectation.help}: \`${expectation.token}\``,
@@ -133,6 +141,7 @@ export function markedCommandReferenceBaselineBlock(id) {
 	return [
 		`<!-- ${CAPABILITY_BASELINE_BLOCK_MARKER_PREFIX}:start ${id} -->`,
 		GENERATED_NOTICE,
+		...(id === "upstream-baseline" ? [""] : []),
 		renderCommandReferenceBaselineBlock(id),
 		`<!-- ${CAPABILITY_BASELINE_BLOCK_MARKER_PREFIX}:end ${id} -->`,
 	].join("\n");
@@ -199,13 +208,12 @@ export async function main(argv = process.argv.slice(2)) {
 }
 
 if (import.meta.main) {
-	main().then(
-		(exitCode) => {
+	main()
+		.then((exitCode) => {
 			process.exitCode = exitCode;
-		},
-		(error) => {
+		})
+		.catch((error) => {
 			console.error(error instanceof Error ? error.message : String(error));
 			process.exitCode = 1;
-		},
-	);
+		});
 }

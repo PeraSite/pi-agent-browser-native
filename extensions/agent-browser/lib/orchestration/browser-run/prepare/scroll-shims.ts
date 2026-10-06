@@ -1,15 +1,29 @@
 import { isRecord } from "../../../parsing.js";
 import { buildAgentBrowserResultCategoryDetails } from "../../../results/categories.js";
 import { applyNamespaceToNextActions } from "../../../results/next-actions.js";
-import type { CompatibilityWorkaround } from "../../../runtime.js";
-import { buildScrollNoopNextActions } from "../diagnostics.js";
+import type { CompatibilityWorkaround } from "../../../runtime-contracts.js";
+import { buildScrollNoopNextActions } from "../interaction-diagnostics.js";
 import { buildSessionDetailFields, runSessionCommandData } from "../session-state.js";
 import type { AgentBrowserToolResult } from "../types.js";
+
+interface ScrollPreparationOptions {
+	readonly commandTokens: readonly string[];
+	readonly compatibilityWorkaround?: CompatibilityWorkaround;
+	readonly cwd: string;
+	readonly effectiveArgs: readonly string[];
+	readonly managedSessionRestoreDisabled: () => boolean;
+	readonly redactedArgs: readonly string[];
+	readonly sessionMode: "auto" | "fresh";
+	readonly namespace?: string;
+	readonly sessionName?: string;
+	readonly signal?: AbortSignal;
+	readonly usedImplicitSession: boolean;
+}
 
 const SCROLL_CONTAINER_DIRECTIONS = new Set(["down", "left", "right", "up"]);
 
 function getContainerScrollRequest(
-	commandTokens: string[],
+	commandTokens: readonly string[],
 ): { amount?: string; direction: string; selector: string } | undefined {
 	if (commandTokens[0] !== "scroll" || commandTokens.length < 3) {
 		return undefined;
@@ -17,7 +31,7 @@ function getContainerScrollRequest(
 	const selector = commandTokens[1];
 	const direction = commandTokens[2]?.toLowerCase();
 	if (
-		!selector ||
+		selector === "" ||
 		selector.startsWith("-") ||
 		selector.startsWith("@") ||
 		SCROLL_CONTAINER_DIRECTIONS.has(selector.toLowerCase())
@@ -31,9 +45,9 @@ function getContainerScrollRequest(
 }
 
 function buildContainerScrollScript(request: {
-	amount?: string;
-	direction: string;
-	selector: string;
+	readonly amount?: string;
+	readonly direction: string;
+	readonly selector: string;
 }): string {
 	return `(() => {
   const selector = ${JSON.stringify(request.selector)};
@@ -64,20 +78,20 @@ function buildContainerScrollScript(request: {
 }
 
 function buildScrollResult(options: {
-	command: "scroll";
-	compatibilityWorkaround?: CompatibilityWorkaround;
-	effectiveArgs: string[];
-	managedSessionRestoreDisabled: () => boolean;
-	message: string;
-	redactedArgs: string[];
-	result: Record<string, unknown>;
-	scrollField: "scrollContainer" | "scrollPage";
-	scrollValue: unknown;
-	sessionMode: "auto" | "fresh";
-	namespace?: string;
-	sessionName?: string;
-	succeeded: boolean;
-	usedImplicitSession: boolean;
+	readonly command: "scroll";
+	readonly compatibilityWorkaround?: CompatibilityWorkaround;
+	readonly effectiveArgs: readonly string[];
+	readonly managedSessionRestoreDisabled: () => boolean;
+	readonly message: string;
+	readonly redactedArgs: readonly string[];
+	readonly result: Readonly<Record<string, unknown>>;
+	readonly scrollField: "scrollContainer" | "scrollPage";
+	readonly scrollValue: unknown;
+	readonly sessionMode: "auto" | "fresh";
+	readonly namespace?: string;
+	readonly sessionName?: string;
+	readonly succeeded: boolean;
+	readonly usedImplicitSession: boolean;
 }): AgentBrowserToolResult {
 	return {
 		content: [{ type: "text", text: options.message }],
@@ -116,21 +130,24 @@ function buildScrollResult(options: {
 	};
 }
 
-export async function tryContainerScroll(options: {
-	commandTokens: string[];
-	compatibilityWorkaround?: CompatibilityWorkaround;
-	cwd: string;
-	effectiveArgs: string[];
-	managedSessionRestoreDisabled: () => boolean;
-	redactedArgs: string[];
-	sessionMode: "auto" | "fresh";
-	namespace?: string;
-	sessionName?: string;
-	signal?: AbortSignal;
-	usedImplicitSession: boolean;
-}): Promise<AgentBrowserToolResult | undefined> {
+function getScrollResult(
+	data: unknown,
+): (Readonly<Record<string, unknown>> & { readonly status: string }) | undefined {
+	const result = isRecord(data) && isRecord(data.result) ? data.result : data;
+	return isRecord(result) && typeof result.status === "string"
+		? { ...result, status: result.status }
+		: undefined;
+}
+
+function describeScrollAmount(amount: string | undefined): string {
+	return amount !== undefined && amount !== "" ? ` by ${amount}` : "";
+}
+
+export async function tryContainerScroll(
+	options: ScrollPreparationOptions,
+): Promise<AgentBrowserToolResult | undefined> {
 	const request = getContainerScrollRequest(options.commandTokens);
-	if (!request || !options.sessionName) {
+	if (!request || (options.sessionName ?? "") === "") {
 		return undefined;
 	}
 	const data = await runSessionCommandData({
@@ -141,13 +158,13 @@ export async function tryContainerScroll(options: {
 		signal: options.signal,
 		stdin: buildContainerScrollScript(request),
 	});
-	const result = isRecord(data) && isRecord(data.result) ? data.result : data;
-	if (!isRecord(result) || typeof result.status !== "string") {
+	const result = getScrollResult(data);
+	if (!result) {
 		return undefined;
 	}
 	const succeeded = result.status === "scrolled";
 	const message = succeeded
-		? `Scrolled container ${request.selector} ${request.direction}${request.amount ? ` by ${request.amount}` : ""}.`
+		? `Scrolled container ${request.selector} ${request.direction}${describeScrollAmount(request.amount)}.`
 		: `Scroll container ${request.selector} did not move (${result.status}).`;
 	return buildScrollResult({
 		...options,
@@ -161,29 +178,50 @@ export async function tryContainerScroll(options: {
 }
 
 type PageScrollRequest =
-	| { target: "end" | "top" }
-	| { amount?: string; direction: "down" | "left" | "right" | "up" };
+	| { readonly target: "end" | "top" }
+	| { readonly amount?: string; readonly direction: "down" | "left" | "right" | "up" };
 
-function getPageScrollToRequest(commandTokens: string[]): PageScrollRequest | undefined {
+function isPageScrollDirection(direction: string): direction is "down" | "left" | "right" | "up" {
+	return (
+		direction === "down" || direction === "left" || direction === "right" || direction === "up"
+	);
+}
+
+function isValidScrollAmount(amount: string | undefined): boolean {
+	if (amount === undefined || amount === "") {
+		return true;
+	}
+	return /^\d+(?:\.\d+)?(?:px|%)?$/.test(amount) && Number(amount.replace(/(?:px|%)$/, "")) > 0;
+}
+
+function describePageScroll(request: PageScrollRequest): string {
+	if ("target" in request) {
+		return `to ${request.target}`;
+	}
+	return `${request.direction}${describeScrollAmount(request.amount)}`;
+}
+
+function getPageScrollToRequest(commandTokens: readonly string[]): PageScrollRequest | undefined {
 	if (commandTokens[0] !== "scroll") {
 		return undefined;
 	}
 	if (commandTokens[1]?.toLowerCase() === "to") {
-		const target = commandTokens[2]?.toLowerCase();
-		return target === "end" || target === "top" ? { target } : undefined;
+		return getPageScrollTarget(commandTokens.at(2));
 	}
 	const direction = commandTokens[1]?.toLowerCase();
-	if (!SCROLL_CONTAINER_DIRECTIONS.has(direction) || commandTokens.length > 3) {
+	if (!isPageScrollDirection(direction) || commandTokens.length > 3) {
 		return undefined;
 	}
-	const amount = commandTokens[2];
-	if (
-		amount &&
-		(!/^\d+(?:\.\d+)?(?:px|%)?$/.test(amount) || Number(amount.replace(/(?:px|%)$/, "")) <= 0)
-	) {
+	const amount = commandTokens.at(2);
+	if (!isValidScrollAmount(amount)) {
 		return undefined;
 	}
-	return { amount, direction: direction as "down" | "left" | "right" | "up" };
+	return { amount, direction };
+}
+
+function getPageScrollTarget(token: string | undefined): PageScrollRequest | undefined {
+	const target = token?.toLowerCase();
+	return target === "end" || target === "top" ? { target } : undefined;
 }
 
 function buildPageScrollToScript(request: PageScrollRequest): string {
@@ -221,21 +259,11 @@ function buildPageScrollToScript(request: PageScrollRequest): string {
 })()`;
 }
 
-export async function tryPageScrollTo(options: {
-	commandTokens: string[];
-	compatibilityWorkaround?: CompatibilityWorkaround;
-	cwd: string;
-	effectiveArgs: string[];
-	managedSessionRestoreDisabled: () => boolean;
-	redactedArgs: string[];
-	sessionMode: "auto" | "fresh";
-	namespace?: string;
-	sessionName?: string;
-	signal?: AbortSignal;
-	usedImplicitSession: boolean;
-}): Promise<AgentBrowserToolResult | undefined> {
+export async function tryPageScrollTo(
+	options: ScrollPreparationOptions,
+): Promise<AgentBrowserToolResult | undefined> {
 	const request = getPageScrollToRequest(options.commandTokens);
-	if (!request || !options.sessionName) {
+	if (!request || (options.sessionName ?? "") === "") {
 		return undefined;
 	}
 	const data = await runSessionCommandData({
@@ -246,18 +274,15 @@ export async function tryPageScrollTo(options: {
 		signal: options.signal,
 		stdin: buildPageScrollToScript(request),
 	});
-	const result = isRecord(data) && isRecord(data.result) ? data.result : data;
-	if (!isRecord(result) || typeof result.status !== "string") {
+	const result = getScrollResult(data);
+	if (!result) {
 		return undefined;
 	}
 	const succeeded = result.status === "scrolled";
 	if (!succeeded && "direction" in request) {
 		return undefined;
 	}
-	const description =
-		"target" in request
-			? `to ${request.target}`
-			: `${request.direction}${request.amount ? ` by ${request.amount}` : ""}`;
+	const description = describePageScroll(request);
 	const message = succeeded
 		? `Scrolled page ${description}.`
 		: `Scroll ${description} completed with no observed movement (${result.status}).`;

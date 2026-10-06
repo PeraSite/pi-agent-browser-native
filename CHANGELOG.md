@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Changed
+
+- Enforce strict Oxlint/Oxfmt acceptance across maintained TypeScript and JavaScript, including compiler scope, reviewed exception and declaration-isolation probes, reproducible checker corrections, editor integration, and real acceptance-failure controls.
+- Separate browser planning, execution, observation, publication, replay, and resource ownership into focused operations while preserving the native tool surface, asynchronous ordering, cancellation, and cleanup contracts.
+
+### Fixed
+
+- Load browser execution and large-output dependencies through Pi's host-owned module mapping in runtime-only package installs, without installing or bundling optional Pi peers.
+- Preserve caller-configured Chrome launch arguments across browser, helper, and local auth calls by omitting automatic startup arguments when native environment or configuration already owns launch defaults.
+
 ## 0.9.3 - 2026-10-05
 
 ### Fixed

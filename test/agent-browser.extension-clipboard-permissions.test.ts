@@ -7,6 +7,7 @@
  */
 
 import assert from "node:assert/strict";
+import { readArray, readRecord, readString } from "./helpers/assertions.js";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -67,14 +68,14 @@ process.stdin.on("end", () => {
 					});
 					assert.equal(standalone.isError, true, JSON.stringify(standalone));
 					assert.match(
-						(standalone.content[0] as { text: string }).text,
+						readString(readRecord(standalone.content[0]).text),
 						/Agent-browser clipboard hint:/,
 					);
 					assert.doesNotMatch(JSON.stringify(standalone), /clipboard-secret/);
-					const firstInvocation = JSON.parse(
-						(await readFile(logPath, "utf8")).trim().split("\n")[0] ?? "{}",
+					const firstInvocation = readRecord(
+						JSON.parse((await readFile(logPath, "utf8")).trim().split("\n")[0] ?? "{}"),
 					);
-					assert.deepEqual(firstInvocation.args.slice(-3), [
+					assert.deepEqual(readArray(firstInvocation.args).map(readString).slice(-3), [
 						"clipboard",
 						"write",
 						"clipboard-secret",
@@ -97,34 +98,37 @@ process.stdin.on("end", () => {
 					});
 					assert.equal(shortPayload.isError, true, JSON.stringify(shortPayload));
 					assert.equal(shortPayload.details?.resultCategory, "failure");
-					assert.equal(shortPayload.details?.failureCategory, "upstream-error");
-					assert.equal(shortPayload.details?.command, "clipboard");
-					assert.equal(shortPayload.details?.sessionMode, "auto");
+					assert.equal(shortPayload.details.failureCategory, "upstream-error");
+					assert.equal(shortPayload.details.command, "clipboard");
+					assert.equal(shortPayload.details.sessionMode, "auto");
 					assert.match(
-						(shortPayload.content[0] as { text: string }).text,
+						readString(readRecord(shortPayload.content[0]).text),
 						/Agent-browser clipboard hint:/,
 					);
 					assert.doesNotMatch(
-						JSON.stringify(shortPayload.details?.error),
+						JSON.stringify(shortPayload.details.error),
 						/permission denied for a\./,
 					);
 					assert.match(
-						JSON.stringify(shortPayload.details?.error),
+						JSON.stringify(shortPayload.details.error),
 						/safe metadata about clipboard denial/,
 					);
-					assert.match(JSON.stringify(shortPayload.details?.error), /safe value/);
+					assert.match(JSON.stringify(shortPayload.details.error), /safe value/);
 
 					const batch = await executeRegisteredTool(harness.tool, harness.ctx, {
 						args: ["batch"],
 						stdin: JSON.stringify([["clipboard", "write", "clipboard-secret"]]),
 					});
 					assert.equal(batch.isError, true, JSON.stringify(batch));
-					assert.match((batch.content[0] as { text: string }).text, /clipboard write \[REDACTED\]/);
+					assert.match(
+						readString(readRecord(batch.content[0]).text),
+						/clipboard write \[REDACTED\]/,
+					);
 					assert.doesNotMatch(JSON.stringify(batch), /clipboard-secret/);
 					const invocations = (await readFile(logPath, "utf8"))
 						.trim()
 						.split("\n")
-						.map((line) => JSON.parse(line));
+						.map((line) => readRecord(JSON.parse(line)));
 					assert.equal(
 						invocations.some(
 							(entry) =>
@@ -153,13 +157,13 @@ process.stdin.on("end", () => {
 					});
 					assert.equal(shortBatch.isError, true, JSON.stringify(shortBatch));
 					assert.equal(shortBatch.details?.resultCategory, "failure");
-					assert.equal(shortBatch.details?.failureCategory, "upstream-error");
+					assert.equal(shortBatch.details.failureCategory, "upstream-error");
 					assert.match(
-						(shortBatch.content[0] as { text: string }).text,
+						readString(readRecord(shortBatch.content[0]).text),
 						/clipboard write \[REDACTED\]/,
 					);
 					assert.doesNotMatch(
-						(shortBatch.content[0] as { text: string }).text,
+						readString(readRecord(shortBatch.content[0]).text),
 						/permission denied for a\./,
 					);
 					assert.match(JSON.stringify(shortBatch.details), /safe metadata about clipboard denial/);

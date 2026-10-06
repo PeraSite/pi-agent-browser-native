@@ -1,3 +1,4 @@
+import { hasErrorCode, readArray, readRecord, readString } from "./helpers/assertions.js";
 import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -15,6 +16,136 @@ import {
 } from "./helpers/agent-browser-harness.js";
 
 const upgradeText = "Detected installation via npm.\n✓ Done!";
+
+function upgradeArgs(mode: string): string[] {
+	switch (mode) {
+		case "ordinary-json":
+			return ["snapshot", "-i"];
+		case "unsupported-upgrade-shape":
+			return ["upgrade", "future"];
+		case "nonzero-text":
+			return ["--json", "false", "upgrade"];
+		case "nonzero-json":
+		case "structured-error":
+			return ["--json", "upgrade"];
+		default:
+			return ["upgrade"];
+	}
+}
+
+function upgradeFailureCategory(mode: string): string {
+	switch (mode) {
+		case "timeout":
+			return "timeout";
+		case "abort":
+			return "aborted";
+		case "missing-binary":
+			return "missing-binary";
+		case "ordinary-json":
+		case "unsupported-upgrade-shape":
+			return "parse-failure";
+		default:
+			return "upstream-error";
+	}
+}
+
+async function waitForUpgradeSignalHandler(
+	marker: string,
+	realSetTimeout: (callback: () => void, ms: number) => unknown,
+): Promise<void> {
+	const deadline = Date.now() + 5000;
+	while (true) {
+		try {
+			// Read after each delay: the child publishes this marker only once its handler is installed.
+			// oxlint-disable-next-line no-await-in-loop
+			await readFile(marker);
+			return;
+		} catch (error) {
+			if (!hasErrorCode(error, "ENOENT")) {
+				throw error;
+			}
+		}
+		assert.ok(
+			Date.now() < deadline,
+			"the controlled upgrade child must install its signal handler before timeout or abort",
+		);
+		// Polling must wait between dependent marker reads, not queue all retries concurrently.
+		// oxlint-disable-next-line no-await-in-loop
+		await new Promise<void>((resolve) => {
+			realSetTimeout(resolve, 5);
+		});
+	}
+}
+
+async function assertUpgradeFailureLogs(mode: string, result: unknown): Promise<void> {
+	const details = readRecord(readRecord(result).details);
+	const content = readArray(readRecord(result).content);
+	if (mode.startsWith("nonzero")) {
+		assert.equal(details.exitCode, 7);
+		assert.equal(details.parseError, undefined);
+		assert.match(readString(details.data), /Detected installation via npm/);
+		if (mode === "nonzero-text") {
+			assert.equal(
+				JSON.stringify(content).split("Detected installation via npm").length - 1,
+				1,
+				"explicit text stdout is rendered only once",
+			);
+		}
+		if (mode === "nonzero-json") {
+			const json = readRecord(JSON.parse(readString(readRecord(content[0]).text)));
+			assert.equal(json.success, false);
+			assert.match(readString(json.error), /Native upgrade failed/);
+			assert.match(readString(json.data), /Detected installation via npm/);
+		} else {
+			assert.match(
+				JSON.stringify(content),
+				/Native upgrade failed[\s\S]*Detected installation via npm/,
+			);
+		}
+	}
+	if (mode === "large-nonzero") {
+		assert.equal(readRecord(details.data).compacted, true);
+		assert.ok(
+			JSON.stringify(content).length < 8000,
+			"failed upgrade logs must use the existing bounded presentation",
+		);
+		const spill = await readFile(readString(details.fullOutputPath), "utf8");
+		assert.match(spill, /Detected installation via npm/);
+		assert.equal(spill.split("npm install progress").length - 1, 2000);
+		assert.doesNotMatch(spill, /upgrade-secret/);
+	}
+}
+
+async function assertUpgradeTermination(
+	mode: string,
+	result: unknown,
+	marker: string,
+	logPath: string,
+): Promise<void> {
+	const details = readRecord(readRecord(result).details);
+	if (mode === "timeout" || mode === "abort") {
+		// POSIX runs the handler; Windows taskkill forcibly closes the shell with 1.
+		assert.equal(
+			details.exitCode,
+			process.platform === "win32" ? 1 : 0,
+			"native termination status must retain cancellation/timeout failure",
+		);
+		assert.equal(details.parseError, undefined);
+		if (mode === "timeout") {
+			assert.equal(details.timedOut, true);
+		}
+		const pid = Number(await readFile(marker, "utf8"));
+		assert.throws(() => process.kill(pid, 0), { code: "ESRCH" });
+		assert.deepEqual(
+			(await readInvocationLog(logPath)).map((row) => row.args),
+			[["--json", "upgrade"]],
+		);
+	}
+	if (mode === "missing-binary") {
+		assert.equal(details.agentBrowserStarted, false);
+		assert.deepEqual(await readInvocationLog(logPath), []);
+	}
+}
 
 test(
 	"registered upgrade leaves an existing managed page and refs intact",
@@ -40,33 +171,37 @@ else process.stdout.write(JSON.stringify({ success: true, data: { url: ${JSON.st
 					const opened = await executeRegisteredTool(harness.tool, harness.ctx, {
 						args: ["open", url],
 					});
-					assert.equal(opened.isError, false, opened.content[0]?.text);
+					const openedDetails = readRecord(opened.details);
+					assert.equal(opened.isError, false, opened.content[0].text);
 					const snapshot = await executeRegisteredTool(harness.tool, harness.ctx, {
 						args: ["snapshot", "-i"],
 					});
-					assert.equal(snapshot.isError, false, snapshot.content[0]?.text);
+					const snapshotDetails = readRecord(snapshot.details);
+					assert.equal(snapshot.isError, false, snapshot.content[0].text);
 					const upgrade = await executeRegisteredTool(harness.tool, harness.ctx, {
 						args: ["upgrade"],
 						sessionMode: "fresh",
 					});
-					assert.equal(upgrade.isError, false, upgrade.content[0]?.text);
-					assert.equal(upgrade.details?.sessionName, undefined);
+					const upgradeDetails = readRecord(upgrade.details);
+					assert.equal(upgrade.isError, false, upgrade.content[0].text);
+					assert.equal(upgradeDetails.sessionName, undefined);
 					const read = await executeRegisteredTool(harness.tool, harness.ctx, {
 						args: ["get", "value", "@e1"],
 					});
-					assert.equal(read.isError, false, read.content[0]?.text);
-					assert.equal(read.details?.sessionName, opened.details?.sessionName);
-					assert.equal(read.details?.refSnapshot, undefined);
+					const readDetails = readRecord(read.details);
+					assert.equal(read.isError, false, read.content[0].text);
+					assert.equal(readDetails.sessionName, openedDetails.sessionName);
+					assert.equal(readDetails.refSnapshot, undefined);
 					assert.deepEqual(
 						SessionPageState.fromBranch(harness.ctx.sessionManager.getBranch()).get(
-							String(read.details?.sessionName),
+							readString(readDetails.sessionName),
 						).refSnapshot,
-						snapshot.details?.refSnapshot,
+						snapshotDetails.refSnapshot,
 					);
-					assert.deepEqual((read.details?.sessionTabTarget as { url: string }).url, url);
+					assert.deepEqual(readRecord(readDetails.sessionTabTarget).url, url);
 					assert.deepEqual(
 						(await readInvocationLog(logPath))
-							.filter((row) => row.args.includes("upgrade"))
+							.filter((row) => readArray(row.args).map(readString).includes("upgrade"))
 							.map((row) => row.args),
 						[["--json", "upgrade"]],
 					);
@@ -136,16 +271,7 @@ if (mode === 'structured-error') {
 						}
 						const harness = createExtensionHarness({ cwd: root });
 						const controller = new AbortController();
-						const args =
-							mode === "ordinary-json"
-								? ["snapshot", "-i"]
-								: mode === "unsupported-upgrade-shape"
-									? ["upgrade", "future"]
-									: mode === "nonzero-text"
-										? ["--json", "false", "upgrade"]
-										: mode === "nonzero-json" || mode === "structured-error"
-											? ["--json", "upgrade"]
-											: ["upgrade"];
+						const args = upgradeArgs(mode);
 						const realSetTimeout = setTimeout;
 						if (mode === "timeout") {
 							t.mock.timers.enable({ apis: ["setTimeout"] });
@@ -158,22 +284,7 @@ if (mode === 'structured-error') {
 						);
 						try {
 							if (mode === "abort" || mode === "timeout") {
-								const deadline = Date.now() + 5000;
-								while (true) {
-									try {
-										await readFile(marker);
-										break;
-									} catch (error) {
-										if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
-											throw error;
-										}
-									}
-									assert.ok(
-										Date.now() < deadline,
-										"the controlled upgrade child must install its signal handler before timeout or abort",
-									);
-									await new Promise((resolve) => realSetTimeout(resolve, 5));
-								}
+								await waitForUpgradeSignalHandler(marker, realSetTimeout);
 								if (mode === "timeout") {
 									t.mock.timers.tick(500);
 								} else {
@@ -181,81 +292,14 @@ if (mode === 'structured-error') {
 								}
 							}
 							const result = await pending;
+							const resultDetails = readRecord(result.details);
 							assert.equal(result.isError, true);
-							assert.equal(result.details?.resultCategory, "failure");
-							const expectedCategory =
-								mode === "timeout"
-									? "timeout"
-									: mode === "abort"
-										? "aborted"
-										: mode === "missing-binary"
-											? "missing-binary"
-											: mode === "ordinary-json" || mode === "unsupported-upgrade-shape"
-												? "parse-failure"
-												: "upstream-error";
-							assert.equal(
-								result.details?.failureCategory,
-								expectedCategory,
-								result.content[0]?.text,
-							);
+							assert.equal(resultDetails.resultCategory, "failure");
+							const expectedCategory = upgradeFailureCategory(mode);
+							assert.equal(resultDetails.failureCategory, expectedCategory, result.content[0].text);
 							assert.doesNotMatch(JSON.stringify(result), /upgrade-secret|stderr-secret/);
-							if (mode.startsWith("nonzero")) {
-								assert.equal(result.details?.exitCode, 7);
-								assert.equal(result.details?.parseError, undefined);
-								assert.match(String(result.details?.data), /Detected installation via npm/);
-								if (mode === "nonzero-text") {
-									assert.equal(
-										JSON.stringify(result.content).split("Detected installation via npm").length -
-											1,
-										1,
-										"explicit text stdout is rendered only once",
-									);
-								}
-								if (mode === "nonzero-json") {
-									const json = JSON.parse(result.content[0]?.text ?? "");
-									assert.equal(json.success, false);
-									assert.match(json.error, /Native upgrade failed/);
-									assert.match(json.data, /Detected installation via npm/);
-								} else {
-									assert.match(
-										JSON.stringify(result.content),
-										/Native upgrade failed[\s\S]*Detected installation via npm/,
-									);
-								}
-							}
-							if (mode === "large-nonzero") {
-								assert.equal((result.details?.data as { compacted?: boolean }).compacted, true);
-								assert.ok(
-									JSON.stringify(result.content).length < 8000,
-									"failed upgrade logs must use the existing bounded presentation",
-								);
-								const spill = await readFile(String(result.details?.fullOutputPath), "utf8");
-								assert.match(spill, /Detected installation via npm/);
-								assert.equal(spill.split("npm install progress").length - 1, 2000);
-								assert.doesNotMatch(spill, /upgrade-secret/);
-							}
-							if (mode === "timeout" || mode === "abort") {
-								// POSIX runs the handler; Windows taskkill forcibly closes the shell with 1.
-								assert.equal(
-									result.details?.exitCode,
-									process.platform === "win32" ? 1 : 0,
-									"native termination status must retain cancellation/timeout failure",
-								);
-								assert.equal(result.details?.parseError, undefined);
-								if (mode === "timeout") {
-									assert.equal(result.details?.timedOut, true);
-								}
-								const pid = Number(await readFile(marker, "utf8"));
-								assert.throws(() => process.kill(pid, 0), { code: "ESRCH" });
-								assert.deepEqual(
-									(await readInvocationLog(logPath)).map((row) => row.args),
-									[["--json", "upgrade"]],
-								);
-							}
-							if (mode === "missing-binary") {
-								assert.equal(result.details?.agentBrowserStarted, false);
-								assert.deepEqual(await readInvocationLog(logPath), []);
-							}
+							await assertUpgradeFailureLogs(mode, result);
+							await assertUpgradeTermination(mode, result, marker, logPath);
 						} finally {
 							if (mode === "timeout") {
 								t.mock.timers.reset();
@@ -297,13 +341,14 @@ process.stdout.write(${JSON.stringify(` \n${upgradeText}\n\n`)});`,
 						args,
 						outputPath,
 					});
-					assert.equal(result.isError, false, result.content[0]?.text);
-					assert.equal(result.details?.resultCategory, "success");
-					assert.equal(result.details?.successCategory, "completed");
-					assert.equal(result.details?.inspection, undefined);
-					assert.equal(result.details?.parseError, undefined);
-					assert.equal(result.details?.managedSessionOutcome, undefined);
-					assert.equal(result.details?.data, upgradeText);
+					const resultDetails = readRecord(result.details);
+					assert.equal(result.isError, false, result.content[0].text);
+					assert.equal(resultDetails.resultCategory, "success");
+					assert.equal(resultDetails.successCategory, "completed");
+					assert.equal(resultDetails.inspection, undefined);
+					assert.equal(resultDetails.parseError, undefined);
+					assert.equal(resultDetails.managedSessionOutcome, undefined);
+					assert.equal(resultDetails.data, upgradeText);
 					const metadata = {
 						success: true,
 						resultCategory: "success",
@@ -311,18 +356,24 @@ process.stdout.write(${JSON.stringify(` \n${upgradeText}\n\n`)});`,
 						...(args.includes("--session") ? { sessionName: "caller", namespace: "up" } : {}),
 					};
 					if (args.includes("--json")) {
-						assert.deepEqual(JSON.parse(result.content[0]?.text ?? ""), {
+						// Exhaustive fixture variant (args.includes("--json")): this selected path must satisfy its own contract.
+						// oxlint-disable-next-line node-test/no-conditional-assertion
+						assert.deepEqual(readRecord(JSON.parse(result.content[0].text ?? "")), {
 							...metadata,
 							data: upgradeText,
 							summary: "Detected installation via npm.",
 						});
 					} else {
+						// Exhaustive fixture variant (args.includes("--json")): this selected path must satisfy its own contract.
+						// oxlint-disable-next-line node-test/no-conditional-assertion
 						assert.equal(
-							result.content[0]?.text,
+							result.content[0].text,
 							`${upgradeText}\n\nObservation: ${JSON.stringify(metadata)}`,
 						);
 					}
-					if (outputPath) {
+					if (outputPath !== undefined) {
+						// Exhaustive fixture variant (outputPath !== undefined): this selected path must satisfy its own contract.
+						// oxlint-disable-next-line node-test/no-conditional-assertion
 						assert.equal(await readFile(outputPath, "utf8"), upgradeText);
 					}
 					assert.deepEqual(

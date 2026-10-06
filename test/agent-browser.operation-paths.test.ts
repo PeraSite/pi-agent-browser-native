@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { join, resolve } from "node:path";
 import test from "node:test";
+import { readString } from "./helpers/assertions.js";
 import { resolveOperationPaths } from "../extensions/agent-browser/lib/orchestration/operation-paths.js";
 import { getUpstreamEffectiveBatchSteps } from "../extensions/agent-browser/lib/orchestration/batch-stdin.js";
 
@@ -127,11 +128,15 @@ test("operation paths bind only native file operands, preserving literals and ab
 		],
 	];
 	for (const [args, expected] of cases) {
+		// The fixed, nonempty path table checks every operand and its already-absolute form.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.deepEqual(
 			resolveOperationPaths(args, undefined, cwd).args,
 			expected,
 			JSON.stringify(args),
 		);
+		// The fixed, nonempty path table checks every operand and its already-absolute form.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.deepEqual(
 			resolveOperationPaths(expected, undefined, cwd).args,
 			expected,
@@ -168,7 +173,7 @@ test("raw and nested batch paths bind without dispatching ignored stdin or clean
 		]),
 		cwd,
 	);
-	assert.deepEqual(JSON.parse(stdin.stdin!), [
+	assert.deepEqual(JSON.parse(readString(stdin.stdin)), [
 		["screenshot", join(cwd, "apostrophe's.png")],
 		["pdf", join(cwd, "--quick"), "ignored.pdf"],
 	]);

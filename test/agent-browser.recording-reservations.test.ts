@@ -70,7 +70,7 @@ test("recording replay rejects relative storage paths without changing display p
 	const branch = [
 		valid,
 		...[{ absolutePath: "video.webm" }, { absolutePath: "" }, { cwd: "." }, { cwd: "" }].map(
-			(invalid, index) => ({ ...valid, ...invalid, sessionName: `invalid-${index}` }),
+			(invalid, index) => Object.assign({}, valid, invalid, { sessionName: `invalid-${index}` }),
 		),
 		{ version: 1, state: "closed", sessionName: "closed" },
 	].map((data) => ({ type: "custom", customType: RECORDING_RESERVATION_ENTRY_TYPE, data }));
@@ -109,9 +109,10 @@ test("contact-sheet reservations survive replay and retire with their video", ()
 	for (const transition of transitions) {
 		appendRecordingReservationTransition(
 			{
-				appendEntry: (customType: string, data: unknown) =>
-					branch.push({ type: "custom", customType, data }),
-			} as never,
+				appendEntry: (customType: string, data: unknown) => {
+					branch.push({ type: "custom", customType, data });
+				},
+			},
 			transition,
 		);
 	}
@@ -143,41 +144,52 @@ test("recording reservations distinguish namespace plus session identity", () =>
 
 test("recording reservation branch entries survive bounded manifest eviction and retire exactly", () => {
 	const appended: Array<{ customType: string; data: unknown }> = [];
-	const appendEntry = (customType: string, data: unknown) => appended.push({ customType, data });
+	const appendEntry = (customType: string, data: unknown) => {
+		appended.push({ customType, data });
+	};
 	const alpha = pendingArtifact("shared", "alpha", "alpha.webm");
 	const beta = pendingArtifact("shared", "beta", "beta.webm");
-	appendRecordingReservationTransition({ appendEntry } as never, {
-		reservation: {
-			absolutePath: alpha.absolutePath,
-			cwd: alpha.cwd ?? "/tmp",
-			namespace: alpha.namespace,
-			path: alpha.path,
-			sessionName: alpha.session ?? "",
+	appendRecordingReservationTransition(
+		{ appendEntry },
+		{
+			reservation: {
+				absolutePath: alpha.absolutePath,
+				cwd: alpha.cwd ?? "/tmp",
+				namespace: alpha.namespace,
+				path: alpha.path,
+				sessionName: alpha.session ?? "",
+			},
+			state: "active",
 		},
-		state: "active",
-	});
-	appendRecordingReservationTransition({ appendEntry } as never, {
-		reservation: {
-			absolutePath: beta.absolutePath,
-			cwd: beta.cwd ?? "/tmp",
-			namespace: beta.namespace,
-			path: beta.path,
-			sessionName: beta.session ?? "",
+	);
+	appendRecordingReservationTransition(
+		{ appendEntry },
+		{
+			reservation: {
+				absolutePath: beta.absolutePath,
+				cwd: beta.cwd ?? "/tmp",
+				namespace: beta.namespace,
+				path: beta.path,
+				sessionName: beta.session ?? "",
+			},
+			state: "active",
 		},
-		state: "active",
-	});
-	appendRecordingReservationTransition({ appendEntry } as never, {
-		reservation: {
-			absolutePath: alpha.absolutePath,
-			cwd: alpha.cwd ?? "/tmp",
-			namespace: alpha.namespace,
-			path: alpha.path,
-			sessionName: alpha.session ?? "",
+	);
+	appendRecordingReservationTransition(
+		{ appendEntry },
+		{
+			reservation: {
+				absolutePath: alpha.absolutePath,
+				cwd: alpha.cwd ?? "/tmp",
+				namespace: alpha.namespace,
+				path: alpha.path,
+				sessionName: alpha.session ?? "",
+			},
+			state: "closed",
 		},
-		state: "closed",
-	});
+	);
 	const branch = [
-		...appended.slice(0, 2).map((entry) => ({ type: "custom", ...entry })),
+		...appended.slice(0, 2).map((entry) => Object.assign({ type: "custom" }, entry)),
 		{
 			type: "message",
 			message: {
@@ -222,35 +234,43 @@ test("recording reservation branch entries survive bounded manifest eviction and
 
 test("recording reservation transition replay keeps the newest pending path authoritative", () => {
 	const appended: Array<{ customType: string; data: unknown }> = [];
-	const appendEntry = (customType: string, data: unknown) => appended.push({ customType, data });
+	const appendEntry = (customType: string, data: unknown) => {
+		appended.push({ customType, data });
+	};
 	const older = pendingArtifact("shared", "scope", "older.webm");
 	const newer = pendingArtifact("shared", "scope", "newer.webm");
-	appendRecordingReservationTransition({ appendEntry } as never, {
-		reservation: {
-			absolutePath: older.absolutePath,
-			cwd: older.cwd ?? "/tmp",
-			namespace: older.namespace,
-			path: older.path,
-			sessionName: older.session ?? "",
+	appendRecordingReservationTransition(
+		{ appendEntry },
+		{
+			reservation: {
+				absolutePath: older.absolutePath,
+				cwd: older.cwd ?? "/tmp",
+				namespace: older.namespace,
+				path: older.path,
+				sessionName: older.session ?? "",
+			},
+			state: "closed",
 		},
-		state: "closed",
-	});
-	appendRecordingReservationTransition({ appendEntry } as never, {
-		reservation: {
-			absolutePath: newer.absolutePath,
-			cwd: newer.cwd ?? "/tmp",
-			namespace: newer.namespace,
-			path: newer.path,
-			sessionName: newer.session ?? "",
+	);
+	appendRecordingReservationTransition(
+		{ appendEntry },
+		{
+			reservation: {
+				absolutePath: newer.absolutePath,
+				cwd: newer.cwd ?? "/tmp",
+				namespace: newer.namespace,
+				path: newer.path,
+				sessionName: newer.session ?? "",
+			},
+			state: "active",
 		},
-		state: "active",
-	});
+	);
 	const newestFirstEntries = [
 		pendingManifestEntry("shared", "scope", "newer.webm", 2),
 		pendingManifestEntry("shared", "scope", "older.webm", 1),
 	];
 	const branch = [
-		...appended.map((entry) => ({ type: "custom", ...entry })),
+		...appended.map((entry) => Object.assign({ type: "custom" }, entry)),
 		{
 			type: "message",
 			message: {

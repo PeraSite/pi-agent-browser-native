@@ -1,3 +1,10 @@
+import {
+	hasErrorCode,
+	readArray,
+	readNumber,
+	readRecord,
+	readString,
+} from "./helpers/assertions.js";
 /**
  * Purpose: Verify the agent-browser subprocess wrapper and parent environment pass-through behavior.
  * Responsibilities: Assert stdout spill handling, temp-budget failure behavior, full-payload parsing, and environment forwarding constraints.
@@ -206,13 +213,7 @@ process.stdout.write(JSON.stringify({ success: true, data: { allowFileAccessEnv:
 						cwd: tempDir,
 					});
 					const parsed = await parseAgentBrowserEnvelope(result.stdout);
-					const data = parsed.envelope?.data as {
-						allowFileAccessEnv?: string | null;
-						args?: string[];
-						config?: string;
-						configContent?: string | null;
-						envArgs?: string | null;
-					};
+					const data = readRecord(parsed.envelope?.data);
 					assert.deepEqual(data.args, [
 						"--allow-file-access",
 						"true",
@@ -241,10 +242,7 @@ process.stdout.write(JSON.stringify({ success: true, data: { allowFileAccessEnv:
 						preserveAttachedBrowserSession: true,
 					});
 					const parsed = await parseAgentBrowserEnvelope(result.stdout);
-					const data = parsed.envelope?.data as {
-						allowFileAccessEnv?: string | null;
-						args?: string[];
-					};
+					const data = readRecord(parsed.envelope?.data);
 					assert.equal(data.allowFileAccessEnv, "true");
 					assert.deepEqual(data.args, ["--allow-file-access", "false", "get", "url"]);
 				},
@@ -263,7 +261,7 @@ test("process start identity commands prefer system paths before PATH and keep n
 	);
 	assert.deepEqual(
 		posixCommands.map((command) => command.args),
-		Array(3).fill(["-p", "123", "-o", "lstart="]),
+		Array.from({ length: 3 }, () => ["-p", "123", "-o", "lstart="]),
 	);
 	assert.deepEqual(buildProcessStartIdentityCommands(123, "darwin"), posixCommands);
 	assert.deepEqual(buildProcessStartIdentityCommands(0, "linux"), []);
@@ -290,11 +288,11 @@ test("process start identity commands prefer system paths before PATH and keep n
 		[join(dirname(process.execPath), "ps"), "/bin/ps", "/usr/bin/ps"],
 	);
 	const windows = buildProcessStartIdentityCommand(123, "win32");
-	assert.match(windows?.file ?? "", /(?:^|[\\/])powershell\.exe$/i);
+	assert.match(readString(windows?.file ?? ""), /(?:^|[\\/])powershell\.exe$/i);
 	assert.equal(win32.isAbsolute(windows?.file ?? ""), true);
-	assert.ok(windows?.args.includes("-NonInteractive"));
-	assert.match(windows?.args.at(-1) ?? "", /Get-Process -Id 123/);
-	assert.match(windows?.args.at(-1) ?? "", /win32-powershell-ticks-v1:/);
+	assert.equal(windows?.args.includes("-NonInteractive"), true);
+	assert.match(readString(windows.args.at(-1) ?? ""), /Get-Process -Id 123/);
+	assert.match(readString(windows.args.at(-1) ?? ""), /win32-powershell-ticks-v1:/);
 	assert.equal(buildProcessStartIdentityCommand(0, "win32"), undefined);
 	assert.equal(normalizeProcessStartIdentity("  638000000000000000\r\n"), "638000000000000000");
 	assert.equal(
@@ -332,12 +330,11 @@ test("writeFakeAgentBrowserBinary installs Windows cmd launcher when platform is
 		const cmdText = await readFile(join(tempDir, "agent-browser.cmd"), "utf8");
 
 		assert.equal(launcherPath, join(tempDir, "agent-browser.cmd"));
-		assert.match(cmdText, /@ECHO OFF/i);
-		assert.match(cmdText, /agent-browser-fake\.cjs/);
-		assert.match(cmdText, /" %\*\r\n$/);
-		await assert.rejects(
-			stat(join(tempDir, "agent-browser")),
-			(error: NodeJS.ErrnoException) => error.code === "ENOENT",
+		assert.match(readString(cmdText), /@ECHO OFF/i);
+		assert.match(readString(cmdText), /agent-browser-fake\.cjs/);
+		assert.match(readString(cmdText), /" %\*\r\n$/);
+		await assert.rejects(stat(join(tempDir, "agent-browser")), (error: unknown) =>
+			hasErrorCode(error, "ENOENT"),
 		);
 	} finally {
 		await rm(tempDir, { force: true, maxRetries: 5, recursive: true, retryDelay: 100 });
@@ -432,9 +429,9 @@ test("agent-browser socket path preflight reports long configured roots before u
 		platform: "linux", // Exercise the Unix limit even when the test runner is Windows.
 		socketDir,
 	});
-	assert.match(error ?? "", /Unix socket path would be \d+ bytes \(max 103\)/);
-	assert.match(error ?? "", /PI_AGENT_BROWSER_SOCKET_DIR/);
-	assert.match(error ?? "", /retrying sessionMode "fresh" cannot shorten/);
+	assert.match(readString(error ?? ""), /Unix socket path would be \d+ bytes \(max 103\)/);
+	assert.match(readString(error ?? ""), /PI_AGENT_BROWSER_SOCKET_DIR/);
+	assert.match(readString(error ?? ""), /retrying sessionMode "fresh" cannot shorten/);
 	assert.equal(
 		getAgentBrowserSocketPathValidationError({
 			args: ["--session", "s", "open", "https://example.com"],
@@ -455,7 +452,8 @@ test("agent-browser socket path preflight reports long configured roots before u
 test("agent-browser socket storage rejects unsafe permissions, ancestry, symlinks, and ownership", async (context) => {
 	const uid = typeof process.getuid === "function" ? process.getuid() : undefined;
 	if (uid === undefined) {
-		return context.skip("POSIX ownership metadata is unavailable");
+		context.skip("POSIX ownership metadata is unavailable");
+		return;
 	}
 	const tempDir = await mkdtemp(join(tmpdir(), "pi-agent-browser-socket-security-"));
 	try {
@@ -463,7 +461,7 @@ test("agent-browser socket storage rejects unsafe permissions, ancestry, symlink
 		await mkdir(insecureDir, { mode: 0o700 });
 		await chmod(insecureDir, 0o777);
 		assert.match(
-			(await getAgentBrowserSocketDirValidationError(insecureDir, uid)) ?? "",
+			readString((await getAgentBrowserSocketDirValidationError(insecureDir, uid)) ?? ""),
 			/the directory mode is 777, not 700/,
 		);
 		assert.equal((await stat(insecureDir)).mode & 0o777, 0o777);
@@ -473,18 +471,20 @@ test("agent-browser socket storage rejects unsafe permissions, ancestry, symlink
 		assert.equal((await stat(secureDir)).mode & 0o777, 0o700);
 		await symlink(insecureDir, join(secureDir, "planted"), "dir");
 		assert.match(
-			(await getAgentBrowserSocketDirValidationError(secureDir, uid)) ?? "",
+			readString((await getAgentBrowserSocketDirValidationError(secureDir, uid)) ?? ""),
 			/foreign-owned, symlink, special, or excessively deep/,
 		);
 
 		const symlinkPath = join(tempDir, "link");
 		await symlink(insecureDir, symlinkPath, "dir");
 		assert.match(
-			(await getAgentBrowserSocketDirValidationError(symlinkPath, uid)) ?? "",
+			readString((await getAgentBrowserSocketDirValidationError(symlinkPath, uid)) ?? ""),
 			/the path is not a directory/,
 		);
 		assert.match(
-			(await getAgentBrowserSocketDirValidationError(join(symlinkPath, "socket"), uid)) ?? "",
+			readString(
+				(await getAgentBrowserSocketDirValidationError(join(symlinkPath, "socket"), uid)) ?? "",
+			),
 			/an ancestor is writable, foreign-owned/,
 		);
 
@@ -492,7 +492,9 @@ test("agent-browser socket storage rejects unsafe permissions, ancestry, symlink
 		await mkdir(unsafeParent, { mode: 0o700 });
 		await chmod(unsafeParent, 0o777);
 		assert.match(
-			(await getAgentBrowserSocketDirValidationError(join(unsafeParent, "socket"), uid)) ?? "",
+			readString(
+				(await getAgentBrowserSocketDirValidationError(join(unsafeParent, "socket"), uid)) ?? "",
+			),
 			/an ancestor is writable, foreign-owned/,
 		);
 
@@ -500,7 +502,7 @@ test("agent-browser socket storage rejects unsafe permissions, ancestry, symlink
 		await mkdir(foreignDir, { mode: 0o700 });
 		// A different validating uid sees the trusted temp ancestry itself as foreign, so ancestry rejects first.
 		assert.match(
-			(await getAgentBrowserSocketDirValidationError(foreignDir, uid + 1)) ?? "",
+			readString((await getAgentBrowserSocketDirValidationError(foreignDir, uid + 1)) ?? ""),
 			/an ancestor is writable, foreign-owned/,
 		);
 	} finally {
@@ -514,9 +516,10 @@ test(
 	async (context) => {
 		const uid = typeof process.getuid === "function" ? process.getuid() : undefined;
 		if (uid !== 0) {
-			return context.skip(
+			context.skip(
 				"Creating root-owned aliases and foreign-owned intermediate links requires actual uid 0",
 			);
+			return;
 		}
 		const tempDir = await mkdtemp(join(tmpdir(), "pi-agent-browser-socket-alias-"));
 		try {
@@ -552,6 +555,8 @@ test(
 				["relative-parent", "pivot/../sibling", true],
 				["relative-unsafe-parent", "unsafe-pivot/..", false],
 			] as const) {
+				// Subtests share the alias directory and its cleanup checks; finish each before creating the next alias.
+				// oxlint-disable-next-line no-await-in-loop
 				await context.test(name, async () => {
 					const alias = join(aliases, name);
 					await symlink(target, alias, "dir");
@@ -562,11 +567,15 @@ test(
 					assert.equal(await readlink(alias), target);
 					assert.deepEqual(await readdir(aliases), entriesBefore);
 					if (accepted) {
+						// Exhaustive fixture variant (accepted): this selected path must satisfy its own contract.
+						// oxlint-disable-next-line node-test/no-conditional-assertion
 						assert.equal((await stat(socketDir)).mode & 0o777, 0o700);
 					} else {
+						// Exhaustive fixture variant (accepted): this selected path must satisfy its own contract.
+						// oxlint-disable-next-line node-test/no-conditional-assertion
 						await assert.rejects(
 							lstat(socketDir),
-							(error: NodeJS.ErrnoException) => error.code === "ENOENT" || error.code === "ELOOP",
+							(error: unknown) => hasErrorCode(error, "ENOENT") || hasErrorCode(error, "ELOOP"),
 						);
 					}
 				});
@@ -603,11 +612,13 @@ test(
 					assert.equal(result.agentBrowserStarted, true);
 					assert.equal(result.spawnError, undefined);
 					const parsed = await parseAgentBrowserEnvelope(result.stdout);
-					assert.equal((parsed.envelope?.data as { socketDir?: string }).socketDir, socketPath);
+					assert.equal(readRecord(parsed.envelope?.data).socketDir, socketPath);
 					const metadata = await lstat(socketPath);
 					assert.equal(metadata.isDirectory(), true);
 					assert.equal(metadata.isSymbolicLink(), false);
 					if (process.platform !== "win32") {
+						// Exhaustive fixture variant (process.platform !== "win32"): this selected path must satisfy its own contract.
+						// oxlint-disable-next-line node-test/no-conditional-assertion
 						assert.equal(metadata.mode & 0o777, 0o700);
 					}
 					// Windows validates a real, non-redirected directory, not POSIX mode bits.
@@ -639,7 +650,7 @@ test("runAgentBrowserProcess fails before spawn for unsafe socket storage", asyn
 				env: { AGENT_BROWSER_SOCKET_DIR: socketPath },
 			});
 			assert.equal(result.agentBrowserStarted, false);
-			assert.match(result.spawnError?.message ?? "", /socket storage.*symlink/i);
+			assert.match(readString(result.spawnError?.message ?? ""), /socket storage.*symlink/i);
 			await assert.rejects(readFile(markerPath, "utf8"));
 		});
 	} finally {
@@ -669,10 +680,7 @@ test("runAgentBrowserProcess does not spawn already-aborted calls", async () => 
 		assert.equal(processResult.aborted, true);
 		assert.equal(processResult.agentBrowserStarted, false);
 		assert.equal(processResult.spawnError, undefined);
-		await assert.rejects(
-			stat(startedPath),
-			(error: NodeJS.ErrnoException) => error.code === "ENOENT",
-		);
+		await assert.rejects(stat(startedPath), (error: unknown) => hasErrorCode(error, "ENOENT"));
 		assert.equal(getEventListeners(controller.signal, "abort").length, 0);
 	} finally {
 		await rm(tempDir, { force: true, maxRetries: 5, recursive: true, retryDelay: 100 });
@@ -728,13 +736,22 @@ for (const mode of ["timeout", "abort"] as const) {
 			const deadline = Date.now() + 5_000;
 			while (Date.now() < deadline) {
 				try {
+					// Read the child-published PID after each retry delay so cancellation targets the live child.
+					// oxlint-disable-next-line no-await-in-loop
 					pid = Number(await readFile(pidPath, "utf8"));
 					break;
 				} catch {
-					await new Promise((resolve) => setTimeout(resolve, 5));
+					// Wait for the child to publish its PID before another dependent read attempt.
+					// oxlint-disable-next-line no-await-in-loop
+					await new Promise((resolve) => {
+						setTimeout(resolve, 5);
+					});
 				}
 			}
-			assert.ok(pid && Number.isInteger(pid), "fixture must start before cancellation");
+			assert.ok(
+				pid !== undefined && Number.isInteger(pid) && pid > 0,
+				"fixture must start before cancellation",
+			);
 			if (mode === "abort") {
 				controller.abort();
 			}
@@ -744,7 +761,7 @@ for (const mode of ["timeout", "abort"] as const) {
 			assert.equal(result.aborted, mode === "abort");
 			assert.equal(getEventListeners(controller.signal, "abort").length, 0);
 			assert.throws(
-				() => process.kill(pid as number, 0),
+				() => process.kill(readNumber(pid), 0),
 				{ code: "ESRCH" },
 				"fixture must be gone at return, not eventually",
 			);
@@ -752,7 +769,7 @@ for (const mode of ["timeout", "abort"] as const) {
 		} finally {
 			controller.abort();
 			await pending;
-			if (pid) {
+			if (pid !== undefined) {
 				try {
 					process.kill(pid, 0);
 					if (process.platform === "win32") {
@@ -855,15 +872,15 @@ test("runAgentBrowserProcess resolves after exit when descendants keep stdio han
 		assert.equal(processResult.exitCode, 0);
 		assert.equal(processResult.timedOut, false);
 		assert.equal(processResult.spawnError, undefined);
-		assert.match(processResult.stdout, /"ok":true/);
+		assert.match(readString(processResult.stdout), /"ok":true/);
 		assert.doesNotThrow(
-			() => process.kill(lingerPid as number, 0),
+			() => process.kill(readNumber(lingerPid), 0),
 			"expected the inherited-stdio descendant to still be alive after process resolution",
 		);
 	} finally {
 		if (Number.isInteger(lingerPid)) {
 			try {
-				process.kill(lingerPid as number, "SIGTERM");
+				process.kill(readNumber(lingerPid), "SIGTERM");
 			} catch {
 				// The linger process may have already exited.
 			}
@@ -910,7 +927,7 @@ test("runAgentBrowserProcess returns timeout exit code when descendants keep std
 	} finally {
 		if (Number.isInteger(lingerPid)) {
 			try {
-				process.kill(lingerPid as number, "SIGTERM");
+				process.kill(readNumber(lingerPid), "SIGTERM");
 			} catch {
 				// The linger process may have already exited.
 			}
@@ -930,6 +947,8 @@ test("runAgentBrowserProcess removes abort listeners after repeated successful r
 
 	try {
 		for (let index = 0; index < 5; index += 1) {
+			// Reuse one AbortSignal sequentially to detect listeners retained after each completed process.
+			// oxlint-disable-next-line no-await-in-loop
 			const processResult = await runAgentBrowserProcess({
 				args: ["snapshot"],
 				cwd: tempDir,
@@ -937,10 +956,20 @@ test("runAgentBrowserProcess removes abort listeners after repeated successful r
 				signal: controller.signal,
 			});
 
+			// Exhaustive fixture variant (index < 5): this selected path must satisfy its own contract.
+			// oxlint-disable-next-line node-test/no-conditional-assertion
 			assert.equal(processResult.exitCode, 0);
+			// Exhaustive fixture variant (index < 5): this selected path must satisfy its own contract.
+			// oxlint-disable-next-line node-test/no-conditional-assertion
 			assert.equal(processResult.agentBrowserStarted, true);
+			// Exhaustive fixture variant (index < 5): this selected path must satisfy its own contract.
+			// oxlint-disable-next-line node-test/no-conditional-assertion
 			assert.equal(processResult.spawnError, undefined);
+			// Exhaustive fixture variant (index < 5): this selected path must satisfy its own contract.
+			// oxlint-disable-next-line node-test/no-conditional-assertion
 			assert.equal(processResult.aborted, false);
+			// Exhaustive fixture variant (index < 5): this selected path must satisfy its own contract.
+			// oxlint-disable-next-line node-test/no-conditional-assertion
 			assert.equal(getEventListeners(controller.signal, "abort").length, 0);
 		}
 	} finally {
@@ -961,7 +990,7 @@ test("runAgentBrowserProcess removes abort listeners after spawn errors", async 
 		});
 
 		assert.equal(processResult.exitCode, 127);
-		assert.match(processResult.spawnError?.message ?? "", /ENOENT|agent-browser/);
+		assert.match(readString(processResult.spawnError?.message ?? ""), /ENOENT|agent-browser/);
 		assert.equal(processResult.aborted, false);
 		assert.equal(processResult.agentBrowserStarted, false);
 		assert.equal(getEventListeners(controller.signal, "abort").length, 0);
@@ -975,7 +1004,7 @@ test("runAgentBrowserProcess spills oversized stdout while parseAgentBrowserEnve
 	const fakeAgentBrowserPath = join(tempDir, "agent-browser");
 	const bigSnapshotRows = Array.from({ length: 7_000 }, (_, index) => {
 		const ref = `e${index + 1}`;
-		return `- generic \"Large process snapshot row ${index + 1} that forces stdout spilling without losing parseability\" [ref=${ref}] clickable [onclick]`;
+		return `- generic "Large process snapshot row ${index + 1} that forces stdout spilling without losing parseability" [ref=${ref}] clickable [onclick]`;
 	}).join("\\n");
 	const refsLiteral = Array.from(
 		{ length: 80 },
@@ -1030,10 +1059,10 @@ process.stdout.write(JSON.stringify(envelope));`,
 		});
 		assert.equal(parsed.parseError, undefined);
 		assert.equal(parsed.envelope?.success, true);
-		const snapshotData = parsed.envelope?.data as { snapshot?: string } | undefined;
-		assert.match(snapshotData?.snapshot ?? "", /Large process snapshot row 7000/);
+		const snapshotData = readRecord(parsed.envelope.data ?? {});
+		assert.match(readString(snapshotData.snapshot ?? ""), /Large process snapshot row 7000/);
 
-		if (processResult.stdoutSpillPath) {
+		if (processResult.stdoutSpillPath !== undefined) {
 			await rm(processResult.stdoutSpillPath, { force: true, maxRetries: 5, retryDelay: 100 });
 		}
 	} finally {
@@ -1065,9 +1094,14 @@ test(
 					env: { PATH: `${tempDir}${delimiter}${basePath}` },
 				});
 
-				assert.match(processResult.spawnError?.message ?? "", /temp spill budget exceeded/i);
-				if (processResult.stdoutSpillPath) {
+				assert.match(
+					readString(processResult.spawnError?.message ?? ""),
+					/temp spill budget exceeded/i,
+				);
+				if (processResult.stdoutSpillPath !== undefined) {
 					const spillStats = await stat(processResult.stdoutSpillPath);
+					// The budget-error assertion always runs; any retained optional spill must also stay bounded.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
 					assert.ok(spillStats.size <= 100000);
 					await rm(processResult.stdoutSpillPath, { force: true, maxRetries: 5, retryDelay: 100 });
 				}
@@ -1135,6 +1169,7 @@ if (args.includes("session") && args.includes("info")) {
 						sessionMode: "fresh",
 						args: ["open", "https://example.com/one"],
 					});
+					const firstOpenDetails = readRecord(firstOpen.details);
 					assert.equal(firstOpen.isError, false, JSON.stringify(firstOpen));
 
 					const freshOpen = await withPatchedEnv(
@@ -1149,20 +1184,15 @@ if (args.includes("session") && args.includes("info")) {
 
 					const { currentTempRoot } = await getSecureTempDebugState();
 					assert.equal(typeof currentTempRoot, "string");
-					const entries = await readdir(currentTempRoot as string);
+					const entries = await readdir(readString(currentTempRoot));
 					assert.deepEqual(
 						entries.filter((entry) => entry.startsWith("process-stdout-")),
 						[],
 					);
-					const closeDebug = JSON.parse(await readFile(closeDebugPath, "utf8")) as {
-						configContent: string | null;
-						envRestore: string | null;
-						restoreKey: string;
-						statePath: string;
-					};
+					const closeDebug = readRecord(JSON.parse(await readFile(closeDebugPath, "utf8")));
 					assert.equal(closeDebug.configContent, null);
 					assert.equal(closeDebug.envRestore, "replacement-key");
-					const firstSessionName = firstOpen.details?.sessionName as string;
+					const firstSessionName = readString(firstOpenDetails.sessionName);
 					assert.equal(
 						closeDebug.restoreKey,
 						createManagedSessionRestoreKey(
@@ -1174,20 +1204,20 @@ if (args.includes("session") && args.includes("info")) {
 					const ownershipManifest = (await readdir(sessions)).find((entry) =>
 						entry.startsWith(".pi-agent-browser-owned-snapshots-v2-"),
 					);
-					assert.ok(ownershipManifest);
+					assert.ok(ownershipManifest !== undefined);
 					const ownershipDirectory = join(sessions, ownershipManifest);
 					const ownershipRecord = (await readdir(ownershipDirectory)).find((entry) =>
 						entry.endsWith(".json"),
 					);
 					assert.ok(
-						ownershipRecord,
+						ownershipRecord !== undefined,
 						JSON.stringify({
 							close: closeDebug,
 							ownershipEntries: await readdir(ownershipDirectory),
 						}),
 					);
 					assert.match(
-						await readFile(join(ownershipDirectory, ownershipRecord), "utf8"),
+						readString(await readFile(join(ownershipDirectory, ownershipRecord), "utf8")),
 						/-auto\.json/,
 					);
 				},
@@ -1239,7 +1269,7 @@ if (isNavigationSummaryHelper) {
 
 				const { currentTempRoot } = await getSecureTempDebugState();
 				assert.equal(typeof currentTempRoot, "string");
-				const entries = await readdir(currentTempRoot as string);
+				const entries = await readdir(readString(currentTempRoot));
 				assert.deepEqual(
 					entries.filter((entry) => entry.startsWith("process-stdout-")),
 					[],
@@ -1304,15 +1334,7 @@ test(
 						}),
 					);
 					const parsed = await parseAgentBrowserEnvelope(processResult.stdout);
-					const data = parsed.envelope?.data as {
-						config?: string;
-						configContent?: string;
-						encryptionKey?: string;
-						home?: string;
-						userProfile?: string;
-						namespace?: string;
-						restore?: string;
-					};
+					const data = readRecord(parsed.envelope?.data);
 					assert.equal(data.encryptionKey, "a".repeat(64));
 					// Pin the native restore home; the other platform's variable remains caller-owned.
 					assert.equal(
@@ -1365,10 +1387,7 @@ test(
 						}),
 					);
 					const namespacedParsed = await parseAgentBrowserEnvelope(namespacedResult.stdout);
-					const namespacedData = namespacedParsed.envelope?.data as {
-						namespace?: string;
-						restore?: string;
-					};
+					const namespacedData = readRecord(namespacedParsed.envelope?.data);
 					assert.equal(namespacedData.namespace, "review-space");
 					assert.equal(
 						namespacedData.restore,
@@ -1398,11 +1417,7 @@ test(
 						}),
 					);
 					const closeParsed = await parseAgentBrowserEnvelope(closeResult.stdout);
-					const closeData = closeParsed.envelope?.data as {
-						args?: string[];
-						configContent?: string;
-						restore?: string | null;
-					};
+					const closeData = readRecord(closeParsed.envelope?.data);
 					assert.deepEqual(closeData.args, [
 						"--session",
 						"piab-managed",
@@ -1463,6 +1478,8 @@ test(
 						await chmod(markerPath, 0o644);
 					}
 					for (const nativeConfirmationDecision of [false, true]) {
+						// These variants share process environment or the last invocation log; finish each before the next.
+						// oxlint-disable-next-line no-await-in-loop
 						const result: ProcessRunResult = await withOwnedManagedSessionContext(context, () =>
 							runAgentBrowserProcess({
 								args: nativeConfirmationDecision
@@ -1475,12 +1492,15 @@ test(
 								ownedManagedSession: true,
 							}),
 						);
+						// Exhaustive fixture variant ([false, true]): this selected path must satisfy its own contract.
+						// oxlint-disable-next-line node-test/no-conditional-assertion
 						assert.equal(result.agentBrowserStarted, false);
-						assert.match(result.spawnError?.message ?? "", /checkout identity changed/);
+						// Exhaustive fixture variant ([false, true]): this selected path must satisfy its own contract.
+						// oxlint-disable-next-line node-test/no-conditional-assertion
+						assert.match(readString(result.spawnError?.message ?? ""), /checkout identity changed/);
 					}
-					await assert.rejects(
-						stat(startedPath),
-						(error: NodeJS.ErrnoException) => error.code === "ENOENT",
+					await assert.rejects(stat(startedPath), (error: unknown) =>
+						hasErrorCode(error, "ENOENT"),
 					);
 				},
 			);
@@ -1532,12 +1552,11 @@ test(
 					);
 					assert.equal(result.agentBrowserStarted, false);
 					assert.match(
-						result.spawnError?.message ?? "",
+						readString(result.spawnError?.message ?? ""),
 						/policy, storage, or checkout identity changed/,
 					);
-					await assert.rejects(
-						stat(startedPath),
-						(error: NodeJS.ErrnoException) => error.code === "ENOENT",
+					await assert.rejects(stat(startedPath), (error: unknown) =>
+						hasErrorCode(error, "ENOENT"),
 					);
 				},
 			);
@@ -1558,17 +1577,12 @@ test(
 			tempDir,
 			`require("node:fs").appendFileSync(${JSON.stringify(observedPath)}, JSON.stringify({ argv: process.argv.slice(2), sessionEnv: process.env.AGENT_BROWSER_SESSION ?? null, screenshotDirEnv: process.env.AGENT_BROWSER_SCREENSHOT_DIR ?? null, stateEnv: process.env.AGENT_BROWSER_STATE ?? null }) + "\\n");`,
 		);
-		const readLastObservation = async (): Promise<{
-			argv: string[];
-			sessionEnv: string | null;
-			screenshotDirEnv: string | null;
-			stateEnv: string | null;
-		}> => {
+		const readLastObservation = async (): Promise<Record<string, unknown>> => {
 			const lines = (await readFile(observedPath, "utf8"))
 				.split("\n")
 				.filter((line) => line.length > 0);
 			assert.ok(lines.length > 0, "fake upstream never ran");
-			return JSON.parse(lines[lines.length - 1] ?? "");
+			return readRecord(JSON.parse(lines[lines.length - 1] ?? ""));
 		};
 		execFileSync("git", ["init", "-q", tempDir], { stdio: "ignore" });
 		try {
@@ -1634,9 +1648,18 @@ test(
 					},
 				];
 				for (const options of passthroughRows) {
+					// These variants share process environment or the last invocation log; finish each before the next.
+					// oxlint-disable-next-line no-await-in-loop
 					const forwarded = await runAgentBrowserProcess({ ...options, cwd: tempDir });
+					// Exhaustive fixture variant (passthroughRows): this selected path must satisfy its own contract.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
 					assert.equal(forwarded.agentBrowserStarted, true);
-					assert.deepEqual(await readLastObservation(), {
+					// These variants share process environment or the last invocation log; finish each before the next.
+					// oxlint-disable-next-line no-await-in-loop
+					const observation = await readLastObservation();
+					// Exhaustive fixture variant (passthroughRows): this selected path must satisfy its own contract.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
+					assert.deepEqual(observation, {
 						argv: options.args,
 						sessionEnv: null,
 						screenshotDirEnv: options.env?.AGENT_BROWSER_SCREENSHOT_DIR ?? null,
@@ -1649,7 +1672,10 @@ test(
 					managedStatePageUrlUnknown: true,
 				});
 				assert.equal(unverified.agentBrowserStarted, false);
-				assert.match(unverified.spawnError?.message ?? "", /active page became unverified/);
+				assert.match(
+					readString(unverified.spawnError?.message ?? ""),
+					/active page became unverified/,
+				);
 			});
 		} finally {
 			await rm(tempDir, { force: true, recursive: true });
@@ -1712,6 +1738,8 @@ test(
 				],
 				["caller-headed", ["--headed"], undefined, undefined, false, null, false],
 			] as const) {
+				// These variants share process environment or the last invocation log; finish each before the next.
+				// oxlint-disable-next-line no-await-in-loop
 				await withPatchedEnv(
 					{
 						AGENT_BROWSER_AUTOSAVE_INTERVAL_MS: parentAutosave,
@@ -1743,10 +1771,9 @@ test(
 								? await withOwnedManagedSessionContext(context, run)
 								: await run();
 						const parsed = await parseAgentBrowserEnvelope(result.stdout);
-						assert.equal(
-							(parsed.envelope?.data as { autosave?: string | null } | undefined)?.autosave,
-							expected,
-						);
+						// Every headed/autosave/environment variant must satisfy its explicit subprocess contract.
+						// oxlint-disable-next-line node-test/no-conditional-assertion
+						assert.equal(readRecord(parsed.envelope?.data ?? {}).autosave, expected);
 					},
 				);
 			}
@@ -1805,18 +1832,8 @@ process.stdout.write(JSON.stringify(envelope));`,
 					assert.equal(processResult.exitCode, 0);
 					const parsed = await parseAgentBrowserEnvelope(processResult.stdout);
 					assert.equal(parsed.parseError, undefined);
-					const data = parsed.envelope?.data as {
-						args: string[];
-						agentBrowserConfig: string | null;
-						agentBrowserDefaultTimeout: string | null;
-						idleTimeout: string | null;
-						lang: string | null;
-						openaiApiKey: string | null;
-						pathStartsWithTemp: boolean;
-						secret: string | null;
-						socketDir: string | null;
-					};
-					assert.equal(data.args.includes("--allow-file-access"), false);
+					const data = readRecord(parsed.envelope?.data);
+					assert.equal(readArray(data.args).map(readString).includes("--allow-file-access"), false);
 					assert.equal(data.agentBrowserConfig, "/tmp/agent-browser.json");
 					assert.equal(data.agentBrowserDefaultTimeout, "25000");
 					assert.equal(data.idleTimeout, "1234");
@@ -1827,7 +1844,9 @@ process.stdout.write(JSON.stringify(envelope));`,
 						data.socketDir,
 						process.env.PI_AGENT_BROWSER_SOCKET_DIR ?? join(tempDir, "caller-sockets"),
 					);
-					if (data.socketDir) {
+					if (typeof data.socketDir === "string" && data.socketDir.length > 0) {
+						// The preceding equality requires the selected socket path; this guard narrows that same value.
+						// oxlint-disable-next-line node-test/no-conditional-assertion
 						assert.equal((await stat(data.socketDir)).isDirectory(), true);
 					}
 					assert.equal(data.pathStartsWithTemp, true);

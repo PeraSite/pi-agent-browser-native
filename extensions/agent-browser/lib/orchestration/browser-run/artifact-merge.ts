@@ -22,21 +22,20 @@ export function mergeBrowserRunArtifactManifest(
 	const changedEntries = updated.entries
 		.map((entry, index) => ({ entry, index }))
 		.filter(({ entry }) => initialEntries.get(getSessionArtifactManifestEntryKey(entry)) !== entry)
-		.sort(
-			(left, right) =>
-				left.entry.createdAtMs - right.entry.createdAtMs ||
+		.sort((left, right) => {
+			const timestampOrder = left.entry.createdAtMs - right.entry.createdAtMs;
+			if (timestampOrder !== 0 && !Number.isNaN(timestampOrder)) {
+				return timestampOrder;
+			}
+			const pendingOrder =
 				Number(
 					isPendingRecordingCommand(left.entry.command, left.entry.subcommand, left.entry.kind),
 				) -
-					Number(
-						isPendingRecordingCommand(
-							right.entry.command,
-							right.entry.subcommand,
-							right.entry.kind,
-						),
-					) ||
-				left.index - right.index,
-		)
+				Number(
+					isPendingRecordingCommand(right.entry.command, right.entry.subcommand, right.entry.kind),
+				);
+			return pendingOrder !== 0 ? pendingOrder : left.index - right.index;
+		})
 		.map(({ entry }) => entry);
 	return changedEntries.length === 0
 		? current

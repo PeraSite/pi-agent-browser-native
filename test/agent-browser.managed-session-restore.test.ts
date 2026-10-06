@@ -5,6 +5,7 @@
  */
 
 import assert from "node:assert/strict";
+import { readArray, readString } from "./helpers/assertions.js";
 import { execFileSync, spawn } from "node:child_process";
 import { once } from "node:events";
 import {
@@ -172,7 +173,11 @@ test("owned managed subprocesses pin canonical and default namespaces", async ()
 		);
 		for (const namespace of ["", "other"]) {
 			const args = ["--namespace", namespace, ...base.args];
+			// Both literal mismatched namespaces must remain outside the owned session context.
+			// oxlint-disable-next-line node-test/no-conditional-assertion
 			assert.equal(isOwnedManagedSessionTarget(args), false);
+			// Both literal mismatched namespaces must remain outside the owned session context.
+			// oxlint-disable-next-line node-test/no-conditional-assertion
 			assert.deepEqual(getOwnedManagedSessionNamespaceEnv({ ...base, args }), {});
 		}
 		assert.equal(isOwnedManagedSessionTarget(["--session", "caller-owned", "snapshot"]), false);
@@ -231,6 +236,8 @@ test("createManagedSessionRestoreKey is transcript- and checkout-generation-stab
 		);
 		if (process.platform !== "win32") {
 			symlinkSync(cwd, alias, "dir");
+			// Symlink identity is a POSIX variant; all platforms still check checkout/scope identity.
+			// oxlint-disable-next-line node-test/no-conditional-assertion
 			assert.equal(createManagedSessionRestoreKey(cwd), createManagedSessionRestoreKey(alias));
 		}
 		assert.match(createManagedSessionRestoreKey(cwd), /^piab-r2-[a-f0-9]{32}$/);
@@ -324,18 +331,26 @@ test("checkout-generation marker creation converges across processes", async () 
 			child.stdout.on("data", (chunk: Buffer) => {
 				stdout += chunk.toString("utf8");
 			});
-			child.stderr.on("data", (chunk: Buffer) => stderr.push(chunk));
+			child.stderr.on("data", (chunk: Buffer) => {
+				stderr.push(chunk);
+			});
 			return { exit: once(child, "exit"), getStdout: () => stdout, stderr };
 		});
 		const keys: string[] = [];
 		for (const result of children) {
-			const [code] = (await result.exit) as [number | null];
+			// Fixture transitions and their assertions run in order against this test's shared state.
+			// oxlint-disable-next-line no-await-in-loop
+			const [code] = readArray(await result.exit);
+			// Both eagerly spawned marker-race children must exit successfully before comparing keys.
+			// oxlint-disable-next-line node-test/no-conditional-assertion
 			assert.equal(code, 0, Buffer.concat(result.stderr).toString("utf8"));
 			keys.push(result.getStdout());
 		}
 		assert.equal(keys[0], keys[1]);
 		assert.match(keys[0] ?? "", /^piab-r2-/);
 		if (process.platform !== "win32") {
+			// POSIX marker permissions are checked here; all platforms check both child exits and keys.
+			// oxlint-disable-next-line node-test/no-conditional-assertion
 			assert.equal(
 				statSync(join(cwd, ".git", "pi-agent-browser-project-generation-v1.json")).mode & 0o777,
 				0o600,
@@ -393,9 +408,13 @@ test("getManagedSessionRestoreEnv isolates ownership and blocks incompatible lau
 	initializeGitProject(cwd);
 	const home = mkdtempSync(join(tmpdir(), "piab-restore-home-"));
 	const session = defaultManagedSession;
-	const restore = (args: string[], parentEnv: NodeJS.ProcessEnv = {}, stdin?: string) =>
+	const restore = (
+		args: readonly string[],
+		parentEnv: Readonly<NodeJS.ProcessEnv> = {},
+		stdin?: string,
+	) =>
 		getAndCommitManagedSessionRestoreEnv({
-			args,
+			args: [...args],
 			cwd,
 			ownedManagedSession: true,
 			parentEnv: { ...restoreHomeEnv(home), ...parentEnv },
@@ -549,19 +568,29 @@ test("getManagedSessionRestoreEnv isolates ownership and blocks incompatible lau
 		] satisfies string[][];
 		for (const args of incompatibleArgs) {
 			clearManagedSessionRestoreDisabled();
+			// Every literal incompatible launch row checks disabled restore after resetting shared state.
+			// oxlint-disable-next-line node-test/no-conditional-assertion
 			assert.deepEqual(restore(args), {}, args.join(" "));
+			// Every literal incompatible launch row checks disabled restore after resetting shared state.
+			// oxlint-disable-next-line node-test/no-conditional-assertion
 			assert.equal(isManagedSessionRestoreDisabled(session), true, args.join(" "));
 		}
 
 		for (const namespace of ["", "parent-owned"]) {
 			clearManagedSessionRestoreDisabled();
+			// Both literal compatible namespace variants check restore reuse without disabling it.
+			// oxlint-disable-next-line node-test/no-conditional-assertion
 			assert.deepEqual(
 				restore(["--json", "--session", session, "open", "https://app.example.com"], {
 					AGENT_BROWSER_NAMESPACE: namespace,
 				}),
 				expectedRestoreEnv(cwd),
 			);
+			// Both literal compatible namespace variants check restore reuse without disabling it.
+			// oxlint-disable-next-line node-test/no-conditional-assertion
 			assert.equal(isManagedSessionRestoreDisabled(session), false);
+			// Both literal compatible namespace variants check restore reuse without disabling it.
+			// oxlint-disable-next-line node-test/no-conditional-assertion
 			assert.deepEqual(
 				restore(["--json", "--session", session, "snapshot", "-i"]),
 				expectedRestoreEnv(cwd),
@@ -594,6 +623,8 @@ test("getManagedSessionRestoreEnv isolates ownership and blocks incompatible lau
 		];
 		for (const parentEnv of incompatibleEnvs) {
 			clearManagedSessionRestoreDisabled();
+			// Every literal incompatible environment row checks restore suppression after a state reset.
+			// oxlint-disable-next-line node-test/no-conditional-assertion
 			assert.deepEqual(
 				restore(["--json", "--session", session, "open", "https://app.example.com"], parentEnv),
 				{},
@@ -634,6 +665,8 @@ test("getManagedSessionRestoreEnv isolates ownership and blocks incompatible lau
 		for (const envName of ["AGENT_BROWSER_AUTO_CONNECT", "AGENT_BROWSER_WEBGPU"]) {
 			for (const disabledValue of ["", "0", "false", "no"]) {
 				clearManagedSessionRestoreDisabled();
+				// Both literal native switches exercise all four literal disabled-value spellings.
+				// oxlint-disable-next-line node-test/no-conditional-assertion
 				assert.deepEqual(
 					restore(["--json", "--session", session, "open", "https://app.example.com"], {
 						[envName]: disabledValue,
@@ -864,9 +897,11 @@ test("owned managed session context enables restore for matching helper probes o
 		assert.equal(validateManagedSessionRestoreContextForSpawn(options), true);
 		assert.equal(restoreState.hasDaemonRestoreKey(managed, "team-name"), false);
 		commitManagedSessionRestoreSuppression({ ...options, ownedManagedSession: true });
-		assert.equal(restoreState.getDaemonRestoreKey(managed, "team-name"), named?.restoreKey);
+		assert.equal(restoreState.getDaemonRestoreKey(managed, "team-name"), named.restoreKey);
 		assert.equal(restoreState.hasDaemonRestoreKey(managed), false);
 		for (const namespace of ["", "other"]) {
+			// Both literal mismatched namespaces must not reuse the captured restore context.
+			// oxlint-disable-next-line node-test/no-conditional-assertion
 			assert.deepEqual(
 				getManagedSessionRestoreEnv({
 					...options,
@@ -1465,9 +1500,17 @@ test(
 					restoreState: new ManagedSessionRestoreState(),
 				};
 				const context = buildOwnedManagedSessionRestoreContext({ ...options, reuseOnly: true });
+				// Fixture transitions and their assertions run in order against this test's shared state.
+				// oxlint-disable-next-line no-await-in-loop
 				await withOwnedManagedSessionContext(context, async () => {
+					// All three prepared symlink attacks check rejection without mutating restore state.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
 					assert.equal(validateManagedSessionRestoreContextForSpawn(options), false);
+					// All three prepared symlink attacks check rejection without mutating restore state.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
 					assert.deepEqual(getManagedSessionRestoreEnv(options), {});
+					// All three prepared symlink attacks check rejection without mutating restore state.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
 					assert.equal(options.restoreState.isDisabled("piab-managed"), false);
 				});
 			}
@@ -1506,6 +1549,8 @@ test("owned snapshot pruning persists close-proven paths and leaves unrecorded m
 		chmodSync(join(home, ".agent-browser"), 0o700);
 
 		for (const [index, suffix] of ["old", "middle", "new"].entries()) {
+			// The literal old/middle/new closes are checked in order before final retention assertions.
+			// oxlint-disable-next-line node-test/no-conditional-assertion
 			assert.equal(
 				pruneOwnedManagedSessionRestoreSnapshots({
 					cwd,
@@ -1520,10 +1565,12 @@ test("owned snapshot pruning persists close-proven paths and leaves unrecorded m
 		const manifest = readdirSync(sessions).find((name) =>
 			name.startsWith(".pi-agent-browser-owned-snapshots-v2-"),
 		);
-		assert.ok(manifest);
+		assert.ok(manifest !== undefined);
 		const manifestDirectory = join(sessions, manifest);
 		assert.equal(statSync(manifestDirectory).isDirectory(), true);
 		if (process.platform !== "win32") {
+			// POSIX directory mode is checked here; all platforms check the manifest and its contents.
+			// oxlint-disable-next-line node-test/no-conditional-assertion
 			assert.equal(statSync(manifestDirectory).mode & 0o077, 0);
 		}
 		const ownershipRecords = readdirSync(manifestDirectory).filter((name) =>
@@ -1533,7 +1580,7 @@ test("owned snapshot pruning persists close-proven paths and leaves unrecorded m
 		assert.deepEqual(
 			new Set(
 				ownershipRecords.map((name) =>
-					JSON.parse(readFileSync(join(manifestDirectory, name), "utf8")),
+					readString(JSON.parse(readFileSync(join(manifestDirectory, name), "utf8"))),
 				),
 			),
 			new Set(
@@ -1541,6 +1588,8 @@ test("owned snapshot pruning persists close-proven paths and leaves unrecorded m
 			),
 		);
 		if (process.platform !== "win32") {
+			// POSIX record modes are checked here; the two expected ownership records are asserted above.
+			// oxlint-disable-next-line node-test/no-conditional-assertion
 			assert.equal(
 				ownershipRecords.every(
 					(name) => (statSync(join(manifestDirectory, name)).mode & 0o077) === 0,
@@ -1552,6 +1601,8 @@ test("owned snapshot pruning persists close-proven paths and leaves unrecorded m
 		assert.equal(existsSync(join(sessions, `${key}-caller.json`)), true);
 
 		for (const [index, suffix] of ["old", "middle", "new"].entries()) {
+			// All three literal namespaced closes check pruning before final path-preservation assertions.
+			// oxlint-disable-next-line node-test/no-conditional-assertion
 			assert.equal(
 				pruneOwnedManagedSessionRestoreSnapshots({
 					cwd,
@@ -1635,7 +1686,7 @@ test("owned snapshot lineage follows a checkout rename", () => {
 			writeFileSync(path, "{}");
 		}
 		const oldSeconds = (Date.now() - 31 * 24 * 60 * 60 * 1_000) / 1_000;
-		utimesSync(paths[0] as string, oldSeconds, oldSeconds);
+		utimesSync(paths[0], oldSeconds, oldSeconds);
 		assert.equal(
 			pruneOwnedManagedSessionRestoreSnapshots({
 				cwd: project,
@@ -1666,7 +1717,7 @@ test("owned snapshot lineage follows a checkout rename", () => {
 			}),
 			1,
 		);
-		assert.equal(existsSync(paths[0] as string), false);
+		assert.equal(existsSync(paths[0]), false);
 	} finally {
 		rmSync(project, { recursive: true, force: true });
 		rmSync(renamedProject, { recursive: true, force: true });
@@ -1755,11 +1806,11 @@ test("owned snapshot manifest self-heals malformed records without claiming unre
 		const manifestName = readdirSync(sessions).find((name) =>
 			name.startsWith(".pi-agent-browser-owned-snapshots-v2-"),
 		);
-		assert.ok(manifestName);
+		assert.ok(manifestName !== undefined);
 		const manifestDirectory = join(sessions, manifestName);
 		const firstRecordPath = join(
 			manifestDirectory,
-			readdirSync(manifestDirectory).find((name) => name.endsWith(".json")) as string,
+			readString(readdirSync(manifestDirectory).find((name) => name.endsWith(".json"))),
 		);
 		writeFileSync(firstRecordPath, "not json");
 		chmodSync(firstRecordPath, 0o644);
@@ -1775,9 +1826,11 @@ test("owned snapshot manifest self-heals malformed records without claiming unre
 		);
 		const middleRecordPath = join(
 			manifestDirectory,
-			readdirSync(manifestDirectory).find((name) => name.endsWith(".json")) as string,
+			readString(readdirSync(manifestDirectory).find((name) => name.endsWith(".json"))),
 		);
 		if (process.platform !== "win32") {
+			// POSIX rebuilt-record mode is checked here; all platforms check record content and old paths.
+			// oxlint-disable-next-line node-test/no-conditional-assertion
 			assert.equal(statSync(middleRecordPath).mode & 0o777, 0o600);
 		}
 		assert.equal(JSON.parse(readFileSync(middleRecordPath, "utf8")), realpathSync(middlePath));
@@ -1798,7 +1851,7 @@ test("owned snapshot manifest self-heals malformed records without claiming unre
 		);
 		assert.equal(remainingRecords.length, 1);
 		assert.equal(
-			JSON.parse(readFileSync(join(manifestDirectory, remainingRecords[0] as string), "utf8")),
+			JSON.parse(readFileSync(join(manifestDirectory, remainingRecords[0]), "utf8")),
 			realpathSync(newPath),
 		);
 		assert.equal(existsSync(middlePath), true);
@@ -1839,7 +1892,7 @@ test("owned snapshot manifest converges concurrent process writers without a blo
 		const manifestName = readdirSync(sessions).find((name) =>
 			name.startsWith(".pi-agent-browser-owned-snapshots-v2-"),
 		);
-		assert.ok(manifestName);
+		assert.ok(manifestName !== undefined);
 		const manifestPath = join(sessions, manifestName);
 		const moduleUrl = new URL(
 			"../extensions/agent-browser/lib/managed-session-restore.ts",
@@ -1853,16 +1906,22 @@ test("owned snapshot manifest converges concurrent process writers without a blo
 				{ stdio: ["ignore", "pipe", "pipe"] },
 			);
 			const stderr: Buffer[] = [];
-			child.stderr.on("data", (chunk: Buffer) => stderr.push(chunk));
+			child.stderr.on("data", (chunk: Buffer) => {
+				stderr.push(chunk);
+			});
 			return { exit: once(child, "exit"), stderr };
 		});
 		for (const child of children) {
-			const [code] = (await child.exit) as [number | null];
+			// Fixture transitions and their assertions run in order against this test's shared state.
+			// oxlint-disable-next-line no-await-in-loop
+			const [code] = readArray(await child.exit);
+			// Every child from the nonempty prepared state-path set must exit before manifest checks.
+			// oxlint-disable-next-line node-test/no-conditional-assertion
 			assert.equal(code, 0, Buffer.concat(child.stderr).toString("utf8"));
 		}
 		const recordedPaths = readdirSync(manifestPath)
 			.filter((name) => name.endsWith(".json"))
-			.map((name) => JSON.parse(readFileSync(join(manifestPath, name), "utf8")) as string);
+			.map((name) => readString(JSON.parse(readFileSync(join(manifestPath, name), "utf8"))));
 		assert.deepEqual(new Set(recordedPaths), new Set(paths.map((path) => realpathSync(path))));
 	} finally {
 		rmSync(home, { recursive: true, force: true });
@@ -1905,20 +1964,26 @@ test("owned snapshot retention converges concurrent young closes to the newest 2
 				{ stdio: ["ignore", "pipe", "pipe"] },
 			);
 			const stderr: Buffer[] = [];
-			child.stderr.on("data", (chunk: Buffer) => stderr.push(chunk));
+			child.stderr.on("data", (chunk: Buffer) => {
+				stderr.push(chunk);
+			});
 			return { exit: once(child, "exit"), stderr };
 		});
 		for (const child of children) {
-			const [code] = (await child.exit) as [number | null];
+			// Fixture transitions and their assertions run in order against this test's shared state.
+			// oxlint-disable-next-line no-await-in-loop
+			const [code] = readArray(await child.exit);
+			// Both overflow children from the fixed 258-path fixture must exit before retention checks.
+			// oxlint-disable-next-line node-test/no-conditional-assertion
 			assert.equal(code, 0, Buffer.concat(child.stderr).toString("utf8"));
 		}
-		assert.equal(existsSync(paths[0] as string), false);
-		assert.equal(existsSync(paths[1] as string), false);
-		assert.equal(existsSync(paths.at(-1) as string), true);
+		assert.equal(existsSync(paths[0]), false);
+		assert.equal(existsSync(paths[1]), false);
+		assert.equal(existsSync(readString(paths.at(-1))), true);
 		const manifestName = readdirSync(sessions).find((name) =>
 			name.startsWith(".pi-agent-browser-owned-snapshots-v2-"),
 		);
-		assert.ok(manifestName);
+		assert.ok(manifestName !== undefined);
 		assert.equal(
 			readdirSync(join(sessions, manifestName)).filter((name) => name.endsWith(".json")).length,
 			256,
@@ -2083,7 +2148,9 @@ test("owned managed session ALS context is isolated across concurrent calls", as
 		withOwnedManagedSessionContext(
 			{ restoreState: managedSessionRestoreState, sessionName: managed },
 			async () => {
-				await new Promise((resolve) => setTimeout(resolve, 20));
+				await new Promise((resolve) => {
+					setTimeout(resolve, 20);
+				});
 				ownedProbeSawRestore =
 					getAndCommitManagedSessionRestoreEnv({
 						args: ["--json", "--session", managed, "snapshot", "-i"],
@@ -2093,7 +2160,9 @@ test("owned managed session ALS context is isolated across concurrent calls", as
 			},
 		),
 		withOwnedManagedSessionContext(undefined, async () => {
-			await new Promise((resolve) => setTimeout(resolve, 5));
+			await new Promise((resolve) => {
+				setTimeout(resolve, 5);
+			});
 			foreignProbeSawRestore =
 				getAndCommitManagedSessionRestoreEnv({
 					args: ["--json", "--session", managed, "snapshot", "-i"],

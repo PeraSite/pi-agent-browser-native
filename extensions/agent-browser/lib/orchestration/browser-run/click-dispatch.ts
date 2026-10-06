@@ -1,5 +1,5 @@
 import { isRecord, parseRefId } from "../../parsing.js";
-import { redactSensitiveText } from "../../runtime.js";
+import { redactSensitiveText } from "../../runtime-redaction.js";
 import {
 	withOptionalSessionArgs,
 	type AgentBrowserNextAction,
@@ -30,31 +30,19 @@ function normalizeAccessibleName(name: string): string {
 }
 
 function getClickDispatchProbeTarget(
-	commandTokens: string[],
+	commandTokens: readonly string[],
 	refSnapshot?: SessionRefSnapshot,
 ): ClickDispatchProbeTarget | undefined {
 	if (commandTokens[0] !== "click" || commandTokens.includes("--new-tab")) {
 		return undefined;
 	}
 	const selector = commandTokens.slice(1).find((token) => token !== "--human");
-	if (!selector || selector.startsWith("-")) {
+	if (selector === undefined || selector === "" || selector.startsWith("-")) {
 		return undefined;
 	}
 	const refId = parseRefId(selector);
-	if (refId) {
-		const ref = refSnapshot?.refs?.[refId];
-		if (!ref || !ACCESSIBLE_REF_CLICK_DISPATCH_ROLES.has(ref.role)) {
-			return undefined;
-		}
-		const matchingRefs = Object.values(refSnapshot?.refs ?? {}).filter(
-			(candidate) =>
-				candidate.role.toLowerCase() === ref.role.toLowerCase() &&
-				normalizeAccessibleName(candidate.name) === normalizeAccessibleName(ref.name),
-		);
-		if (matchingRefs.length !== 1) {
-			return undefined;
-		}
-		return { kind: "accessible", name: ref.name, refId, role: ref.role };
+	if (refId !== undefined && refId !== "") {
+		return getAccessibleProbeTarget(refId, refSnapshot);
 	}
 	if (selector.startsWith("xpath=")) {
 		return { kind: "xpath", selector: selector.slice("xpath=".length) };
@@ -62,25 +50,42 @@ function getClickDispatchProbeTarget(
 	return undefined;
 }
 
-function getEvalResultRecord(data: unknown): Record<string, unknown> | undefined {
+function getAccessibleProbeTarget(
+	refId: string,
+	refSnapshot: SessionRefSnapshot | undefined,
+): ClickDispatchProbeTarget | undefined {
+	const refs: Readonly<Partial<SessionRefSnapshot["refs"]>> = refSnapshot?.refs ?? {};
+	const ref = refs[refId];
+	if (!ref || !ACCESSIBLE_REF_CLICK_DISPATCH_ROLES.has(ref.role)) {
+		return undefined;
+	}
+	const matchingRefs = Object.values(refs).filter(
+		(candidate) =>
+			candidate !== undefined &&
+			candidate.role.toLowerCase() === ref.role.toLowerCase() &&
+			normalizeAccessibleName(candidate.name) === normalizeAccessibleName(ref.name),
+	);
+	return matchingRefs.length === 1
+		? { kind: "accessible", name: ref.name, refId, role: ref.role }
+		: undefined;
+}
+
+function getEvalResultRecord(data: unknown): Readonly<Record<string, unknown>> | undefined {
 	return isRecord(data) && isRecord(data.result) ? data.result : undefined;
 }
 
-function getClickDispatchIdentityAttribute(probe: ClickDispatchProbe): string {
+function getClickDispatchIdentityAttribute(probe: Readonly<ClickDispatchProbe>): string {
 	return `data-pi-click-dispatch-${probe.marker.toLowerCase()}`;
 }
 
-function buildClickDispatchProbeInstallScript(
-	probe: ClickDispatchProbe,
-	timeoutMs: number,
-): string {
-	const target = probe.target;
-	const resolveTarget =
-		target.kind === "selector"
-			? `(() => { try { return document.querySelector(${JSON.stringify(target.selector)}); } catch { return null; } })()`
-			: target.kind === "xpath"
-				? `(() => { try { return document.evaluate(${JSON.stringify(target.selector)}, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue; } catch { return null; } })()`
-				: `(() => {
+function buildClickTargetResolutionScript(target: ClickDispatchProbeTarget): string {
+	if (target.kind === "selector") {
+		return `(() => { try { return document.querySelector(${JSON.stringify(target.selector)}); } catch { return null; } })()`;
+	}
+	if (target.kind === "xpath") {
+		return `(() => { try { return document.evaluate(${JSON.stringify(target.selector)}, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue; } catch { return null; } })()`;
+	}
+	return `(() => {
   const normalize = (value) => String(value ?? "").replace(/\\s+/g, " ").trim();
   const expectedRole = ${JSON.stringify(target.role)};
   const expectedName = normalize(${JSON.stringify(target.name)});
@@ -108,9 +113,15 @@ function buildClickDispatchProbeInstallScript(
   const candidates = Array.from(document.querySelectorAll("button,a[href],input,select,textarea,summary,[role],[onclick],[tabindex]")).filter((element) => inferRole(element) === expectedRole && inferName(element) === expectedName && isVisible(element));
   return candidates.length === 1 ? candidates[0] : null;
 })()`;
+}
+
+function buildClickDispatchProbeInstallScript(
+	probe: Readonly<ClickDispatchProbe>,
+	timeoutMs: number,
+): string {
 	return `(() => {
 const marker = ${JSON.stringify(probe.marker)};
-const element = ${resolveTarget};
+const element = ${buildClickTargetResolutionScript(probe.target)};
 if (!element) return { status: "target-not-found", marker };
 const cssEscape = (value) => {
   if (window.CSS && typeof window.CSS.escape === "function") return window.CSS.escape(value);
@@ -184,7 +195,7 @@ return { status: "installed", marker, target: state.target };
 })()`;
 }
 
-function buildClickDispatchProbeCheckScript(probe: ClickDispatchProbe): string {
+function buildClickDispatchProbeCheckScript(probe: Readonly<ClickDispatchProbe>): string {
 	return `(() => {
 const marker = ${JSON.stringify(probe.marker)};
 const state = window[marker];
@@ -200,7 +211,7 @@ return finish({ status: "no-native-event-observed", nativeEventCount, target: st
 })()`;
 }
 
-function buildClickDispatchProbeCleanupScript(probe: ClickDispatchProbe): string {
+function buildClickDispatchProbeCleanupScript(probe: Readonly<ClickDispatchProbe>): string {
 	return `(() => {
 const marker = ${JSON.stringify(probe.marker)};
 const state = window[marker];
@@ -222,9 +233,9 @@ export function formatClickDispatchDiagnosticText(diagnostic: ClickDispatchDiagn
 }
 
 export function buildClickDispatchNextActions(options: {
-	commandTokens: string[];
-	diagnostic?: ClickDispatchDiagnostic;
-	sessionName?: string;
+	readonly commandTokens: readonly string[];
+	readonly diagnostic?: ClickDispatchDiagnostic;
+	readonly sessionName?: string;
 }): AgentBrowserNextAction[] {
 	const retryArgs =
 		options.commandTokens[0] === "click" || options.commandTokens[0] === "find"
@@ -247,14 +258,14 @@ export function buildClickDispatchNextActions(options: {
 			params: {
 				args: withOptionalSessionArgs(
 					options.sessionName,
-					["scrollintoview", retryArgs[1]].filter(
-						(item): item is string => typeof item === "string",
-					),
+					["scrollintoview", retryArgs.at(1)].filter((item) => typeof item === "string"),
 				),
 			},
-			reason: options.diagnostic.scrollContainer.selector
-				? `The target may be outside nested scroll container ${options.diagnostic.scrollContainer.selector}; scroll the target into view before retrying the click.`
-				: "The target may be inside an offscreen nested scroll container; scroll the target into view before retrying the click.",
+			reason:
+				options.diagnostic.scrollContainer.selector !== undefined &&
+				options.diagnostic.scrollContainer.selector !== ""
+					? `The target may be outside nested scroll container ${options.diagnostic.scrollContainer.selector}; scroll the target into view before retrying the click.`
+					: "The target may be inside an offscreen nested scroll container; scroll the target into view before retrying the click.",
 			safety:
 				"Use only for the same current page and target; run snapshot -i again if the page rerendered.",
 			tool: "agent_browser",
@@ -272,28 +283,81 @@ export function buildClickDispatchNextActions(options: {
 	return actions;
 }
 
-export async function prepareClickDispatchProbe(options: {
-	commandTokens: string[];
-	cwd: string;
-	namespace?: string;
-	refSnapshot?: SessionRefSnapshot;
-	sessionName?: string;
-	signal?: AbortSignal;
-	timeoutMs?: number;
-}): Promise<ClickDispatchProbe | undefined> {
+interface ClickDispatchProbeOptions {
+	readonly commandTokens: readonly string[];
+	readonly cwd: string;
+	readonly namespace?: string;
+	readonly refSnapshot?: SessionRefSnapshot;
+	readonly sessionName?: string;
+	readonly signal?: AbortSignal;
+	readonly timeoutMs?: number;
+}
+
+function nativeProbeSelector(target: ClickDispatchProbeTarget): string {
+	if (target.kind === "accessible") {
+		return `@${target.refId}`;
+	}
+	return target.kind === "xpath" ? `xpath=${target.selector}` : target.selector;
+}
+
+async function verifyClickDispatchProbeIdentity(
+	options: ClickDispatchProbeOptions,
+	probe: Readonly<ClickDispatchProbe>,
+): Promise<boolean> {
+	const identity = await runSessionCommandData({
+		args: [
+			"get",
+			"attr",
+			nativeProbeSelector(probe.target),
+			getClickDispatchIdentityAttribute(probe),
+		],
+		cwd: options.cwd,
+		namespace: options.namespace,
+		sessionName: options.sessionName,
+		signal: options.signal,
+	});
+	if (!isRecord(identity) || identity.value !== probe.marker) {
+		return false;
+	}
+	const removed = await runSessionCommandData({
+		args: ["eval", "--stdin"],
+		cwd: options.cwd,
+		namespace: options.namespace,
+		sessionName: options.sessionName,
+		signal: options.signal,
+		stdin: `(() => {
+const state = window[${JSON.stringify(probe.marker)}];
+if (!state || typeof state.removeIdentityMarker !== "function") return { status: "probe-missing" };
+state.removeIdentityMarker();
+return { status: "identity-marker-removed" };
+})()`,
+	});
+	return getEvalResultRecord(removed)?.status === "identity-marker-removed";
+}
+
+function canPrepareClickDispatchProbe(options: ClickDispatchProbeOptions): boolean {
 	if (
-		!options.sessionName ||
+		(options.sessionName ?? "") === "" ||
 		options.commandTokens[0] !== "click" ||
 		options.commandTokens.includes("--new-tab")
 	) {
-		return undefined;
+		return false;
 	}
 	// This optional diagnostic must not require approving a fresh eval on every click retry.
 	if (
 		getAgentBrowserProcessEnvironment()
 			.AGENT_BROWSER_CONFIRM_ACTIONS?.split(",")
-			.some((action) => action.trim().toLowerCase() === "evaluate")
+			.some((action) => action.trim().toLowerCase() === "evaluate") === true
 	) {
+		return false;
+	}
+	return true;
+}
+
+export async function prepareClickDispatchProbe(
+	options: ClickDispatchProbeOptions,
+): Promise<ClickDispatchProbe | undefined> {
+	if (!canPrepareClickDispatchProbe(options)) {
 		return undefined;
 	}
 	const target = getClickDispatchProbeTarget(options.commandTokens, options.refSnapshot);
@@ -322,39 +386,10 @@ export async function prepareClickDispatchProbe(options: {
 		}
 		// Name matching and in-page XPath only find candidates. Native resolution
 		// must prove identity, including frame scope, before missing events mean failure.
-		const selector =
-			target.kind === "accessible"
-				? `@${target.refId}`
-				: target.kind === "xpath"
-					? `xpath=${target.selector}`
-					: target.selector;
-		const identity = await runSessionCommandData({
-			args: ["get", "attr", selector, getClickDispatchIdentityAttribute(probe)],
-			cwd: options.cwd,
-			namespace: options.namespace,
-			sessionName: options.sessionName,
-			signal: options.signal,
-		});
-		if (!isRecord(identity) || identity.value !== probe.marker) {
+		if (!(await verifyClickDispatchProbeIdentity(options, probe))) {
 			return undefined;
 		}
-		const removed = await runSessionCommandData({
-			args: ["eval", "--stdin"],
-			cwd: options.cwd,
-			namespace: options.namespace,
-			sessionName: options.sessionName,
-			signal: options.signal,
-			stdin: `(() => {
-const state = window[${JSON.stringify(probe.marker)}];
-if (!state || typeof state.removeIdentityMarker !== "function") return { status: "probe-missing" };
-state.removeIdentityMarker();
-return { status: "identity-marker-removed" };
-})()`,
-		});
-		if (getEvalResultRecord(removed)?.status !== "identity-marker-removed") {
-			return undefined;
-		}
-		prepared = !options.signal?.aborted;
+		prepared = options.signal?.aborted !== true;
 		return prepared ? probe : undefined;
 	} finally {
 		// Even a lost/aborted install response may have left listeners in-page.
@@ -364,20 +399,27 @@ return { status: "identity-marker-removed" };
 	}
 }
 
+function optionalBoolean(
+	value: Readonly<Record<string, unknown>> | undefined,
+	key: string,
+): boolean | undefined {
+	return typeof value?.[key] === "boolean" ? value[key] : undefined;
+}
+
+function nearestScrollContainer(
+	target: Readonly<Record<string, unknown>> | undefined,
+): Readonly<Record<string, unknown>> | undefined {
+	return isRecord(target?.nearestScrollContainer) ? target.nearestScrollContainer : undefined;
+}
+
 function getClickDispatchScrollContainerDiagnostic(
-	result: Record<string, unknown>,
+	result: Readonly<Record<string, unknown>>,
 ): ClickDispatchDiagnostic["scrollContainer"] {
 	const target = isRecord(result.target) ? result.target : undefined;
-	const scrollContainer = isRecord(target?.nearestScrollContainer)
-		? target.nearestScrollContainer
-		: undefined;
-	const targetOutsideViewport =
-		typeof target?.targetOutsideViewport === "boolean" ? target.targetOutsideViewport : undefined;
-	const targetOutsideContainer =
-		typeof scrollContainer?.targetOutsideContainer === "boolean"
-			? scrollContainer.targetOutsideContainer
-			: undefined;
-	if (!scrollContainer && !targetOutsideViewport) {
+	const scrollContainer = nearestScrollContainer(target);
+	const targetOutsideViewport = optionalBoolean(target, "targetOutsideViewport");
+	const targetOutsideContainer = optionalBoolean(scrollContainer, "targetOutsideContainer");
+	if (!scrollContainer && targetOutsideViewport !== true) {
 		return undefined;
 	}
 	if (targetOutsideContainer !== true && targetOutsideViewport !== true) {
@@ -387,20 +429,24 @@ function getClickDispatchScrollContainerDiagnostic(
 		typeof scrollContainer?.selector === "string"
 			? redactSensitiveText(scrollContainer.selector)
 			: undefined;
-	const summary = selector
-		? `Target appears outside nested scroll container ${selector}; use scrollintoview on the target or scroll that container before retrying.`
-		: "Target appears outside the viewport or a nested scroll container; use scrollintoview on the target before retrying.";
+	const summary = describeClickScrollContainer(selector);
 	return { selector, summary, targetOutsideContainer, targetOutsideViewport };
 }
 
+function describeClickScrollContainer(selector: string | undefined): string {
+	return selector !== undefined && selector !== ""
+		? `Target appears outside nested scroll container ${selector}; use scrollintoview on the target or scroll that container before retrying.`
+		: "Target appears outside the viewport or a nested scroll container; use scrollintoview on the target before retrying.";
+}
+
 export async function collectClickDispatchDiagnostic(options: {
-	cwd: string;
-	namespace?: string;
-	probe?: ClickDispatchProbe;
-	sessionName?: string;
-	signal?: AbortSignal;
+	readonly cwd: string;
+	readonly namespace?: string;
+	readonly probe?: ClickDispatchProbe;
+	readonly sessionName?: string;
+	readonly signal?: AbortSignal;
 }): Promise<ClickDispatchDiagnostic | undefined> {
-	if (!options.probe || !options.sessionName) {
+	if (!options.probe || (options.sessionName ?? "") === "") {
 		return undefined;
 	}
 	const data = await runSessionCommandData({
@@ -438,12 +484,12 @@ export async function collectClickDispatchDiagnostic(options: {
 }
 
 export async function cleanupClickDispatchProbe(options: {
-	cwd: string;
-	namespace?: string;
-	probe?: ClickDispatchProbe;
-	sessionName?: string;
+	readonly cwd: string;
+	readonly namespace?: string;
+	readonly probe?: Readonly<ClickDispatchProbe>;
+	readonly sessionName?: string;
 }): Promise<void> {
-	if (!options.probe || options.probe.cleaned || !options.sessionName) {
+	if (!options.probe || options.probe.cleaned === true || (options.sessionName ?? "") === "") {
 		return;
 	}
 	await runSessionCommandData({
@@ -453,5 +499,7 @@ export async function cleanupClickDispatchProbe(options: {
 		sessionName: options.sessionName,
 		stdin: buildClickDispatchProbeCleanupScript(options.probe),
 		timeoutMs: CLICK_DISPATCH_CLEANUP_TIMEOUT_MS,
-	}).catch(() => undefined);
+	}).catch(() => {
+		// Probe expiry also removes listeners; cleanup failure must not replace the caller's result.
+	});
 }

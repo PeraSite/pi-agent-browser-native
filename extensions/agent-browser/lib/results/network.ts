@@ -2,7 +2,7 @@ import { isRecord } from "../parsing.js";
 import type { NetworkFailureClassification, NetworkFailureSummary } from "./contracts.js";
 
 export function getStringRecordField(
-	value: Record<string, unknown>,
+	value: Readonly<Record<string, unknown>>,
 	key: string,
 ): string | undefined {
 	const field = value[key];
@@ -10,7 +10,7 @@ export function getStringRecordField(
 }
 
 function getNetworkRequestUrlPath(url: string | undefined): string | undefined {
-	if (!url) {
+	if (url === undefined || url.length === 0) {
 		return undefined;
 	}
 	try {
@@ -21,7 +21,7 @@ function getNetworkRequestUrlPath(url: string | undefined): string | undefined {
 	}
 }
 
-function isFailedNetworkRequest(request: Record<string, unknown>): boolean {
+function isFailedNetworkRequest(request: Readonly<Record<string, unknown>>): boolean {
 	return (
 		(typeof request.status === "number" && request.status >= 400) ||
 		request.failed === true ||
@@ -29,7 +29,7 @@ function isFailedNetworkRequest(request: Record<string, unknown>): boolean {
 	);
 }
 
-export function isNetworkArtifactNoiseRequest(request: Record<string, unknown>): boolean {
+export function isNetworkArtifactNoiseRequest(request: Readonly<Record<string, unknown>>): boolean {
 	const url = getStringRecordField(request, "url") ?? "";
 	const resourceType = (
 		getStringRecordField(request, "resourceType") ??
@@ -39,28 +39,34 @@ export function isNetworkArtifactNoiseRequest(request: Record<string, unknown>):
 	return /^data:image\//i.test(url) || (url.startsWith("data:") && resourceType.includes("image"));
 }
 
+function isIconResourceType(resourceType: string | undefined): boolean {
+	const normalized = resourceType?.toLowerCase() ?? "";
+	return (
+		normalized.length === 0 ||
+		["image", "img", "other"].includes(normalized) ||
+		normalized.startsWith("image/")
+	);
+}
+
 function isBenignAssetFailure(
-	request: Record<string, unknown>,
+	request: Readonly<Record<string, unknown>>,
 	url: string | undefined,
 	resourceType: string | undefined,
 ): boolean {
 	const path = getNetworkRequestUrlPath(url);
-	if (!path) {
+	if (path === undefined || path.length === 0) {
 		return false;
 	}
-	const normalizedResourceType = resourceType?.toLowerCase();
 	return (
 		/(?:^|\/)(?:favicon(?:[-.\w]*)?\.(?:ico|png|svg)|apple-touch-icon(?:[-.\w]*)?\.png)$/i.test(
 			path,
 		) &&
 		(request.status === 404 || request.failed === true || typeof request.error === "string") &&
-		(!normalizedResourceType ||
-			["image", "img", "other"].includes(normalizedResourceType) ||
-			normalizedResourceType.startsWith("image/"))
+		isIconResourceType(resourceType)
 	);
 }
 
-export function isApiLikeNetworkRequest(request: Record<string, unknown>): boolean {
+export function isApiLikeNetworkRequest(request: Readonly<Record<string, unknown>>): boolean {
 	const method = (getStringRecordField(request, "method") ?? "GET").toUpperCase();
 	const resourceType = (getStringRecordField(request, "resourceType") ?? "").toLowerCase();
 	const mimeType = (getStringRecordField(request, "mimeType") ?? "").toLowerCase();
@@ -75,7 +81,7 @@ export function isApiLikeNetworkRequest(request: Record<string, unknown>): boole
 }
 
 export function classifyNetworkRequestFailure(
-	request: Record<string, unknown>,
+	request: Readonly<Record<string, unknown>>,
 ): NetworkFailureClassification | undefined {
 	if (!isFailedNetworkRequest(request)) {
 		return undefined;
@@ -96,7 +102,7 @@ export function classifyNetworkRequestFailure(
 	};
 }
 
-export function summarizeNetworkFailures(requests: unknown[]): NetworkFailureSummary {
+export function summarizeNetworkFailures(requests: readonly unknown[]): NetworkFailureSummary {
 	const failures = requests.flatMap((request) => {
 		if (!isRecord(request) || isNetworkArtifactNoiseRequest(request)) {
 			return [];

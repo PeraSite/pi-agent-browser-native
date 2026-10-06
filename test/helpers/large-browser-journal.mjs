@@ -45,6 +45,8 @@ try {
 		);
 		const chunk = Buffer.alloc(1024 * 1024, 120);
 		for (let index = 0; index < 1025; index++) {
+			// Bounded memory and byte ordering require one completed file write per chunk.
+			// oxlint-disable-next-line no-await-in-loop
 			await file.write(chunk);
 		} // The ignored string alone exceeds 1 GiB and Node's whole-string ceiling.
 		await file.write('"}}\n');
@@ -97,6 +99,8 @@ try {
 		let parent = "capture";
 		for (let index = 0; index < 220; index++) {
 			const id = `read-${index}`;
+			// Journal ancestry and physical append order must advance together.
+			// oxlint-disable-next-line no-await-in-loop
 			await file.write(JSON.stringify(legacy(id, parent, details)) + "\n");
 			parent = id;
 		}

@@ -207,12 +207,12 @@ Exec=${quoteDesktopExecPath(electronExecutable)}
 		});
 		assert.deepEqual(electronAppNames(result.apps), ["Demo Electron"]);
 		const app = result.apps[0];
-		assert.equal(app?.platform, "linux");
-		assert.equal(app?.executablePath, realElectronExecutable);
-		assert.equal(app?.comment, "Demo comment");
-		assert.equal(app?.icon, "demo-icon");
-		assert.equal(app?.desktopId, "demo");
-		assert.equal(app?.packageSource, "desktop");
+		assert.equal(app.platform, "linux");
+		assert.equal(app.executablePath, realElectronExecutable);
+		assert.equal(app.comment, "Demo comment");
+		assert.equal(app.icon, "demo-icon");
+		assert.equal(app.desktopId, "demo");
+		assert.equal(app.packageSource, "desktop");
 
 		const binDir = join(tempDir, "bin");
 		await mkdir(binDir, { recursive: true });
@@ -270,6 +270,8 @@ test("electron discovery caps results, clamps maxResults, and reports omittedCou
 		await mkdir(applicationsDir, { recursive: true });
 		for (let index = 0; index < ELECTRON_DISCOVERY_MAX_RESULTS + 2; index += 1) {
 			const suffix = String(index).padStart(3, "0");
+			// Create bundles serially to bound the fixture's simultaneous filesystem work.
+			// oxlint-disable-next-line no-await-in-loop
 			await writeFakeMacElectronApp({
 				applicationsDir,
 				bundleId: `com.example.Cap${suffix}`,

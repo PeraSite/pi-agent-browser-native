@@ -73,6 +73,8 @@ async function expandDeclaredPackageFile(cwd, declaredPath) {
 	for (const entry of entries) {
 		const childPath = `${normalizedPath}/${entry.name}`;
 		if (entry.isDirectory()) {
+			// Traverse one subtree at a time to bound open-directory and stat pressure.
+			// oxlint-disable-next-line no-await-in-loop
 			expandedPaths.push(...(await expandDeclaredPackageFile(cwd, childPath)));
 		} else if (entry.isFile() && !NPM_IGNORED_METADATA_FILES.has(entry.name)) {
 			expandedPaths.push(toPackagePath(childPath));
@@ -90,6 +92,8 @@ export async function loadPublishContract(options = {}) {
 	const requiredPackedFiles = new Set(ALWAYS_INCLUDED_PACKED_FILES);
 
 	for (const declaredPath of declaredPackageFiles) {
+		// Expand each declared tree before the next to bound filesystem traversal resources.
+		// oxlint-disable-next-line no-await-in-loop
 		for (const expandedPath of await expandDeclaredPackageFile(cwd, declaredPath)) {
 			requiredPackedFiles.add(expandedPath);
 		}

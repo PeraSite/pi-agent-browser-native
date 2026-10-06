@@ -52,7 +52,7 @@ async function createConfigFixture() {
 			HOME: home,
 			[BRAVE_API_KEY_ENV]: undefined,
 			[EXA_API_KEY_ENV]: undefined,
-		} as NodeJS.ProcessEnv,
+		},
 		globalPath: join(home, ".pi", "config", "pi-agent-browser-native", "config.json"),
 		home,
 		projectPath: join(cwd, ".pi", "config", "pi-agent-browser-native", "config.json"),

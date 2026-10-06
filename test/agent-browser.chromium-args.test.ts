@@ -16,13 +16,14 @@ import {
 	withPatchedEnv,
 	writeFakeAgentBrowserBinary,
 } from "./helpers/agent-browser-harness.js";
+import { readRecord, readArray } from "./helpers/assertions.js";
 
 const url = "https://chromium-args.example.test/";
 
 async function withFixture(
 	run: (
 		root: string,
-		harness: ReturnType<typeof createExtensionHarness>,
+		harness: Pick<ReturnType<typeof createExtensionHarness>, "tool" | "ctx">,
 		log: string,
 	) => Promise<void>,
 ): Promise<void> {
@@ -89,20 +90,20 @@ for (const [label, step] of [
 			async () => {
 				await withFixture(async (root, harness, log) => {
 					await writeFile(join(root, "raw-rows.json"), JSON.stringify([step]));
-					const params =
-						mode === "direct"
-							? { args: [...step] }
-							: mode === "stdin"
-								? { args: ["batch"], stdin: JSON.stringify([step]) }
-								: { args: ["batch", step.map((value) => JSON.stringify(value)).join(" ")] };
+					const requests = {
+						direct: { args: [...step] },
+						stdin: { args: ["batch"], stdin: JSON.stringify([step]) },
+						raw: { args: ["batch", step.map((value) => JSON.stringify(value)).join(" ")] },
+					};
+					const params = requests[mode];
 					const result = await executeRegisteredTool(harness.tool, harness.ctx, params);
 					assert.equal(result.isError, true);
 					assert.equal(result.details?.failureCategory, "validation-error");
-					assert.match(result.content[0]?.text ?? "", /Chromium launch argument/);
-					assert.match(result.content[0]?.text ?? "", /top-level.*--args/);
-					assert.match(result.content[0]?.text ?? "", /sessionMode.*fresh/);
+					assert.match(result.content[0].text ?? "", /Chromium launch argument/);
+					assert.match(result.content[0].text ?? "", /top-level.*--args/);
+					assert.match(result.content[0].text ?? "", /sessionMode.*fresh/);
 					assert.match(
-						result.content[0]?.text ?? "",
+						result.content[0].text ?? "",
 						step[0] === "--no-sandbox" ? /not an agent-browser command/ : /ignored.*option/,
 					);
 					assert.deepEqual(
@@ -182,12 +183,14 @@ for (const args of [
 				assert.notEqual(
 					result.details?.failureCategory,
 					"validation-error",
-					result.content[0]?.text,
+					result.content[0].text,
 				);
 				const evaluation = args[0] === "eval";
-				assert.equal(result.isError, evaluation, result.content[0]?.text);
+				assert.equal(result.isError, evaluation, result.content[0].text);
 				if (evaluation) {
-					assert.match(result.content[0]?.text ?? "", /Native fixture evaluation error/);
+					// This enumerated fixture branch (evaluation) has variant-specific assertions; common assertions cover every case.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
+					assert.match(result.content[0].text ?? "", /Native fixture evaluation error/);
 				}
 				const calls = await readInvocationLog(log);
 				const expected = args.map((token, index) =>
@@ -238,11 +241,11 @@ for (const mode of ["stdin", "raw"] as const) {
 					"--no-startup-window,--no-sandbox",
 					...args.slice(2),
 				]);
-				assert.equal((batch as { stdin?: string } | undefined)?.stdin, stdin);
+				assert.equal(readRecord(batch).stdin, stdin);
 				assert.deepEqual(
-					(result.details?.batchSteps as Array<{ data?: { echo?: string[] } }>).map(
-						(step) => step.data?.echo,
-					),
+					readArray(result.details?.batchSteps)
+						.map(readRecord)
+						.map((step) => readRecord(step.data).echo),
 					rows,
 				);
 			});

@@ -4,6 +4,7 @@ import { copyFile, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs
 import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
 import test from "node:test";
+import { readRecord, readString, hasErrorCode, readNumber } from "./helpers/assertions.js";
 import crossSpawn from "cross-spawn";
 import {
 	buildAgentBrowserProcessEnv,
@@ -48,11 +49,18 @@ async function stock(root: string) {
 function childEnv(path: string): NodeJS.ProcessEnv {
 	const env = { ...process.env };
 	for (const key of Object.keys(env)) {
-		if (key.toLowerCase() === "path") env[key] = undefined;
+		if (key.toLowerCase() === "path") {
+			env[key] = undefined;
+		}
 	}
 	return { ...env, Path: path };
 }
-function original(cwd: string, env: NodeJS.ProcessEnv, args: string[], input = "") {
+function original(
+	cwd: string,
+	env: Readonly<NodeJS.ProcessEnv>,
+	args: readonly string[],
+	input = "",
+) {
 	// Use the same effective environment, not the override map: undefined keys
 	// mean deletion to the product, but Node deduplicates PATH casing before
 	// dropping undefined values. Command selection itself is the real library.
@@ -79,23 +87,23 @@ test(
 			await writeFile(script, capture);
 			const env = childEnv(prefix),
 				cwdBefore = process.cwd();
-			await sameFile(resolveWindowsStockLauncher(root, env)!, exe);
+			await sameFile(readString(resolveWindowsStockLauncher(root, env)), exe);
 			assert.equal(process.cwd(), cwdBefore);
 			const args = [script, ...vector],
 				stdin = "stdin\r\n雪\n";
 			const old = original(root, env, args, stdin);
 			assert.equal(old.status, 0, old.stderr);
-			assert.notDeepEqual(JSON.parse(old.stdout).args, vector);
+			assert.notDeepEqual(readRecord(JSON.parse(old.stdout)).args, vector);
 			const result = await runAgentBrowserProcess({ cwd: root, env, args, stdin });
 			assert.equal(result.spawnError, undefined);
 			assert.equal(result.exitCode, 0, result.stderr);
 			assert.equal(result.agentBrowserStarted, true);
 			assert.equal(result.aborted, false);
 			assert.equal(result.timedOut, false);
-			const received = JSON.parse(result.stdout);
+			const received = readRecord(JSON.parse(result.stdout));
 			assert.deepEqual(received.args, vector);
 			assert.equal(received.stdin, stdin);
-			await sameFile(received.exe, exe);
+			await sameFile(readString(received.exe), exe);
 		} finally {
 			await rm(root, { recursive: true, force: true });
 		}
@@ -118,28 +126,45 @@ test(
 			await writeFile(script, capture);
 			await copyFile(process.execPath, join(prefix, "agent-browser.exe"));
 			for (const order of [".EXE;.CMD", ".CMD;.EXE"]) {
+				const reversedOrder = order === ".EXE;.CMD" ? ".CMD;.EXE" : ".EXE;.CMD";
+				// Finish the native control before the next case changes the shared launcher fixture or PATHEXT.
+				// oxlint-disable-next-line no-await-in-loop
 				await withPatchedEnv({ PATHEXT: order }, async () => {
 					for (const differing of [false, true]) {
 						// which uses parent PATHEXT to choose transport; cmd.exe itself
 						// uses child PATHEXT to select the command it actually executes.
 						const env = {
 							...childEnv(relative(cwd, prefix)),
-							PATHEXT: differing ? (order === ".EXE;.CMD" ? ".CMD;.EXE" : ".EXE;.CMD") : order,
+							PATHEXT: differing ? reversedOrder : order,
 						};
 						const raw = original(cwd, env, [script, "probe"]);
+						// Fixed native launcher/PATHEXT variants require their selected transport assertions and unchanged control results.
+						// oxlint-disable-next-line node-test/no-conditional-assertion
 						assert.equal(raw.status, 0, raw.stderr);
 						const expected =
 							order.startsWith(".EXE") || differing ? join(prefix, "agent-browser.exe") : exe;
-						await sameFile(JSON.parse(raw.stdout).exe, expected);
+						// Finish the native control before the next case changes the shared launcher fixture or PATHEXT.
+						// oxlint-disable-next-line no-await-in-loop
+						await sameFile(readString(readRecord(JSON.parse(raw.stdout)).exe), expected);
 						const chosen = resolveWindowsStockLauncher(cwd, env);
 						if (order.startsWith(".EXE") || differing) {
+							// Fixed native launcher/PATHEXT variants require their selected transport assertions and unchanged control results.
+							// oxlint-disable-next-line node-test/no-conditional-assertion
 							assert.equal(chosen, undefined);
 						} else {
-							await sameFile(chosen!, exe);
+							// Finish the native control before the next case changes the shared launcher fixture or PATHEXT.
+							// oxlint-disable-next-line no-await-in-loop
+							await sameFile(readString(chosen), exe);
 						}
+						// Finish the native control before the next case changes the shared launcher fixture or PATHEXT.
+						// oxlint-disable-next-line no-await-in-loop
 						const integrated = await runAgentBrowserProcess({ cwd, env, args: [script, "probe"] });
+						// Fixed native launcher/PATHEXT variants require their selected transport assertions and unchanged control results.
+						// oxlint-disable-next-line node-test/no-conditional-assertion
 						assert.equal(integrated.exitCode, 0, integrated.stderr);
-						await sameFile(JSON.parse(integrated.stdout).exe, expected);
+						// Finish the native control before the next case changes the shared launcher fixture or PATHEXT.
+						// oxlint-disable-next-line no-await-in-loop
+						await sameFile(readString(readRecord(JSON.parse(integrated.stdout)).exe), expected);
 					}
 				});
 			}
@@ -153,7 +178,7 @@ test(
 				encoding: "utf8",
 				timeout: 10_000,
 			});
-			assert.equal((ambiguousRaw.error as NodeJS.ErrnoException)?.code, "ENOENT");
+			assert.equal(hasErrorCode(ambiguousRaw.error, "ENOENT"), true);
 			assert.equal(resolveWindowsStockLauncher(cwd, ambiguous), undefined);
 			const ambiguousResult = await runAgentBrowserProcess({
 				cwd,
@@ -161,19 +186,33 @@ test(
 				args: ["probe"],
 			});
 			assert.equal(ambiguousResult.exitCode, 127);
-			assert.equal((ambiguousResult.spawnError as NodeJS.ErrnoException)?.code, "ENOENT");
+			assert.equal(hasErrorCode(ambiguousResult.spawnError, "ENOENT"), true);
 			assert.equal(ambiguousResult.agentBrowserStarted, false);
 			for (const location of [custom, cwd]) {
 				if (location === cwd) {
+					// Finish the native control before the next case changes the shared launcher fixture or PATHEXT.
+					// oxlint-disable-next-line no-await-in-loop
 					await writeFakeAgentBrowserBinary(cwd, "process.stdout.write('cwd-cmd');");
 				}
 				const env = childEnv(`${custom};${prefix}`);
 				const raw = original(cwd, env, ["probe"]);
+				// Fixed native launcher/PATHEXT variants require their selected transport assertions and unchanged control results.
+				// oxlint-disable-next-line node-test/no-conditional-assertion
 				assert.equal(raw.status, 0, raw.stderr);
+				// Fixed native launcher/PATHEXT variants require their selected transport assertions and unchanged control results.
+				// oxlint-disable-next-line node-test/no-conditional-assertion
 				assert.equal(raw.stdout, location === cwd ? "cwd-cmd" : "custom-cmd");
+				// Fixed native launcher/PATHEXT variants require their selected transport assertions and unchanged control results.
+				// oxlint-disable-next-line node-test/no-conditional-assertion
 				assert.equal(resolveWindowsStockLauncher(cwd, env), undefined);
+				// Finish the native control before the next case changes the shared launcher fixture or PATHEXT.
+				// oxlint-disable-next-line no-await-in-loop
 				const integrated = await runAgentBrowserProcess({ cwd, env, args: ["probe"] });
+				// Fixed native launcher/PATHEXT variants require their selected transport assertions and unchanged control results.
+				// oxlint-disable-next-line node-test/no-conditional-assertion
 				assert.equal(integrated.exitCode, raw.status);
+				// Fixed native launcher/PATHEXT variants require their selected transport assertions and unchanged control results.
+				// oxlint-disable-next-line node-test/no-conditional-assertion
 				assert.equal(integrated.stdout, raw.stdout);
 			}
 			await rm(join(cwd, "agent-browser.cmd"));
@@ -181,10 +220,16 @@ test(
 			await withPatchedEnv({ PATHEXT: ".EXE;.CMD" }, async () => {
 				const env = childEnv(`${custom};${prefix}`),
 					raw = original(cwd, env, [script, "probe"]);
-				await sameFile(JSON.parse(raw.stdout).exe, join(custom, "agent-browser.exe"));
+				await sameFile(
+					readString(readRecord(JSON.parse(raw.stdout)).exe),
+					join(custom, "agent-browser.exe"),
+				);
 				assert.equal(resolveWindowsStockLauncher(cwd, env), undefined);
 				const integrated = await runAgentBrowserProcess({ cwd, env, args: [script, "probe"] });
-				await sameFile(JSON.parse(integrated.stdout).exe, join(custom, "agent-browser.exe"));
+				await sameFile(
+					readString(readRecord(JSON.parse(integrated.stdout)).exe),
+					join(custom, "agent-browser.exe"),
+				);
 			});
 			const stockCwd = join(root, "stock-cwd");
 			await stock(stockCwd);
@@ -198,7 +243,10 @@ test(
 				args: [script, "probe"],
 			});
 			assert.equal(noCwdResult.exitCode, noCwdRaw.status);
-			assert.deepEqual(JSON.parse(noCwdResult.stdout), JSON.parse(noCwdRaw.stdout));
+			assert.deepEqual(
+				readRecord(JSON.parse(noCwdResult.stdout)),
+				readRecord(JSON.parse(noCwdRaw.stdout)),
+			);
 			await withPatchedEnv({ ComSpec: process.execPath }, async () => {
 				const env = childEnv(stockCwd),
 					raw = original(stockCwd, env, [script, "probe"]);
@@ -231,9 +279,9 @@ test(
 			const raw = original(root, env, args, stdin);
 			const result = await runAgentBrowserProcess({ cwd: root, env, args, stdin });
 			assert.equal(result.exitCode, raw.status);
-			assert.deepEqual(JSON.parse(result.stdout), JSON.parse(raw.stdout));
-			assert.notDeepEqual(JSON.parse(result.stdout).args, args);
-			assert.equal(JSON.parse(result.stdout).stdin, stdin);
+			assert.deepEqual(readRecord(JSON.parse(result.stdout)), readRecord(JSON.parse(raw.stdout)));
+			assert.notDeepEqual(readRecord(JSON.parse(result.stdout)).args, args);
+			assert.equal(readRecord(JSON.parse(result.stdout)).stdin, stdin);
 		} finally {
 			await rm(root, { recursive: true, force: true });
 		}
@@ -263,32 +311,47 @@ test(
 				"missing-binary",
 				"directory-binary",
 			]) {
-				await writeFile(
-					shim,
-					kind === "extra-command"
-						? template + "@REM custom command\r\n"
-						: kind === "quoted-forwarding"
-							? template.replace("%*", '"%*"')
-							: template,
-				);
+				let shimContent = template;
+				if (kind === "extra-command") {
+					shimContent += "@REM custom command\r\n";
+				} else if (kind === "quoted-forwarding") {
+					shimContent = template.replace("%*", '"%*"');
+				}
+				// Finish the native control before the next case changes the shared launcher fixture or PATHEXT.
+				// oxlint-disable-next-line no-await-in-loop
+				await writeFile(shim, shimContent);
+				// Finish the native control before the next case changes the shared launcher fixture or PATHEXT.
+				// oxlint-disable-next-line no-await-in-loop
 				await writeFile(
 					manifest,
 					kind === "wrong-package" ? '{"name":"custom"}' : originalManifest,
 				);
 				if (kind === "missing-binary") {
+					// Finish the native control before the next case changes the shared launcher fixture or PATHEXT.
+					// oxlint-disable-next-line no-await-in-loop
 					await rm(exe);
 				}
 				if (kind === "directory-binary") {
+					// Finish the native control before the next case changes the shared launcher fixture or PATHEXT.
+					// oxlint-disable-next-line no-await-in-loop
 					await mkdir(exe);
 				}
+				// Fixed native launcher/PATHEXT variants require their selected transport assertions and unchanged control results.
+				// oxlint-disable-next-line node-test/no-conditional-assertion
 				assert.equal(resolveWindowsStockLauncher(root, env), undefined, kind);
 				const raw = original(root, env, [script, "probe"]);
+				// Finish the native control before the next case changes the shared launcher fixture or PATHEXT.
+				// oxlint-disable-next-line no-await-in-loop
 				const integrated = await runAgentBrowserProcess({
 					cwd: root,
 					env,
 					args: [script, "probe"],
 				});
+				// Fixed native launcher/PATHEXT variants require their selected transport assertions and unchanged control results.
+				// oxlint-disable-next-line node-test/no-conditional-assertion
 				assert.equal(integrated.exitCode, raw.status, kind);
+				// Fixed native launcher/PATHEXT variants require their selected transport assertions and unchanged control results.
+				// oxlint-disable-next-line node-test/no-conditional-assertion
 				assert.equal(integrated.stdout, raw.stdout, kind);
 			}
 			const missingEnv = childEnv(join(root, "absent"));
@@ -299,7 +362,7 @@ test(
 				args: ["--version"],
 			});
 			assert.equal(missing.exitCode, 127);
-			assert.equal((missing.spawnError as NodeJS.ErrnoException)?.code, "ENOENT");
+			assert.equal(hasErrorCode(missing.spawnError, "ENOENT"), true);
 			assert.equal(missing.agentBrowserStarted, false);
 		} finally {
 			await rm(root, { recursive: true, force: true });
@@ -331,24 +394,34 @@ for (const mode of ["abort", "timeout"] as const) {
 			});
 			for (let count = 0; count < 100; count++) {
 				try {
+					// Poll the observed dispatch/exit state before waiting again; parallel polls would race cancellation.
+					// oxlint-disable-next-line no-await-in-loop
 					pid = Number(await readFile(marker, "utf8"));
 					break;
 				} catch {
-					await new Promise((resolve) => setTimeout(resolve, 20));
+					// Poll the observed dispatch/exit state before waiting again; parallel polls would race cancellation.
+					// oxlint-disable-next-line no-await-in-loop
+					await new Promise<void>((resolve) => {
+						setTimeout(resolve, 20);
+					});
 				}
 			}
-			assert.ok(pid, "child must start before cancellation");
+			assert.ok(pid !== undefined && pid !== 0, "child must start before cancellation");
 			if (mode === "abort") {
 				controller.abort();
 			}
 			const result = await running;
 			assert.equal(result.aborted, mode === "abort");
 			assert.equal(result.timedOut, mode === "timeout");
-			assert.throws(() => process.kill(pid!, 0), { code: "ESRCH" }, "reaped before returning");
+			assert.throws(
+				() => process.kill(readNumber(pid), 0),
+				{ code: "ESRCH" },
+				"reaped before returning",
+			);
 		} finally {
 			controller.abort();
 			await running;
-			if (pid) {
+			if (pid !== undefined && pid !== 0) {
 				try {
 					process.kill(pid, "SIGKILL");
 				} catch {
@@ -362,9 +435,14 @@ for (const mode of ["abort", "timeout"] as const) {
 
 test(
 	"actual stock Rust receives exact LF/CRLF and every vector operand through production integration",
-	{ skip: !windows || !process.env.PI_AGENT_BROWSER_STOCK_PREFIX },
+	{
+		skip:
+			!windows ||
+			process.env.PI_AGENT_BROWSER_STOCK_PREFIX === undefined ||
+			process.env.PI_AGENT_BROWSER_STOCK_PREFIX === "",
+	},
 	async () => {
-		const prefix = process.env.PI_AGENT_BROWSER_STOCK_PREFIX!;
+		const prefix = readString(process.env.PI_AGENT_BROWSER_STOCK_PREFIX);
 		const root = await mkdtemp(join(tmpdir(), "rust-argv-"));
 		try {
 			const exe = join(
@@ -375,7 +453,7 @@ test(
 					"agent-browser-win32-x64.exe",
 				),
 				env = childEnv(prefix);
-			await sameFile(resolveWindowsStockLauncher(root, env)!, exe);
+			await sameFile(readString(resolveWindowsStockLauncher(root, env)), exe);
 			for (const operand of [
 				"--no-startup-window,--disable-gpu\n--no-sandbox",
 				"--no-startup-window,--disable-gpu\r\n--no-sandbox",
@@ -389,16 +467,30 @@ test(
 					encoding: "utf8",
 					timeout: 10_000,
 				});
+				// Fixed native launcher/PATHEXT variants require their selected transport assertions and unchanged control results.
+				// oxlint-disable-next-line node-test/no-conditional-assertion
 				assert.equal(direct.status, 1, direct.stderr);
-				assert.equal(JSON.parse(direct.stdout).error, expected);
+				// Fixed native launcher/PATHEXT variants require their selected transport assertions and unchanged control results.
+				// oxlint-disable-next-line node-test/no-conditional-assertion
+				assert.equal(readRecord(JSON.parse(direct.stdout)).error, expected);
 				const old = original(root, env, args);
 				if (operand.includes("\n")) {
-					assert.notEqual(JSON.parse(old.stdout).error, expected);
+					// Fixed native launcher/PATHEXT variants require their selected transport assertions and unchanged control results.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
+					assert.notEqual(readRecord(JSON.parse(old.stdout)).error, expected);
 				}
+				// Finish the native control before the next case changes the shared launcher fixture or PATHEXT.
+				// oxlint-disable-next-line no-await-in-loop
 				const result = await runAgentBrowserProcess({ cwd: root, env, args });
+				// Fixed native launcher/PATHEXT variants require their selected transport assertions and unchanged control results.
+				// oxlint-disable-next-line node-test/no-conditional-assertion
 				assert.equal(result.exitCode, 1, result.stderr);
+				// Fixed native launcher/PATHEXT variants require their selected transport assertions and unchanged control results.
+				// oxlint-disable-next-line node-test/no-conditional-assertion
 				assert.equal(result.spawnError, undefined);
-				assert.equal(JSON.parse(result.stdout).error, expected);
+				// Fixed native launcher/PATHEXT variants require their selected transport assertions and unchanged control results.
+				// oxlint-disable-next-line node-test/no-conditional-assertion
+				assert.equal(readRecord(JSON.parse(result.stdout)).error, expected);
 				console.log(
 					JSON.stringify({
 						operand,

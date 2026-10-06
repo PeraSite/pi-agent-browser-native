@@ -8,30 +8,30 @@
 
 import { AsyncLocalStorage } from "node:async_hooks";
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import type { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { EventEmitter, once } from "node:events";
 import { appendFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { chmod, readFile, writeFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { execPath as nodeExecPath, platform as processPlatform } from "node:process";
 
 import type {
-	AgentToolResult,
 	ExtensionAPI,
 	Theme,
 	ToolDefinition,
 	ToolRenderResultOptions,
 } from "@earendil-works/pi-coding-agent";
 import type { Component } from "@earendil-works/pi-tui";
-import type { TSchema } from "typebox";
+import { Type, type Static, type TSchema } from "typebox";
+import { Check } from "typebox/value";
 
 import agentBrowserExtension from "../../extensions/agent-browser/index.js";
 import { convertBrowserEntries } from "../../extensions/agent-browser/lib/browser-session-conversion.js";
 import { TARGET_AGENT_BROWSER_VERSION_LABEL } from "../../scripts/agent-browser-target.mjs";
+import { hasErrorCode } from "./assertions.js";
 
 export const TEST_SESSION_ID = "12345678-1234-5678-9abc-def012345678";
 export const DOWNLOAD_FIXTURE_CONTENT = "download contract fixture report\n";
@@ -71,7 +71,7 @@ function sendFixtureHtml(response: ServerResponse, html: string): void {
 export async function startAgentBrowserContractFixtureServer(): Promise<FixtureServer> {
 	const server = createServer((request: IncomingMessage, response: ServerResponse) => {
 		const url = new URL(request.url ?? "/", "http://127.0.0.1");
-		if (url.pathname === "/" || url.pathname === "/contract") {
+		if (["/", "/contract"].includes(url.pathname)) {
 			sendFixtureHtml(
 				response,
 				`<!doctype html>
@@ -310,8 +310,11 @@ export async function startAgentBrowserContractFixtureServer(): Promise<FixtureS
 		});
 	});
 
-	const address = server.address() as AddressInfo | null;
-	assert.ok(address, "expected fixture server to bind to a local port");
+	const address = server.address();
+	assert.ok(
+		address !== null && typeof address === "object",
+		"expected fixture server to bind to a local port",
+	);
 	return {
 		baseUrl: `http://127.0.0.1:${address.port}`,
 		close: async () => {
@@ -335,8 +338,8 @@ export function buildUserBranch(prompt = ""): unknown[] {
 }
 
 export function createToolBranchEntry(options: {
-	details: Record<string, unknown>;
-	isError?: boolean;
+	readonly details: Readonly<Record<string, unknown>>;
+	readonly isError?: boolean;
 }): unknown {
 	return {
 		type: "message",
@@ -349,22 +352,22 @@ export function createToolBranchEntry(options: {
 }
 
 export type AgentBrowserToolParams = {
-	code?: string;
-	args?: string[];
-	semanticAction?: {
-		action: "check" | "click" | "fill" | "select";
-		locator?: "alt" | "label" | "placeholder" | "role" | "testid" | "text" | "title";
-		value?: string;
-		values?: string[];
-		selector?: string;
-		text?: string;
-		role?: string;
-		name?: string;
-		session?: string;
+	readonly code?: string;
+	readonly args?: readonly string[];
+	readonly semanticAction?: {
+		readonly action: "check" | "click" | "fill" | "select";
+		readonly locator?: "alt" | "label" | "placeholder" | "role" | "testid" | "text" | "title";
+		readonly value?: string;
+		readonly values?: readonly string[];
+		readonly selector?: string;
+		readonly text?: string;
+		readonly role?: string;
+		readonly name?: string;
+		readonly session?: string;
 	};
-	job?: {
-		steps: Array<{
-			action:
+	readonly job?: {
+		readonly steps: readonly {
+			readonly action:
 				| "open"
 				| "click"
 				| "fill"
@@ -376,80 +379,80 @@ export type AgentBrowserToolParams = {
 				| "waitForDownload"
 				| "screenshot"
 				| "snapshot";
-			url?: string;
-			loadState?: "domcontentloaded" | "load" | "networkidle";
-			selector?: string;
-			locator?: "alt" | "label" | "placeholder" | "role" | "testid" | "text" | "title";
-			role?: string;
-			name?: string;
-			text?: string;
-			value?: string;
-			values?: string[];
-			path?: string;
-			delayMs?: number;
-			press?: string;
-			milliseconds?: number;
-		}>;
+			readonly url?: string;
+			readonly loadState?: "domcontentloaded" | "load" | "networkidle";
+			readonly selector?: string;
+			readonly locator?: "alt" | "label" | "placeholder" | "role" | "testid" | "text" | "title";
+			readonly role?: string;
+			readonly name?: string;
+			readonly text?: string;
+			readonly value?: string;
+			readonly values?: readonly string[];
+			readonly path?: string;
+			readonly delayMs?: number;
+			readonly press?: string;
+			readonly milliseconds?: number;
+		}[];
 	};
-	qa?:
+	readonly qa?:
 		| {
-				attached: true;
-				expectedText?: string | string[];
-				expectedSelector?: string;
-				screenshotPath?: string;
-				checkConsole?: boolean;
-				checkErrors?: boolean;
-				checkNetwork?: boolean;
+				readonly attached: true;
+				readonly expectedText?: string | readonly string[];
+				readonly expectedSelector?: string;
+				readonly screenshotPath?: string;
+				readonly checkConsole?: boolean;
+				readonly checkErrors?: boolean;
+				readonly checkNetwork?: boolean;
 		  }
 		| {
-				attached?: false;
-				url: string;
-				expectedText?: string | string[];
-				expectedSelector?: string;
-				screenshotPath?: string;
-				checkConsole?: boolean;
-				checkErrors?: boolean;
-				checkNetwork?: boolean;
+				readonly attached?: false;
+				readonly url: string;
+				readonly expectedText?: string | readonly string[];
+				readonly expectedSelector?: string;
+				readonly screenshotPath?: string;
+				readonly checkConsole?: boolean;
+				readonly checkErrors?: boolean;
+				readonly checkNetwork?: boolean;
 		  };
-	sourceLookup?: {
-		selector?: string;
-		reactFiberId?: string;
-		componentName?: string;
-		includeDomHints?: boolean;
-		maxWorkspaceFiles?: number;
+	readonly sourceLookup?: {
+		readonly selector?: string;
+		readonly reactFiberId?: string;
+		readonly componentName?: string;
+		readonly includeDomHints?: boolean;
+		readonly maxWorkspaceFiles?: number;
 	};
-	networkSourceLookup?: {
-		filter?: string;
-		requestId?: string;
-		session?: string;
-		url?: string;
-		maxWorkspaceFiles?: number;
+	readonly networkSourceLookup?: {
+		readonly filter?: string;
+		readonly requestId?: string;
+		readonly session?: string;
+		readonly url?: string;
+		readonly maxWorkspaceFiles?: number;
 	};
-	electron?: {
-		action: "list" | "launch" | "status" | "cleanup" | "probe";
-		query?: string;
-		maxResults?: number;
-		appPath?: string;
-		appName?: string;
-		bundleId?: string;
-		executablePath?: string;
-		appArgs?: string[];
-		handoff?: "connect" | "tabs" | "snapshot";
-		targetType?: "page" | "webview" | "any";
-		timeoutMs?: number;
-		allow?: string[];
-		deny?: string[];
-		launchId?: string;
-		all?: boolean;
+	readonly electron?: {
+		readonly action: "list" | "launch" | "status" | "cleanup" | "probe";
+		readonly query?: string;
+		readonly maxResults?: number;
+		readonly appPath?: string;
+		readonly appName?: string;
+		readonly bundleId?: string;
+		readonly executablePath?: string;
+		readonly appArgs?: readonly string[];
+		readonly handoff?: "connect" | "tabs" | "snapshot";
+		readonly targetType?: "page" | "webview" | "any";
+		readonly timeoutMs?: number;
+		readonly allow?: readonly string[];
+		readonly deny?: readonly string[];
+		readonly launchId?: string;
+		readonly all?: boolean;
 	};
-	outputPath?: string;
-	sessionMode?: "auto" | "fresh";
-	stdin?: string;
-	timeoutMs?: number;
+	readonly outputPath?: string;
+	readonly sessionMode?: "auto" | "fresh";
+	readonly stdin?: string;
+	readonly timeoutMs?: number;
 };
 
 export interface AgentBrowserToolRenderContext {
-	args: AgentBrowserToolParams;
+	args: unknown;
 	argsComplete: boolean;
 	cwd: string;
 	executionStarted: boolean;
@@ -463,33 +466,87 @@ export interface AgentBrowserToolRenderContext {
 	toolCallId: string;
 }
 
+const JSON_VALUE = Type.Cyclic(
+	{
+		Json: Type.Union([
+			Type.Null(),
+			Type.Boolean(),
+			Type.Number(),
+			Type.String(),
+			Type.Array(Type.Ref("Json")),
+			Type.Record(Type.String(), Type.Ref("Json")),
+		]),
+	},
+	"Json",
+);
+const TOOL_RESULT = Type.Object({
+	content: Type.Array(
+		Type.Union([
+			Type.Object({ type: Type.Literal("text"), text: Type.String() }),
+			Type.Object({
+				type: Type.Literal("image"),
+				data: Type.String(),
+				mimeType: Type.String(),
+				text: Type.Optional(Type.String()),
+			}),
+		]),
+	),
+	details: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
+	isError: Type.Optional(Type.Boolean()),
+	structuredContent: Type.Optional(JSON_VALUE),
+});
+export type TestToolResult = Static<typeof TOOL_RESULT>;
+
 export type RegisteredTool = {
-	description: string;
-	parameters: TSchema;
-	outputSchema?: ToolDefinition["outputSchema"];
-	namespace?: ToolDefinition["namespace"];
-	execute: (
+	readonly description: string;
+	readonly parameters: TSchema;
+	readonly outputSchema?: ToolDefinition["outputSchema"];
+	readonly namespace?: ToolDefinition["namespace"];
+	readonly execute: (
 		toolCallId: string,
 		params: unknown,
 		signal: AbortSignal | undefined,
 		onUpdate: ((update: unknown) => void) | undefined,
 		ctx: unknown,
-	) => Promise<unknown>;
-	name: string;
-	promptGuidelines: string[];
-	promptSnippet: string;
-	renderCall?: (
-		args: AgentBrowserToolParams,
+	) => Promise<TestToolResult>;
+	readonly name: string;
+	readonly promptGuidelines: readonly string[];
+	readonly promptSnippet: string;
+	readonly renderCall?: (args: unknown, theme: Theme, context: unknown) => Component;
+	readonly renderResult?: (
+		result: unknown,
+		options: Readonly<ToolRenderResultOptions>,
 		theme: Theme,
-		context: AgentBrowserToolRenderContext,
-	) => Component;
-	renderResult?: (
-		result: AgentToolResult<unknown>,
-		options: ToolRenderResultOptions,
-		theme: Theme,
-		context: AgentBrowserToolRenderContext,
+		context: unknown,
 	) => Component;
 };
+
+function assertComponent(value: unknown): asserts value is Component {
+	assert.ok(typeof value === "object" && value !== null, "expected a TUI component");
+	assert.ok("render" in value && typeof value.render === "function", "expected component.render");
+	assert.ok(
+		"invalidate" in value && typeof value.invalidate === "function",
+		"expected component.invalidate",
+	);
+	assert.ok(
+		!("handleInput" in value) ||
+			value.handleInput === undefined ||
+			typeof value.handleInput === "function",
+		"expected an optional component.handleInput callback",
+	);
+	assert.ok(
+		!("handleMouse" in value) ||
+			value.handleMouse === undefined ||
+			typeof value.handleMouse === "function",
+		"expected an optional component.handleMouse callback",
+	);
+	assert.ok(
+		!("wantsKeyRelease" in value) ||
+			value.wantsKeyRelease === undefined ||
+			typeof value.wantsKeyRelease === "boolean",
+		"expected an optional component.wantsKeyRelease flag",
+	);
+}
 
 function adaptRegisteredTool<TParams extends TSchema, TDetails, TState>(
 	tool: ToolDefinition<TParams, TDetails, TState>,
@@ -501,15 +558,18 @@ function adaptRegisteredTool<TParams extends TSchema, TDetails, TState>(
 		description: tool.description,
 		outputSchema: tool.outputSchema,
 		namespace: tool.namespace,
-		execute: (toolCallId, params, signal, onUpdate, ctx) => {
-			type ExecuteArgs = Parameters<typeof tool.execute>;
-			return tool.execute(
+		execute: async (toolCallId, params, signal, onUpdate, ctx) => {
+			// Tests intentionally send invalid params and partial contexts to registered callbacks.
+			// Dynamic invocation preserves that negative boundary; only the actual output is trusted.
+			const result: unknown = await Reflect.apply(tool.execute.bind(tool), tool, [
 				toolCallId,
-				params as ExecuteArgs[1],
+				params,
 				signal,
-				onUpdate as ExecuteArgs[3],
-				ctx as ExecuteArgs[4],
-			);
+				onUpdate,
+				ctx,
+			]);
+			assert.ok(Check(TOOL_RESULT, result), "registered tool returned an invalid result envelope");
+			return result;
 		},
 		name: tool.name,
 		parameters: tool.parameters,
@@ -519,36 +579,92 @@ function adaptRegisteredTool<TParams extends TSchema, TDetails, TState>(
 			sourceRenderCall === undefined
 				? undefined
 				: (args, theme, context) => {
-						type RenderCallArgs = Parameters<typeof sourceRenderCall>;
-						return sourceRenderCall(args as RenderCallArgs[0], theme, context as RenderCallArgs[2]);
+						const result: unknown = Reflect.apply(sourceRenderCall, undefined, [
+							args,
+							theme,
+							context,
+						]);
+						assertComponent(result);
+						return result;
 					},
 		renderResult:
 			sourceRenderResult === undefined
 				? undefined
 				: (result, options, theme, context) => {
-						type RenderResultArgs = Parameters<typeof sourceRenderResult>;
-						return sourceRenderResult(
-							result as RenderResultArgs[0],
+						const rendered: unknown = Reflect.apply(sourceRenderResult, undefined, [
+							result,
 							options,
 							theme,
-							context as RenderResultArgs[3],
-						);
+							context,
+						]);
+						assertComponent(rendered);
+						return rendered;
 					},
 	};
 }
 
-export function createExtensionHarness(options: {
-	branch?: unknown[];
-	cwd: string;
-	onBusEvent?: (channel: string, request: unknown) => void;
-	onAppendEntry?: (customType: string, data: unknown) => void;
-	projectTrusted?: boolean;
-	prompt?: string;
-	sessionDir?: string;
-	sessionFile?: string | null;
-	sessionId?: string;
-}) {
-	const handlers = new Map<string, Array<(...args: unknown[]) => unknown>>();
+/** Mutable, caller-owned replay array shared with the harness's branch synchronization. */
+export type FixtureBranch = unknown[];
+
+export interface ExtensionHarnessOptions {
+	// Live fixture-owned replay array: normalize in place so external append/fault tests stay visible.
+	readonly branch?: FixtureBranch;
+	readonly cwd: string;
+	readonly onBusEvent?: (channel: string, request: unknown) => void;
+	readonly onAppendEntry?: (customType: string, data: unknown) => void;
+	readonly projectTrusted?: boolean;
+	readonly prompt?: string;
+	readonly sessionDir?: string;
+	readonly sessionFile?: string | null;
+	readonly sessionId?: string;
+}
+type HarnessHandler = (...args: readonly unknown[]) => unknown;
+interface HarnessContext {
+	readonly cwd: string;
+	readonly isProjectTrusted: () => boolean;
+	readonly sessionManager: {
+		readonly getBranch: () => unknown[];
+		readonly getEntries: () => unknown[];
+		readonly getEntry: (id: string) => unknown;
+		readonly getHeader: () => {
+			type: string;
+			version: number;
+			id: string;
+			cwd: string;
+			timestamp: string;
+		};
+		readonly getLeafId: () => string | null;
+		readonly buildSessionProjection: () => { messages: unknown[] };
+		readonly getSessionDir: () => string | undefined;
+		readonly getSessionFile: () => string | undefined;
+		readonly getSessionId: () => string;
+	};
+}
+export interface ExtensionHarness {
+	readonly appendedEntries: Array<{ customType: string; data: unknown }>;
+	readonly ctx: HarnessContext;
+	readonly events: ExtensionAPI["events"];
+	readonly getTool: (name: string) => RegisteredTool | undefined;
+	readonly getActiveTools: () => string[];
+	readonly handlers: Map<string, HarnessHandler[]>;
+	readonly tools: Map<string, RegisteredTool>;
+	readonly setBranch: (nextBranch: FixtureBranch) => void;
+	readonly tool: RegisteredTool;
+}
+function entryId(value: unknown): string | undefined {
+	return typeof value === "object" &&
+		value !== null &&
+		"id" in value &&
+		typeof value.id === "string"
+		? value.id
+		: undefined;
+}
+function unsupportedHarnessOperation(): never {
+	throw new Error("This SDK operation is outside the focused extension harness");
+}
+
+export function createExtensionHarness(options: ExtensionHarnessOptions): ExtensionHarness {
+	const handlers = new Map<string, Array<(...args: readonly unknown[]) => unknown>>();
 	const registeredTools = new Map<string, RegisteredTool>();
 	let activeTools: string[] = ["read", "bash"];
 	const appendedEntries: Array<{ customType: string; data: unknown }> = [];
@@ -565,7 +681,7 @@ export function createExtensionHarness(options: {
 		cwd: options.cwd,
 		timestamp: new Date().toISOString(),
 	};
-	const normalizeBranch = (entries: unknown[]) => {
+	const normalizeBranch = (entries = options.branch ?? buildUserBranch(options.prompt)) => {
 		let parentId: string | null = null;
 		const normalized = convertBrowserEntries(
 			entries.map((value) => {
@@ -583,15 +699,15 @@ export function createExtensionHarness(options: {
 			}),
 			sessionId,
 		);
-		entries.length = 0;
+		entries.splice(0, entries.length);
 		for (const entry of normalized) {
 			entries.push(entry);
 		}
 		return entries;
 	};
-	let branch = normalizeBranch(options.branch ?? buildUserBranch(options.prompt));
+	let branch = normalizeBranch();
 	const entries = [...branch];
-	if (sessionFile) {
+	if (sessionFile !== undefined && sessionFile.length > 0) {
 		mkdirSync(dirname(sessionFile), { recursive: true });
 		writeFileSync(
 			sessionFile,
@@ -600,31 +716,53 @@ export function createExtensionHarness(options: {
 		);
 	}
 	const syncFixtureEntries = () => {
-		const ids = new Set(entries.map((entry) => (entry as { id?: string }).id));
-		if (!branch.some((entry) => !ids.has((entry as { id?: string }).id))) {
+		const ids = new Set(entries.map(entryId));
+		if (!branch.some((entry) => !ids.has(entryId(entry)))) {
 			return;
 		}
 		normalizeBranch(branch);
 		for (const entry of branch) {
-			if (!ids.has((entry as { id: string }).id)) {
-				ids.add((entry as { id: string }).id);
+			if (!ids.has(entryId(entry))) {
+				ids.add(entryId(entry));
 				entries.push(entry);
-				if (sessionFile) appendFileSync(sessionFile, `${JSON.stringify(entry)}\n`);
+				if (sessionFile !== undefined && sessionFile.length > 0) {
+					appendFileSync(sessionFile, `${JSON.stringify(entry)}\n`);
+				}
 			}
 		}
 	};
 
-	const pi: Pick<
-		Parameters<typeof agentBrowserExtension>[0],
-		| "events"
-		| "appendEntry"
-		| "getActiveTools"
-		| "getAllTools"
-		| "getCommands"
-		| "on"
-		| "registerTool"
-		| "setActiveTools"
-	> = {
+	const pi: ExtensionAPI &
+		Readonly<
+			Record<"refreshTools" | "registerProviderAuthFallback", typeof unsupportedHarnessOperation>
+		> = {
+		refreshTools: unsupportedHarnessOperation,
+		registerProviderAuthFallback: unsupportedHarnessOperation,
+		registerCommand: unsupportedHarnessOperation,
+		registerShortcut: unsupportedHarnessOperation,
+		registerFlag: unsupportedHarnessOperation,
+		getFlag: unsupportedHarnessOperation,
+		registerMessageRenderer: unsupportedHarnessOperation,
+		registerMarkdownTransformer: unsupportedHarnessOperation,
+		registerEntryRenderer: unsupportedHarnessOperation,
+		registerToolRenderer: unsupportedHarnessOperation,
+		sendMessage: unsupportedHarnessOperation,
+		sendUserMessage: unsupportedHarnessOperation,
+		setSessionName: unsupportedHarnessOperation,
+		getSessionName: unsupportedHarnessOperation,
+		setLabel: unsupportedHarnessOperation,
+		exec: unsupportedHarnessOperation,
+		getSettings: unsupportedHarnessOperation,
+		setModel: unsupportedHarnessOperation,
+		getThinkingLevel: unsupportedHarnessOperation,
+		setThinkingLevel: unsupportedHarnessOperation,
+		registerProvider: unsupportedHarnessOperation,
+		unregisterProvider: unsupportedHarnessOperation,
+		registerMcpServer: unsupportedHarnessOperation,
+		unregisterMcpServer: unsupportedHarnessOperation,
+		getMcpServers: unsupportedHarnessOperation,
+		registerVirtualModel: unsupportedHarnessOperation,
+		unregisterVirtualModel: unsupportedHarnessOperation,
 		events: {
 			emit(channel, request) {
 				options.onBusEvent?.(channel, request);
@@ -643,14 +781,19 @@ export function createExtensionHarness(options: {
 		},
 		getAllTools() {
 			return [...registeredTools.values()].map((tool) => ({
-				...tool,
+				name: tool.name,
+				description: tool.description,
+				parameters: tool.parameters,
+				promptGuidelines: [...tool.promptGuidelines],
+				namespace: tool.namespace,
+				outputSchema: tool.outputSchema,
 				id: tool.name,
-				exposure: "direct" as const,
+				exposure: "direct",
 				sourceInfo: {
 					path: "test",
 					source: "test",
-					scope: "temporary" as const,
-					origin: "top-level" as const,
+					scope: "temporary",
+					origin: "top-level",
 				},
 			}));
 		},
@@ -665,24 +808,26 @@ export function createExtensionHarness(options: {
 				customType,
 				data,
 				id: randomUUID(),
-				parentId: (branch.at(-1) as { id?: string } | undefined)?.id ?? null,
+				parentId: entryId(branch.at(-1)) ?? null,
 				timestamp: new Date().toISOString(),
 			};
 			branch.push(entry);
 			entries.push(entry);
 			options.onAppendEntry?.(customType, data);
-			if (sessionFile) {
+			if (sessionFile !== undefined && sessionFile.length > 0) {
 				appendFileSync(sessionFile, `${JSON.stringify(entry)}\n`);
 			}
 		},
 		on(event, handler) {
 			const existingHandlers = handlers.get(event) ?? [];
-			existingHandlers.push(handler as (...args: unknown[]) => unknown);
+			const registeredHandler = (...args: readonly unknown[]): unknown =>
+				Reflect.apply(handler, undefined, args);
+			existingHandlers.push(registeredHandler);
 			handlers.set(event, existingHandlers);
 			return () => {
 				handlers.set(
 					event,
-					existingHandlers.filter((candidate) => candidate !== handler),
+					existingHandlers.filter((candidate) => candidate !== registeredHandler),
 				);
 			};
 		},
@@ -692,13 +837,16 @@ export function createExtensionHarness(options: {
 			activeTools.push(registeredTool.name);
 		},
 	};
-	agentBrowserExtension(pi as ExtensionAPI);
+	agentBrowserExtension(pi);
 
 	const registeredTool = registeredTools.get("agent_browser");
 	assert.ok(registeredTool, "expected the extension to register the agent_browser tool");
 
 	const sessionDir =
-		options.sessionDir ?? (options.sessionFile ? dirname(options.sessionFile) : undefined);
+		options.sessionDir ??
+		(typeof options.sessionFile === "string" && options.sessionFile.length > 0
+			? dirname(options.sessionFile)
+			: undefined);
 	const ctx = {
 		cwd: options.cwd,
 		isProjectTrusted: () => options.projectTrusted ?? true,
@@ -721,7 +869,7 @@ export function createExtensionHarness(options: {
 			getHeader: () => header,
 			getLeafId: () => {
 				syncFixtureEntries();
-				return (branch.at(-1) as { id?: string } | undefined)?.id ?? null;
+				return entryId(branch.at(-1)) ?? null;
 			},
 			buildSessionProjection: () => ({
 				messages: branch.flatMap((entry) =>
@@ -744,13 +892,13 @@ export function createExtensionHarness(options: {
 		appendedEntries,
 		ctx,
 		events: pi.events,
-		getTool(name: string) {
+		getTool(name: string): RegisteredTool | undefined {
 			return registeredTools.get(name);
 		},
-		getActiveTools: () => [...activeTools],
+		getActiveTools: (): string[] => [...activeTools],
 		handlers,
 		tools: registeredTools,
-		setBranch(nextBranch: unknown[]) {
+		setBranch(nextBranch): void {
 			branch = normalizeBranch(nextBranch);
 			syncFixtureEntries();
 		},
@@ -759,60 +907,63 @@ export function createExtensionHarness(options: {
 }
 
 export async function runExtensionEvent(
-	handlers: Map<string, Array<(...args: unknown[]) => unknown>>,
+	handlers: ReadonlyMap<string, readonly HarnessHandler[]>,
 	eventName: string,
-	...args: unknown[]
+	...args: readonly unknown[]
 ): Promise<void> {
 	for (const handler of handlers.get(eventName) ?? []) {
+		// Registered handlers share event/context state and must execute in registration order.
+		// oxlint-disable-next-line no-await-in-loop
 		await handler(...args);
 	}
 }
 
-export async function getBrowserInstructions(
-	harness: ReturnType<typeof createExtensionHarness>,
-): Promise<string> {
-	const event = {
+export async function getBrowserInstructions(harness: {
+	readonly handlers: ReadonlyMap<string, readonly HarnessHandler[]>;
+	readonly ctx: unknown;
+}): Promise<string> {
+	const event: {
+		prompt: string;
+		systemPromptOptions: { sections: Partial<Record<string, string>> };
+	} = {
 		prompt: "Please continue.",
-		systemPromptOptions: { sections: {} as Record<string, string> },
+		systemPromptOptions: { sections: {} },
 	};
 	await runExtensionEvent(harness.handlers, "before_agent_start", event, harness.ctx);
 	return event.systemPromptOptions.sections.agent_browser ?? "";
 }
 
-export async function runExtensionEventResults<T>(
-	handlers: Map<string, Array<(...args: unknown[]) => unknown>>,
+export async function runExtensionEventResults(
+	handlers: ReadonlyMap<string, readonly HarnessHandler[]>,
 	eventName: string,
-	...args: unknown[]
-): Promise<T[]> {
-	const results: T[] = [];
+	...args: readonly unknown[]
+): Promise<unknown[]> {
+	const results: unknown[] = [];
 	for (const handler of handlers.get(eventName) ?? []) {
+		// Result handlers must observe preceding handler mutations.
+		// oxlint-disable-next-line no-await-in-loop
 		const result = await handler(...args);
 		if (result !== undefined) {
-			results.push(result as T);
+			results.push(result);
 		}
 	}
 	return results;
 }
 
 export async function executeRegisteredTool(
-	tool: NonNullable<ReturnType<typeof createExtensionHarness>["tool"]>,
-	ctx: ReturnType<typeof createExtensionHarness>["ctx"],
+	tool: Readonly<RegisteredTool>,
+	ctx: unknown,
 	params: unknown,
 	signal: AbortSignal = new AbortController().signal,
-) {
-	return (await tool.execute("test-tool-call", params, signal, undefined, ctx)) as {
-		content: Array<{ type: string; text?: string }>;
-		details?: Record<string, unknown>;
-		isError?: boolean;
-		structuredContent?: AgentToolResult<unknown>["structuredContent"];
-	};
+): Promise<TestToolResult> {
+	return await tool.execute("test-tool-call", params, signal, undefined, ctx);
 }
 
 const patchedEnvScope = new AsyncLocalStorage<boolean>();
 let patchedEnvQueue: Promise<void> = Promise.resolve();
 
 async function runWithPatchedEnv<T>(
-	patch: Record<string, string | undefined>,
+	patch: Readonly<Record<string, string | undefined>>,
 	run: () => Promise<T>,
 ): Promise<T> {
 	const previousValues = new Map<string, string | undefined>();
@@ -823,7 +974,7 @@ async function runWithPatchedEnv<T>(
 		} else if (
 			processPlatform === "win32" &&
 			name.toLowerCase() === "path" &&
-			previousValues.get(name)
+			(previousValues.get(name)?.length ?? 0) > 0
 		) {
 			const previousPath = previousValues.get(name) ?? "";
 			const posixStyleSuffix = `:${previousPath}`;
@@ -849,25 +1000,29 @@ async function runWithPatchedEnv<T>(
 }
 
 export async function withPatchedEnv<T>(
-	patch: Record<string, string | undefined>,
+	patch: Readonly<Record<string, string | undefined>>,
 	run: () => Promise<T>,
 ): Promise<T> {
-	if (patchedEnvScope.getStore()) {
+	if (patchedEnvScope.getStore() === true) {
 		return await runWithPatchedEnv(patch, run);
 	}
 
-	const queuedRun = patchedEnvQueue
-		.catch(() => undefined)
-		.then(() => patchedEnvScope.run(true, () => runWithPatchedEnv(patch, run)));
+	const queuedRun = patchedEnvQueue.then(() =>
+		patchedEnvScope.run(true, () => runWithPatchedEnv(patch, run)),
+	);
 	patchedEnvQueue = queuedRun.then(
-		() => undefined,
-		() => undefined,
+		() => {
+			/* Queue tracks completion only; the caller owns the actual result. */ return;
+		},
+		() => {
+			/* The original queuedRun rejection is returned to its caller below. */ return;
+		},
 	);
 	return await queuedRun;
 }
 
 /** Fake script body that spawns a detached descendant inheriting stdio (stdio-linger regressions). */
-export function buildStdioLingerFakeScript(options: { afterSpawnBody: string }): string {
+export function buildStdioLingerFakeScript(options: { readonly afterSpawnBody: string }): string {
 	return `const { spawn } = require("node:child_process");
 const { writeFileSync } = require("node:fs");
 const { tmpdir } = require("node:os");
@@ -947,23 +1102,30 @@ if (process.env.PI_AGENT_BROWSER_TEST_CUSTOM_SESSION_INFO !== "1" && __piabFakeA
 	return fakeAgentBrowserPath;
 }
 
-export interface InvocationLogEntry {
-	agentcoreApiKey?: string | null;
-	apiKey?: string | null;
-	args: string[];
-	autosave?: string | null;
-	browserbaseApiKey?: string | null;
-	browserlessApiKey?: string | null;
-	browserUseApiKey?: string | null;
-	defaultTimeout?: string | null;
-	event?: string;
-	idleTimeout?: string | null;
-	iosDevice?: string | null;
-	kernelApiKey?: string | null;
-	model?: string | null;
-	sessionName?: string;
-	socketDir?: string | null;
-	stdin?: string | null;
+const NULLABLE_LOG_STRING = Type.Optional(Type.Union([Type.String(), Type.Null()]));
+const INVOCATION_LOG_ENTRY = Type.Object({
+	agentcoreApiKey: NULLABLE_LOG_STRING,
+	apiKey: NULLABLE_LOG_STRING,
+	args: Type.Array(Type.String()),
+	autosave: NULLABLE_LOG_STRING,
+	browserbaseApiKey: NULLABLE_LOG_STRING,
+	browserlessApiKey: NULLABLE_LOG_STRING,
+	browserUseApiKey: NULLABLE_LOG_STRING,
+	confirmActions: NULLABLE_LOG_STRING,
+	defaultTimeout: NULLABLE_LOG_STRING,
+	event: Type.Optional(Type.String()),
+	idleTimeout: NULLABLE_LOG_STRING,
+	iosDevice: NULLABLE_LOG_STRING,
+	kernelApiKey: NULLABLE_LOG_STRING,
+	model: NULLABLE_LOG_STRING,
+	sessionName: Type.Optional(Type.String()),
+	socketDir: NULLABLE_LOG_STRING,
+	stdin: NULLABLE_LOG_STRING,
+});
+export type InvocationLogEntry = Static<typeof INVOCATION_LOG_ENTRY>;
+function parseInvocationLogEntry(value: unknown): InvocationLogEntry {
+	assert.ok(Check(INVOCATION_LOG_ENTRY, value), "invalid fake-upstream invocation log entry");
+	return value;
 }
 
 export async function readInvocationLog(logPath: string): Promise<InvocationLogEntry[]> {
@@ -973,20 +1135,19 @@ export async function readInvocationLog(logPath: string): Promise<InvocationLogE
 			.split("\n")
 			.map((line) => line.trim())
 			.filter((line) => line.length > 0)
-			.map((line) => JSON.parse(line) as InvocationLogEntry);
+			.map((line) => parseInvocationLogEntry(JSON.parse(line)));
 	} catch (error) {
-		const errorWithCode = error as NodeJS.ErrnoException;
-		if (errorWithCode.code === "ENOENT") {
+		if (hasErrorCode(error, "ENOENT")) {
 			return [];
 		}
 		throw error;
 	}
 }
 
-export async function readChildStdoutJsonLine<T>(
+export async function readChildStdoutJsonLine(
 	child: ReturnType<typeof spawn>,
 	timeoutMs = 15_000,
-): Promise<T> {
+): Promise<unknown> {
 	assert.ok(child.stdout, "expected child stdout pipe");
 	assert.ok(child.stderr, "expected child stderr pipe");
 	let stdout = "";
@@ -995,7 +1156,7 @@ export async function readChildStdoutJsonLine<T>(
 	child.stderr.on("data", (chunk: string) => {
 		stderr += chunk;
 	});
-	return await new Promise<T>((resolve, reject) => {
+	return await new Promise<unknown>((resolve, reject) => {
 		const timeout = setTimeout(() => {
 			reject(
 				new Error(
@@ -1007,21 +1168,24 @@ export async function readChildStdoutJsonLine<T>(
 		child.stdout?.on("data", (chunk: string) => {
 			stdout += chunk;
 			const firstLine = stdout.split("\n").find((line) => line.trim().length > 0);
-			if (!firstLine) {
+			if (firstLine === undefined || firstLine.length === 0) {
 				return;
 			}
 			clearTimeout(timeout);
 			try {
-				resolve(JSON.parse(firstLine) as T);
+				const value: unknown = JSON.parse(firstLine);
+				resolve(value);
 			} catch (error) {
-				reject(error);
+				reject(
+					error instanceof Error ? error : new Error("Failed parsing child JSON", { cause: error }),
+				);
 			}
 		});
 		child.once("exit", (code, signal) => {
 			clearTimeout(timeout);
 			reject(
 				new Error(
-					`Child exited before stdout JSON line: code=${code} signal=${signal} stdout=${stdout} stderr=${stderr}`,
+					`Child exited before stdout JSON line: code=${String(code)} signal=${String(signal)} stdout=${stdout} stderr=${stderr}`,
 				),
 			);
 		});
@@ -1037,7 +1201,9 @@ export async function stopChildProcess(child: ReturnType<typeof spawn>): Promise
 		return;
 	}
 	child.kill("SIGTERM");
-	const timeout = setTimeout(() => child.kill("SIGKILL"), 2_000);
+	const timeout = setTimeout(() => {
+		child.kill("SIGKILL");
+	}, 2_000);
 	try {
 		await once(child, "exit");
 	} finally {

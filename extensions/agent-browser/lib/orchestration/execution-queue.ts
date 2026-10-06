@@ -28,9 +28,11 @@ export class AsyncExecutionQueue {
 		const cancelled = new Promise<never>((_resolve, reject) => {
 			rejectWaiting = reject;
 		});
-		const abortWaiting = () => rejectWaiting(signal?.reason);
+		const abortWaiting = () => {
+			rejectWaiting(signal?.reason);
+		};
 		signal?.addEventListener("abort", abortWaiting, { once: true });
-		if (signal?.aborted) {
+		if (signal?.aborted === true) {
 			abortWaiting();
 		}
 		const execution = (async () => {
@@ -91,7 +93,11 @@ export class KeyedAsyncExecutionQueue {
 		this.barriers.set(namespaceKey, barrier);
 		const drains = [...this.entries]
 			.filter(([key]) => isAgentBrowserSessionIdentityKeyInNamespace(key, namespace))
-			.map(([, { queue }]) => queue.run(async () => undefined));
+			.map(([, { queue }]) =>
+				queue.run(async () => {
+					// This queued marker only waits for earlier work; it has no browser operation.
+				}),
+			);
 		await previous;
 		await Promise.all(drains);
 		try {

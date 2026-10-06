@@ -1,3 +1,4 @@
+import { readRecord } from "./helpers/assertions.js";
 /**
  * Purpose: Verify pure selector-miss recovery helpers without spawning agent-browser.
  * Responsibilities: Lock visible-ref fallback matching, rich-input recovery actions, fill-text redaction, and excluded selector shapes.
@@ -52,28 +53,24 @@ test("visible ref fallback excludes direct fill args and rich input recovery nev
 
 	const diagnostic = buildVisibleRefFallbackDiagnosticFromSnapshot({
 		snapshotData,
-		target: target!,
+		target: target,
 	});
 	assert.equal(diagnostic?.candidates.length, 2);
 	assert.deepEqual(
-		diagnostic?.candidates.map((candidate) => candidate.ref),
+		diagnostic.candidates.map((candidate) => candidate.ref),
 		["@e1", "@e2"],
 	);
 	assert.deepEqual(
-		diagnostic?.candidates.map((candidate) => candidate.args),
+		diagnostic.candidates.map((candidate) => candidate.args),
 		[undefined, undefined],
 	);
-	assert.equal(diagnostic?.candidates[1]?.role, "textbox");
+	assert.equal(diagnostic.candidates[1]?.role, "textbox");
 
-	const visibleActions = diagnostic
-		? buildVisibleRefFallbackNextActions({ diagnostic, sessionName: "s1" })
-		: [];
+	const visibleActions = buildVisibleRefFallbackNextActions({ diagnostic, sessionName: "s1" });
 	assert.deepEqual(visibleActions, []);
 
-	const publicDiagnostic = diagnostic
-		? sanitizeVisibleRefFallbackDiagnostic(diagnostic)
-		: undefined;
-	assert.equal("editableEvidence" in (publicDiagnostic?.candidates[0] ?? {}), false);
+	const publicDiagnostic = sanitizeVisibleRefFallbackDiagnostic(diagnostic);
+	assert.equal("editableEvidence" in (publicDiagnostic.candidates[0] ?? {}), false);
 	assert.equal(JSON.stringify(publicDiagnostic).includes("super-secret"), false);
 
 	const richInput = buildRichInputRecoveryDiagnostic(diagnostic);
@@ -83,11 +80,12 @@ test("visible ref fallback excludes direct fill args and rich input recovery nev
 		"focus-current-editable-ref-2",
 		"click-current-editable-ref-2",
 	]);
-	const richActions = richInput
-		? buildRichInputRecoveryNextActions({ diagnostic: richInput, sessionName: "s1" })
-		: [];
+	const richActions = buildRichInputRecoveryNextActions({
+		diagnostic: richInput,
+		sessionName: "s1",
+	});
 	assert.deepEqual(
-		richActions.map((action) => action.params?.args),
+		richActions.map((action) => readRecord(action.params).args),
 		[
 			["--session", "s1", "focus", "@e1"],
 			["--session", "s1", "click", "@e1"],
@@ -108,7 +106,7 @@ test("visible ref fallback builds direct current-ref actions for non-fill text c
 
 	const diagnostic = buildVisibleRefFallbackDiagnosticFromSnapshot({
 		snapshotData,
-		target: target!,
+		target: target,
 	});
 	assert.deepEqual(
 		diagnostic?.candidates.map((candidate) => [candidate.ref, candidate.role, candidate.args]),
@@ -118,7 +116,7 @@ test("visible ref fallback builds direct current-ref actions for non-fill text c
 		],
 	);
 	assert.deepEqual(
-		diagnostic ? buildVisibleRefFallbackNextActions({ diagnostic }).map((action) => action.id) : [],
+		buildVisibleRefFallbackNextActions({ diagnostic }).map((action) => action.id),
 		["try-current-visible-ref-1", "try-current-visible-ref-2"],
 	);
 });
@@ -163,7 +161,7 @@ test("selector recovery parses locator select targets and still requires exact n
 	});
 	assert.ok(target);
 	assert.equal(
-		buildVisibleRefFallbackDiagnosticFromSnapshot({ snapshotData, target: target! }),
+		buildVisibleRefFallbackDiagnosticFromSnapshot({ snapshotData, target: target }),
 		undefined,
 	);
 });
@@ -220,14 +218,16 @@ test("semantic fill visible-ref resolution is internal-only and requires one exa
 	const target = getVisibleRefFallbackTarget({ commandTokens: compiledAction.args });
 	const diagnostic = buildVisibleRefFallbackDiagnosticFromSnapshot({
 		snapshotData: comboboxSnapshot,
-		target: target!,
+		// A missing fill target fails immediately; the diagnostic assertions always receive a target.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
+		target: target ?? assert.fail("fill command must produce a recovery target"),
 	});
 	assert.deepEqual(
 		diagnostic?.candidates.map((candidate) => candidate.args),
 		[undefined],
 	);
 	assert.equal(
-		JSON.stringify(sanitizeVisibleRefFallbackDiagnostic(diagnostic!)).includes("private search"),
+		JSON.stringify(sanitizeVisibleRefFallbackDiagnostic(diagnostic)).includes("private search"),
 		false,
 	);
 

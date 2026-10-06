@@ -7,6 +7,7 @@
  */
 
 import assert from "node:assert/strict";
+import { readNumber, readRecord, readString } from "./helpers/assertions.js";
 import { spawn, type ChildProcess } from "node:child_process";
 import { once } from "node:events";
 import { createServer, type Server } from "node:http";
@@ -35,7 +36,7 @@ function assertIsString(value: unknown): asserts value is string {
 }
 
 function pidIsAlive(pid: number | undefined): boolean {
-	if (!pid) {
+	if (pid === undefined || pid === 0) {
 		return false;
 	}
 	try {
@@ -65,20 +66,22 @@ async function listenOnLoopback(server: Server): Promise<number> {
 		});
 	});
 	const address = server.address();
-	assert.ok(address && typeof address === "object");
+	assert.ok(address !== null && typeof address === "object");
 	return address.port;
 }
 
 function delay(ms: number): Promise<void> {
-	return new Promise((resolve) => setTimeout(resolve, ms));
+	return new Promise((resolve) => {
+		setTimeout(resolve, ms);
+	});
 }
 
 function electronManagedSessionDetails(
 	sessionName: string,
-	electronRecord: Record<string, unknown>,
+	electronRecord: Readonly<Record<string, unknown>>,
 ) {
 	return {
-		args: ["connect", String(electronRecord.port ?? "9")],
+		args: ["connect", String(readNumber(electronRecord.port ?? 9))],
 		command: "connect",
 		electron: { action: "launch", launch: electronRecord, status: "attached" },
 		exitCode: 0,
@@ -100,7 +103,10 @@ function electronManagedSessionDetails(
 	};
 }
 
-function electronCleanupDetails(sessionName: string, electronRecord: Record<string, unknown>) {
+function electronCleanupDetails(
+	sessionName: string,
+	electronRecord: Readonly<Record<string, unknown>>,
+) {
 	return {
 		args: [],
 		electron: {
@@ -120,7 +126,7 @@ function electronCleanupDetails(sessionName: string, electronRecord: Record<stri
 							{ resource: "debug-port", state: "already-gone" },
 							{ resource: "user-data-dir", state: "removed" },
 						],
-						summary: `Electron cleanup for ${String(electronRecord.launchId)} completed.`,
+						summary: `Electron cleanup for ${readString(electronRecord.launchId)} completed.`,
 					},
 				],
 			},
@@ -217,12 +223,12 @@ process.stdout.write(JSON.stringify({ success: true, data: { closed: args.includ
 						),
 					);
 					assert.ok(
-						(invocations as Array<{ args: string[]; confirmActions?: string }>)
+						invocations
 							.filter((entry) => entry.args.includes("close"))
-							.every((entry) => entry.confirmActions === "navigate"),
+							.every((entry) => readRecord(entry).confirmActions === "navigate"),
 						"off-branch Electron cleanup keeps the native setting for its session",
 					);
-					assert.equal(pidIsAlive(child?.pid), false);
+					assert.equal(pidIsAlive(child.pid), false);
 				});
 			} finally {
 				if (pidIsAlive(child?.pid)) {
@@ -324,7 +330,7 @@ process.stdout.write(JSON.stringify({ success: true, data: { closed: args.includ
 					.map((entry) => entry.args)
 					.filter((args) => args.includes("close"));
 				assert.deepEqual(closeArgs, []);
-				assert.equal(pidIsAlive(child?.pid), true);
+				assert.equal(pidIsAlive(child.pid), true);
 			});
 		} finally {
 			if (pidIsAlive(child?.pid)) {
@@ -405,7 +411,7 @@ process.stdout.write(JSON.stringify({ success: true, data: { result: "https://sa
 						invocation?.args[invocation.args.indexOf("--args") + 1],
 						"--no-startup-window",
 					);
-					assert.equal(invocation?.args.includes("--allow-file-access"), false);
+					assert.equal(invocation.args.includes("--allow-file-access"), false);
 				},
 			);
 		} finally {
@@ -525,7 +531,7 @@ process.stdout.write(JSON.stringify({ success: true, data }));`,
 					.map((entry) => entry.args)
 					.filter((args) => args.includes("close"));
 				assert.deepEqual(closeArgs, [["--session", electronSessionName, "close"]]);
-				assert.equal(pidIsAlive(child?.pid), false);
+				assert.equal(pidIsAlive(child.pid), false);
 			});
 		} finally {
 			if (pidIsAlive(child?.pid)) {
@@ -622,8 +628,8 @@ process.stdout.write(JSON.stringify({ success: true, data }));`,
 					electron: { action: "cleanup", launchId: "electron-a", timeoutMs: 15_000 },
 				});
 				assert.equal(cleanupA.isError, false, JSON.stringify(cleanupA));
-				assert.equal(pidIsAlive(childA?.pid), false);
-				assert.equal(pidIsAlive(childB?.pid), true);
+				assert.equal(pidIsAlive(childA.pid), false);
+				assert.equal(pidIsAlive(childB.pid), true);
 
 				harness.setBranch(branchBCleaned);
 				await runExtensionEvent(
@@ -653,7 +659,7 @@ process.stdout.write(JSON.stringify({ success: true, data }));`,
 					!closedSessions.includes(sessionNameB),
 					`B should not be closed again after branch cleanup evidence, but got: ${JSON.stringify(closedSessions)}`,
 				);
-				assert.equal(pidIsAlive(childB?.pid), true);
+				assert.equal(pidIsAlive(childB.pid), true);
 			});
 		} finally {
 			if (pidIsAlive(childA?.pid)) {
@@ -756,7 +762,7 @@ if (args.includes("close")) {
 					[],
 					`Should not have closed the session after branch cleanup evidence, but got: ${JSON.stringify(closeArgs)}`,
 				);
-				assert.equal(pidIsAlive(child?.pid), true);
+				assert.equal(pidIsAlive(child.pid), true);
 			});
 		} finally {
 			if (pidIsAlive(child?.pid)) {
@@ -835,8 +841,7 @@ else process.stdout.write(JSON.stringify({ success: true, data: { closed: args.i
 				});
 				assert.equal(status.isError, false, JSON.stringify(status));
 				assert.equal(
-					(status.details?.electron as { identifiers?: { launchId?: string } } | undefined)
-						?.identifiers?.launchId,
+					readRecord(readRecord(status.details?.electron).identifiers).launchId,
 					electronRecord.launchId,
 				);
 
@@ -845,8 +850,7 @@ else process.stdout.write(JSON.stringify({ success: true, data: { closed: args.i
 				});
 				assert.equal(probe.isError, false, JSON.stringify(probe));
 				assert.equal(
-					(probe.details?.electron as { probeContext?: { launchId?: string } } | undefined)
-						?.probeContext?.launchId,
+					readRecord(readRecord(probe.details?.electron).probeContext).launchId,
 					electronRecord.launchId,
 				);
 
@@ -854,7 +858,7 @@ else process.stdout.write(JSON.stringify({ success: true, data: { closed: args.i
 					electron: { action: "cleanup", launchId: electronRecord.launchId },
 				});
 				assert.equal(cleanup.isError, false, JSON.stringify(cleanup));
-				assert.equal(pidIsAlive(child?.pid), false);
+				assert.equal(pidIsAlive(child.pid), false);
 			});
 		} finally {
 			if (pidIsAlive(child?.pid)) {
@@ -984,7 +988,7 @@ else process.stdout.write(JSON.stringify({ success: true, data: { closed: args.i
 						);
 						assert.equal(blockedProbe.isError, true, JSON.stringify(blockedProbe));
 						assert.match(
-							String(blockedProbe.details?.summary),
+							readString(blockedProbe.details?.summary),
 							/cannot change a running wrapper-owned headed session/,
 						);
 					});
@@ -1006,7 +1010,7 @@ else process.stdout.write(JSON.stringify({ success: true, data: { closed: args.i
 						true,
 						JSON.stringify(invocations),
 					);
-					assert.equal(pidIsAlive(child?.pid), false);
+					assert.equal(pidIsAlive(child.pid), false);
 				},
 			);
 		} finally {
@@ -1165,11 +1169,9 @@ process.stdout.write(JSON.stringify({ success: true, data: { closed: args.includ
 					args: ["--session", firstFollowUpSessionName, "close"],
 				});
 				assert.equal(closeFirstFollowUp.isError, false, JSON.stringify(closeFirstFollowUp));
-				const reservedAfterClose = (
-					closeFirstFollowUp.details?.managedSessionOutcome as
-						| { currentSessionName?: string }
-						| undefined
-				)?.currentSessionName;
+				const reservedAfterClose = readRecord(
+					closeFirstFollowUp.details?.managedSessionOutcome,
+				).currentSessionName;
 				assertIsString(reservedAfterClose);
 				assert.notEqual(reservedAfterClose, firstFollowUpSessionName);
 
@@ -1401,7 +1403,6 @@ test(
 		let child: ChildProcess | undefined;
 		let userDataDir: string | undefined;
 		let liveBrowserEndpoint: string;
-		let pageEndpoint: string;
 		const server = createServer((request, response) => {
 			// Undici's parser timer can outlive this fixture when setTimeout is mocked below.
 			response.writeHead(pidIsAlive(child?.pid) ? 200 : 503, {
@@ -1426,7 +1427,7 @@ test(
 		const port = await listenOnLoopback(server);
 		const browserEndpoint = `ws://127.0.0.1:${port}/devtools/browser/original`;
 		liveBrowserEndpoint = browserEndpoint;
-		pageEndpoint = `ws://127.0.0.1:${port}/devtools/page/page`;
+		const pageEndpoint = `ws://127.0.0.1:${port}/devtools/page/page`;
 		await writeFile(connectionPath, JSON.stringify({ active: true, cdpUrl: pageEndpoint }));
 		await writeFakeAgentBrowserBinary(
 			tempDir,
@@ -1505,6 +1506,8 @@ process.stdout.write(JSON.stringify({ success: true, data }));`,
 					for (const mismatch of ["browser-instance", "connection", "namespace"]) {
 						liveBrowserEndpoint =
 							mismatch === "browser-instance" ? browserEndpoint + "-replaced" : browserEndpoint;
+						// Fixture transitions and their assertions run in order against this test's shared state.
+						// oxlint-disable-next-line no-await-in-loop
 						await writeFile(
 							connectionPath,
 							JSON.stringify({
@@ -1516,24 +1519,38 @@ process.stdout.write(JSON.stringify({ success: true, data }));`,
 							branch: branch(mismatch === "namespace" ? { ...record, namespace: "other" } : record),
 							cwd: tempDir,
 						});
+						// Fixture transitions and their assertions run in order against this test's shared state.
+						// oxlint-disable-next-line no-await-in-loop
 						await runExtensionEvent(
 							harness.handlers,
 							"session_start",
 							{ reason: "reload" },
 							harness.ctx,
 						);
+						// Fixture transitions and their assertions run in order against this test's shared state.
+						// oxlint-disable-next-line no-await-in-loop
 						const before = (await readInvocationLog(logPath)).length;
 						for (let attempt = 0; attempt < 2; attempt += 1) {
+							// Fixture transitions and their assertions run in order against this test's shared state.
+							// oxlint-disable-next-line no-await-in-loop
 							const result = await executeRegisteredTool(harness.tool, harness.ctx, {
 								args: ["get", "title"],
 							});
+							// Both fixed attempts for every literal connection mismatch must fail before dispatch.
+							// oxlint-disable-next-line node-test/no-conditional-assertion
 							assert.equal(result.isError, true, `${mismatch}: ${JSON.stringify(result)}`);
+							// Both fixed attempts for every literal connection mismatch must fail before dispatch.
+							// oxlint-disable-next-line node-test/no-conditional-assertion
 							assert.equal(
 								result.details?.managedSessionCleanupOnlyReason,
 								"restore-disabled-daemon-without-provenance",
 							);
 						}
+						// Each of the three literal identity mismatches checks that title was never dispatched.
+						// oxlint-disable-next-line node-test/no-conditional-assertion
 						assert.equal(
+							// Fixture transitions and their assertions run in order against this test's shared state.
+							// oxlint-disable-next-line no-await-in-loop
 							(await readInvocationLog(logPath))
 								.slice(before)
 								.some((entry) => entry.args.includes("title")),
@@ -1552,20 +1569,36 @@ process.stdout.write(JSON.stringify({ success: true, data }));`,
 					]) {
 						const harness = createExtensionHarness({ branch: branch(), cwd: tempDir });
 						lastHarness = harness;
+						// Fixture transitions and their assertions run in order against this test's shared state.
+						// oxlint-disable-next-line no-await-in-loop
 						await runExtensionEvent(
 							harness.handlers,
 							"session_start",
 							{ reason: "reload" },
 							harness.ctx,
 						);
+						// Fixture transitions and their assertions run in order against this test's shared state.
+						// oxlint-disable-next-line no-await-in-loop
 						const before = (await readInvocationLog(logPath)).length;
+						// Fixture transitions and their assertions run in order against this test's shared state.
+						// oxlint-disable-next-line no-await-in-loop
 						const result = await executeRegisteredTool(harness.tool, harness.ctx, params);
+						// All four literal restored-call variants check native verification and retained host ownership.
+						// oxlint-disable-next-line node-test/no-conditional-assertion
 						assert.equal(result.isError, false, JSON.stringify(result));
+						// All four literal restored-call variants check native verification and retained host ownership.
+						// oxlint-disable-next-line node-test/no-conditional-assertion
 						assert.match(JSON.stringify(result.content), /Verified Electron/);
+						// All four literal restored-call variants check native verification and retained host ownership.
+						// oxlint-disable-next-line node-test/no-conditional-assertion
 						assert.doesNotMatch(JSON.stringify(result.content), /Managed session warning/);
+						// Fixture transitions and their assertions run in order against this test's shared state.
+						// oxlint-disable-next-line no-await-in-loop
 						const verification = (await readInvocationLog(logPath))
 							.slice(before)
 							.filter((entry) => entry.args.includes("cdp-url"));
+						// All four literal restored-call variants check native verification and retained host ownership.
+						// oxlint-disable-next-line node-test/no-conditional-assertion
 						assert.deepEqual(
 							verification.map((entry) => entry.args),
 							[
@@ -1580,10 +1613,14 @@ process.stdout.write(JSON.stringify({ success: true, data }));`,
 								],
 							],
 						);
+						// All four literal restored-call variants check native verification and retained host ownership.
+						// oxlint-disable-next-line node-test/no-conditional-assertion
 						assert.equal(pidIsAlive(child.pid), true);
 					}
 					for (const mode of ["timeout", "abort"]) {
 						const marker = `cdp-${mode}-ready`;
+						// Fixture transitions and their assertions run in order against this test's shared state.
+						// oxlint-disable-next-line no-await-in-loop
 						await writeFile(
 							connectionPath,
 							JSON.stringify({
@@ -1593,6 +1630,8 @@ process.stdout.write(JSON.stringify({ success: true, data }));`,
 							}),
 						);
 						const harness = createExtensionHarness({ branch: branch(), cwd: tempDir });
+						// Fixture transitions and their assertions run in order against this test's shared state.
+						// oxlint-disable-next-line no-await-in-loop
 						await runExtensionEvent(
 							harness.handlers,
 							"session_start",
@@ -1617,9 +1656,13 @@ process.stdout.write(JSON.stringify({ success: true, data }));`,
 							controller.signal,
 						);
 						try {
+							// Fixture transitions and their assertions run in order against this test's shared state.
+							// oxlint-disable-next-line no-await-in-loop
 							await Promise.race([
 								ready,
 								pending.then((result) =>
+									// Both literal timeout/abort modes check interruption and child cleanup; early settlement fails.
+									// oxlint-disable-next-line node-test/no-conditional-assertion
 									assert.fail(
 										`Verification settled before its controlled read: ${JSON.stringify(result)}`,
 									),
@@ -1630,6 +1673,8 @@ process.stdout.write(JSON.stringify({ success: true, data }));`,
 							} else {
 								controller.abort();
 							}
+							// Fixture transitions and their assertions run in order against this test's shared state.
+							// oxlint-disable-next-line no-await-in-loop
 							const result = await Promise.race([
 								pending,
 								new Promise<never>((_resolve, reject) => {
@@ -1640,8 +1685,14 @@ process.stdout.write(JSON.stringify({ success: true, data }));`,
 									);
 								}),
 							]);
+							// Both literal timeout/abort modes check interruption and child cleanup; early settlement fails.
+							// oxlint-disable-next-line node-test/no-conditional-assertion
 							assert.equal(result.isError, true, JSON.stringify(result));
+							// Fixture transitions and their assertions run in order against this test's shared state.
+							// oxlint-disable-next-line no-await-in-loop
 							const pid = Number(await readFile(join(tempDir, marker), "utf8"));
+							// Both literal timeout/abort modes check interruption and child cleanup; early settlement fails.
+							// oxlint-disable-next-line node-test/no-conditional-assertion
 							assert.throws(() => process.kill(pid, 0), { code: "ESRCH" });
 						} finally {
 							t.mock.timers.reset();
@@ -1649,6 +1700,8 @@ process.stdout.write(JSON.stringify({ success: true, data }));`,
 							if (guard) {
 								clearTimeout(guard);
 							}
+							// Fixture transitions and their assertions run in order against this test's shared state.
+							// oxlint-disable-next-line no-await-in-loop
 							await Promise.allSettled([pending, ready]);
 						}
 					}
@@ -1663,13 +1716,15 @@ process.stdout.write(JSON.stringify({ success: true, data }));`,
 				},
 			);
 		} finally {
-			if (child?.pid && child.exitCode === null && child.signalCode === null) {
+			if (child?.pid !== undefined && child.exitCode === null && child.signalCode === null) {
 				const exited = once(child, "exit");
 				child.kill("SIGKILL");
 				await exited;
 			}
-			await new Promise<void>((resolve) => server.close(() => resolve()));
-			if (userDataDir) {
+			await new Promise<void>((resolve) => {
+				server.close(() => resolve());
+			});
+			if (userDataDir !== undefined) {
 				await rm(userDataDir, { recursive: true, force: true });
 			}
 			await rm(tempDir, { recursive: true, force: true });
@@ -1781,12 +1836,14 @@ process.stdout.write(JSON.stringify({ success: true, data: { closed: args.includ
 					assert.equal(await directoryExists(userDataDir), true);
 				});
 			} finally {
-				await new Promise<void>((resolve) => server.close(() => resolve())).catch(() => undefined);
+				await new Promise<void>((resolve) => {
+					server.close(() => resolve());
+				});
 				if (pidIsAlive(child?.pid)) {
 					child?.kill("SIGKILL");
 				}
-				if (preservedUserDataDir) {
-					await rm(preservedUserDataDir, { force: true, recursive: true }).catch(() => undefined);
+				if (preservedUserDataDir !== undefined) {
+					await rm(preservedUserDataDir, { force: true, recursive: true });
 				}
 				await rm(tempDir, { force: true, recursive: true });
 			}
@@ -1981,8 +2038,12 @@ if (args.includes("snapshot")) {
 					args: ["snapshot", "-i"],
 				});
 				while (
+					// Fixture transitions and their assertions run in order against this test's shared state.
+					// oxlint-disable-next-line no-await-in-loop
 					!(await readInvocationLog(logPath)).some((entry) => entry.event === "snapshot-start")
 				) {
+					// Fixture transitions and their assertions run in order against this test's shared state.
+					// oxlint-disable-next-line no-await-in-loop
 					await delay(10);
 				}
 

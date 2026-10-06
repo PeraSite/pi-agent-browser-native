@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readArray, readRecord, readString } from "./helpers/assertions.js";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -8,6 +9,7 @@ import {
 	normalizeContext,
 	validateToolArguments,
 	type JsonObject,
+	type JsonValue,
 } from "@earendil-works/pi-ai";
 import { stream as streamAnthropic } from "@earendil-works/pi-ai/api/anthropic-messages";
 import {
@@ -18,7 +20,7 @@ import {
 	SettingsManager,
 	type AgentSession,
 	type AgentToolResult,
-	type ExtensionContext,
+	type ExtensionToolContext,
 } from "@earendil-works/pi-coding-agent";
 import { JsonSchema } from "../extensions/agent-browser/lib/json-schema.js";
 import {
@@ -37,21 +39,48 @@ import {
 } from "../extensions/agent-browser/lib/playbook.js";
 import { registerAgentBrowserToolSurface } from "../extensions/agent-browser/lib/tool-surface.js";
 
+function assertJsonObject(value: unknown): asserts value is JsonObject {
+	for (const item of Object.values(readRecord(value))) {
+		assertJsonValue(item);
+	}
+}
+
+function assertJsonValue(value: unknown): asserts value is JsonValue {
+	if (value === null || typeof value === "string" || typeof value === "boolean") {
+		return;
+	}
+	if (typeof value === "number") {
+		assert.ok(Number.isFinite(value));
+		return;
+	}
+	if (Array.isArray(value)) {
+		for (const item of readArray(value)) {
+			assertJsonValue(item);
+		}
+		return;
+	}
+	assertJsonObject(value);
+}
+
+type RecordedBrowserCall = Readonly<Omit<AgentBrowserExecuteParams, "args">> & {
+	readonly args?: readonly string[];
+};
+
 async function withSurface(
 	run: (fixture: {
-		session: AgentSession;
-		call: (name: string, input: JsonObject) => Promise<AgentToolResult<unknown>>;
-		active: () => string[];
-		all: () => string[];
-		calls: AgentBrowserExecuteParams[];
-		codeCalls: unknown[];
-		reload: () => Promise<void>;
+		readonly session: AgentSession;
+		readonly call: (name: string, input: JsonObject) => Promise<AgentToolResult<unknown>>;
+		readonly active: () => string[];
+		readonly all: () => string[];
+		readonly calls: readonly RecordedBrowserCall[];
+		readonly codeCalls: readonly unknown[];
+		readonly reload: () => Promise<void>;
 	}) => Promise<void>,
 	options: {
-		tools?: string[];
-		defaultTools?: string[];
-		sessionManager?: SessionManager;
-		result?: AgentToolResult<unknown>;
+		readonly tools?: readonly string[];
+		readonly defaultTools?: readonly string[];
+		readonly sessionManager?: SessionManager;
+		readonly result?: AgentToolResult<unknown>;
 	} = {},
 ) {
 	const directory = await mkdtemp(join(tmpdir(), "piab-tool-surface-"));
@@ -62,7 +91,7 @@ async function withSurface(
 	});
 	const calls: AgentBrowserExecuteParams[] = [];
 	const codeCalls: unknown[] = [];
-	let context: ExtensionContext;
+	let context: ExtensionToolContext;
 	const resourceLoader = new DefaultResourceLoader({
 		agentDir: directory,
 		cwd: directory,
@@ -103,7 +132,13 @@ async function withSurface(
 					},
 				});
 				pi.on("session_start", (_event, ctx) => {
-					context = ctx;
+					context = {
+						...ctx,
+						tools: [],
+						async executeTool() {
+							throw new Error("Nested tool execution is not used by this surface fixture.");
+						},
+					};
 				});
 			},
 		],
@@ -116,9 +151,9 @@ async function withSurface(
 			modelRuntime,
 			resourceLoader,
 			noTools: options.defaultTools ? undefined : "builtin",
-			tools: options.tools,
+			tools: options.tools ? [...options.tools] : undefined,
 			settingsManager: SettingsManager.inMemory(
-				options.defaultTools ? { defaultTools: options.defaultTools } : {},
+				options.defaultTools ? { defaultTools: [...options.defaultTools] } : {},
 			),
 			sessionManager: options.sessionManager ?? SessionManager.inMemory(directory),
 		});
@@ -133,19 +168,13 @@ async function withSurface(
 				async call(name, input) {
 					const tool = session.getToolDefinition(name);
 					assert.ok(tool, `registered ${name}`);
-					const params = validateToolArguments(tool, {
+					const params: unknown = validateToolArguments(tool, {
 						type: "toolCall",
 						name,
 						id: "surface",
 						arguments: input,
 					});
-					return tool.execute(
-						"surface",
-						params,
-						undefined,
-						undefined,
-						context as Parameters<typeof tool.execute>[4],
-					);
+					return tool.execute("surface", params, undefined, undefined, context);
 				},
 				active: () => session.getActiveToolNames(),
 				all: () => session.getAllTools().map(({ name }) => name),
@@ -167,15 +196,7 @@ test("registered browser code serializes for Anthropic while Pi still rejects in
 	await withSurface(async ({ session, call, codeCalls }) => {
 		const tool = session.getToolDefinition("agent_browser_code");
 		assert.ok(tool);
-		let payload:
-			| {
-					tools: {
-						name: string;
-						strict?: boolean;
-						input_schema: { properties: Record<string, unknown>; required: string[] };
-					}[];
-			  }
-			| undefined;
+		let payload: unknown;
 		const result = await streamAnthropic(
 			{
 				id: "claude-sonnet-4-6",
@@ -200,7 +221,7 @@ test("registered browser code serializes for Anthropic while Pi still rejects in
 				apiKey: "test-key",
 				maxRetries: 0,
 				async fetch(_url, init) {
-					payload = JSON.parse(String(init?.body));
+					payload = JSON.parse(readString(init?.body));
 					return new Response(
 						'event: message_delta\ndata: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":0}}\n\nevent: message_stop\ndata: {"type":"message_stop"}\n\n',
 						{
@@ -211,8 +232,8 @@ test("registered browser code serializes for Anthropic while Pi still rejects in
 			},
 		).result();
 		assert.equal(result.stopReason, "stop", result.errorMessage);
-		assert.ok(payload);
-		const [wireTool] = payload.tools;
+		assert.ok(payload !== undefined);
+		const [wireTool] = readArray(readRecord(payload).tools).map(readRecord);
 		assert.equal(wireTool.name, "agent_browser_code");
 		assert.equal(
 			Object.hasOwn(wireTool, "discovery"),
@@ -221,13 +242,13 @@ test("registered browser code serializes for Anthropic while Pi still rejects in
 		);
 		// Anthropic rejects integer minimum/maximum in strict tool schemas.
 		assert.equal(wireTool.strict ?? false, false);
-		assert.deepEqual(wireTool.input_schema.properties.timeoutMs, {
+		assert.deepEqual(readRecord(readRecord(wireTool.input_schema).properties).timeoutMs, {
 			type: "integer",
 			minimum: 1,
 			maximum: 300000,
 		});
-		assert.deepEqual(wireTool.input_schema.required, ["code"]);
-		assert.deepEqual(Object.keys(wireTool.input_schema.properties).sort(), [
+		assert.deepEqual(readRecord(wireTool.input_schema).required, ["code"]);
+		assert.deepEqual(Object.keys(readRecord(readRecord(wireTool.input_schema).properties)).sort(), [
 			"code",
 			"namespace",
 			"outputPath",
@@ -245,7 +266,16 @@ test("registered browser code serializes for Anthropic while Pi still rejects in
 			{ script: "emit(1)" },
 		];
 		for (const input of invalidInputs) {
-			await assert.rejects(call(tool.name, input), /Validation failed/, JSON.stringify(input));
+			// Every literal invalid code input must reject; the empty dispatch log is checked afterward.
+			// oxlint-disable-next-line node-test/no-conditional-assertion
+			const rejection = assert.rejects(
+				call(tool.name, input),
+				/Validation failed/,
+				JSON.stringify(input),
+			);
+			// Fixture transitions and their assertions run in order against this test's shared state.
+			// oxlint-disable-next-line no-await-in-loop
+			await rejection;
 		}
 		assert.deepEqual(codeCalls, []);
 		await call(tool.name, {
@@ -282,7 +312,7 @@ test("native Pi registration keeps advanced tools discoverable and activation ad
 		assert.match(JSON.stringify(inventory.content), /agent_browser_network_source.*inactive/);
 		assert.deepEqual(active().sort(), [...baseTools].sort());
 		const loaded = await call("agent_browser_tools", { enable: ["qa", "action", "qa"] });
-		assert.deepEqual((loaded.details as { added: string[] }).added, [
+		assert.deepEqual(readRecord(loaded.details).added, [
 			"agent_browser_qa",
 			"agent_browser_action",
 		]);
@@ -342,14 +372,20 @@ test("native defaultTools survives startup and initial resume restoration is add
 		{ label: "plain registration without default tools or restoration", options: {} },
 	];
 	for (const { label, options, restoredTool } of cases) {
+		// Fixture transitions and their assertions run in order against this test's shared state.
+		// oxlint-disable-next-line no-await-in-loop
 		await withSurface(async ({ active, reload }) => {
 			const expected = [
 				...baseTools,
 				...(options.defaultTools ? ["agent_browser_qa"] : []),
-				...(restoredTool ? [restoredTool] : []),
+				...(restoredTool !== undefined ? [restoredTool] : []),
 			].sort();
+			// Each fixed registration/restoration case checks active tools before and after reload.
+			// oxlint-disable-next-line node-test/no-conditional-assertion
 			assert.deepEqual(active().sort(), expected, label);
 			await reload();
+			// Each fixed registration/restoration case checks active tools before and after reload.
+			// oxlint-disable-next-line node-test/no-conditional-assertion
 			assert.deepEqual(active().sort(), expected, label);
 		}, options);
 	}
@@ -378,33 +414,64 @@ test("public returns classify failure without a result hook and preserve JSON, i
 		{ name: "agent_browser_qa", input: { attached: true }, json: false },
 	];
 	for (const { name, input, json } of cases) {
+		// Fixture transitions and their assertions run in order against this test's shared state.
+		// oxlint-disable-next-line no-await-in-loop
 		await withSurface(
 			async ({ call, session }) => {
 				const result = await call(name, input);
+				// All four literal tool/result variants check failure, image, recovery, and output contracts.
+				// oxlint-disable-next-line node-test/no-conditional-assertion
 				assert.equal(result.isError, true);
+				// All four literal tool/result variants check failure, image, recovery, and output contracts.
+				// oxlint-disable-next-line node-test/no-conditional-assertion
 				assert.deepEqual(
 					result.content.filter((item) => item.type === "image"),
 					[image],
 				);
-				const text = result.content.find((item) => item.type === "text")!.text;
+				const textItem = result.content.find((item) => item.type === "text");
+				// All four literal tool/result variants check failure, image, recovery, and output contracts.
+				// oxlint-disable-next-line node-test/no-conditional-assertion
+				assert.ok(textItem);
+				const text = textItem.text;
 				if (json) {
+					// The fixed tool variants include JSON and prose; each format branch has its own assertion.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
 					assert.deepEqual(JSON.parse(text), { success: false, data: 42 });
 				} else {
+					// The fixed tool variants include JSON and prose; each format branch has its own assertion.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
 					assert.match(
 						text,
 						/Result category: failure; failureCategory: qa-failure; Pi tool isError: true/,
 					);
 				}
-				const observation = result.structuredContent as JsonObject;
+				const observation = result.structuredContent;
+				assertJsonObject(observation);
+				// All four literal tool/result variants check failure, image, recovery, and output contracts.
+				// oxlint-disable-next-line node-test/no-conditional-assertion
 				assert.equal(observation.success, false);
+				// All four literal tool/result variants check failure, image, recovery, and output contracts.
+				// oxlint-disable-next-line node-test/no-conditional-assertion
 				assert.deepEqual(observation.data, { password: "[REDACTED]", requested: 42 });
+				// All four literal tool/result variants check failure, image, recovery, and output contracts.
+				// oxlint-disable-next-line node-test/no-conditional-assertion
 				assert.deepEqual(observation.nextActions, details.nextActions);
+				// All four literal tool/result variants check failure, image, recovery, and output contracts.
+				// oxlint-disable-next-line node-test/no-conditional-assertion
 				assert.equal(observation.refSnapshot, undefined);
-				const tool = session.getToolDefinition(name)!;
+				const tool = session.getToolDefinition(name);
+				// All four literal tool/result variants check failure, image, recovery, and output contracts.
+				// oxlint-disable-next-line node-test/no-conditional-assertion
+				assert.ok(tool);
+				// All four literal tool/result variants check failure, image, recovery, and output contracts.
+				// oxlint-disable-next-line node-test/no-conditional-assertion
+				assert.ok(tool.outputSchema);
 				validateToolArguments(
-					{ ...tool, parameters: tool.outputSchema! },
+					{ ...tool, parameters: tool.outputSchema },
 					{ type: "toolCall", id: "output", name, arguments: observation },
 				);
+				// All four literal tool/result variants check failure, image, recovery, and output contracts.
+				// oxlint-disable-next-line node-test/no-conditional-assertion
 				assert.equal(tool.namespace?.name, "browser");
 			},
 			{
@@ -601,12 +668,14 @@ for (const tools of [["agent_browser_qa"], ["agent_browser_qa", "agent_browser_t
 test("internal input normalization preserves QA semantics without public job/script routes", () => {
 	for (const params of [{ script: "emit(1)" }, { job: { steps: [{ action: "snapshot" }] } }]) {
 		const resolved = resolveAgentBrowserInput({
-			params: params as AgentBrowserExecuteParams,
+			params,
 			getBatchPreflightValidationError: () => undefined,
 		});
+		// Both literal retired input routes must be rejected by raw-input normalization.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.equal(resolved.status, "invalid");
 	}
-	const resolve = (params: AgentBrowserExecuteParams) =>
+	const resolve = (params: unknown) =>
 		resolveAgentBrowserInput({ params, getBatchPreflightValidationError: () => undefined });
 	assert.match(
 		resolve({ qa: { attached: true }, sessionMode: "fresh" }).validationError ?? "",
@@ -618,9 +687,6 @@ test("internal input normalization preserves QA semantics without public job/scr
 	);
 	const qa = resolve({ qa: { url: "https://example.com", expectedText: "Ready" } });
 	assert.equal(qa.kind, "qa");
-	if (qa.kind !== "qa") {
-		assert.fail("QA should compile");
-	}
 	assert.equal(qa.compiledQaPreset.checks.checkNetwork, true);
 	assert.equal(qa.compiledQaPreset.checks.diagnosticsResetAtStart, true);
 	assert.equal(qa.compiledGeneratedBatch.failFast, true);
@@ -644,6 +710,8 @@ test("prompt routing is compact and preserves browser authority, recovery, and i
 		"profiles",
 		"explicit stops",
 	]) {
+		// All nine literal required prompt tokens must occur in the compact runtime guidance.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.ok(runtime.includes(required), required);
 	}
 	const playbook = [
@@ -655,8 +723,12 @@ test("prompt routing is compact and preserves browser authority, recovery, and i
 		playbook,
 		/top-level script|\{\s*(?:script|job):|semanticAction\/job|result\.ok/,
 	);
-	for (const [key, guidelines] of Object.entries(ADVANCED_TOOL_PROMPT_GUIDELINES)) {
+	const advancedGuidelines = Object.entries(ADVANCED_TOOL_PROMPT_GUIDELINES);
+	assert.ok(advancedGuidelines.length > 0, "advanced tool guidance must not be empty");
+	for (const [key, guidelines] of advancedGuidelines) {
 		const toolName = key === "network" ? "agent_browser_network_source" : `agent_browser_${key}`;
+		// The asserted nonempty advanced-guidance catalog checks each tool's own instruction lines.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.ok(
 			guidelines.every((line) => line.includes(toolName)),
 			`${key} guidelines must name their tool`,
@@ -705,14 +777,28 @@ test("Electron action schemas preserve field boundaries through native Pi valida
 			probe: ["launchId", "timeoutMs", "outputPath"],
 		};
 		for (const [action, names] of Object.entries(allowed)) {
+			// Fixture transitions and their assertions run in order against this test's shared state.
+			// oxlint-disable-next-line no-await-in-loop
 			await call("agent_browser_electron", { action });
 			for (const [field, value] of Object.entries(fields)) {
 				const input = { action, [field]: value };
 				if (names.includes(field)) {
+					// Fixture transitions and their assertions run in order against this test's shared state.
+					// oxlint-disable-next-line no-await-in-loop
 					await call("agent_browser_electron", input);
 				} else {
 					const before = calls.length;
-					await assert.rejects(call("agent_browser_electron", input), /Validation failed/);
+					// The fixed action/field matrix checks every disallowed pair rejects without dispatching.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
+					const rejection = assert.rejects(
+						call("agent_browser_electron", input),
+						/Validation failed/,
+					);
+					// Fixture transitions and their assertions run in order against this test's shared state.
+					// oxlint-disable-next-line no-await-in-loop
+					await rejection;
+					// The fixed action/field matrix checks every disallowed pair rejects without dispatching.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
 					assert.equal(calls.length, before, `${action}.${field} must not dispatch`);
 				}
 			}
@@ -729,22 +815,29 @@ test("Electron action schemas preserve field boundaries through native Pi valida
 			{},
 		];
 		for (const input of invalid) {
-			await assert.rejects(call("agent_browser_electron", input), /Validation failed/);
+			// All nine literal invalid Electron inputs must reject at native schema validation.
+			// oxlint-disable-next-line node-test/no-conditional-assertion
+			const rejection = assert.rejects(call("agent_browser_electron", input), /Validation failed/);
+			// Fixture transitions and their assertions run in order against this test's shared state.
+			// oxlint-disable-next-line no-await-in-loop
+			await rejection;
 		}
 	});
 });
 
 test("every registered browser tool exposes an object-rooted parameter schema", async () => {
 	await withSurface(async ({ all, session }) => {
-		for (const name of all().filter((name) => name.startsWith("agent_browser"))) {
+		const browserTools = all().filter((toolName) => toolName.startsWith("agent_browser"));
+		assert.ok(browserTools.length > 0, "browser tools must be registered");
+		for (const name of browserTools) {
 			const tool = session.getToolDefinition(name);
+			// The asserted nonempty registered browser-tool set checks every object-rooted schema.
+			// oxlint-disable-next-line node-test/no-conditional-assertion
 			assert.ok(tool, `registered ${name}`);
 			// Strict providers reject a schema whose root lacks `type: "object"`.
-			assert.equal(
-				(tool.parameters as { type?: unknown }).type,
-				"object",
-				`${name} root schema type`,
-			);
+			// The asserted nonempty registered browser-tool set checks every object-rooted schema.
+			// oxlint-disable-next-line node-test/no-conditional-assertion
+			assert.equal(readRecord(tool.parameters).type, "object", `${name} root schema type`);
 		}
 	});
 });

@@ -7,6 +7,7 @@
  */
 
 import assert from "node:assert/strict";
+import { readArray, readRecord, readString } from "./helpers/assertions.js";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
@@ -21,7 +22,7 @@ import {
 	writeFakeAgentBrowserBinary,
 } from "./helpers/agent-browser-harness.js";
 
-const stripWrapperPrefix = (args: string[]) => {
+const stripWrapperPrefix = (args: readonly string[]) => {
 	const stripped = [...args];
 	if (stripped[0] === "--allow-file-access") {
 		stripped.splice(0, 2);
@@ -42,7 +43,7 @@ const stripWrapperPrefix = (args: string[]) => {
 // active page URL with a `get url` probe before page-content access. Explicit navigation, history or
 // attachment transitions that themselves re-establish the target, tab selection/close, lifecycle
 // closes, dialogs, and `get url` itself are exempt; everything else is probed first.
-const needsRootSessionPageCheck = (args: string[]) => {
+const needsRootSessionPageCheck = (args: readonly string[]) => {
 	const command = args[0];
 	const subcommand = args[1];
 	if (command === "get") {
@@ -159,26 +160,43 @@ process.stdout.write(JSON.stringify({ success: true, data: JSON.parse(fs.readFil
 								socketDir: sockets,
 								...status,
 							};
+							// Fixture transitions and their assertions run in order against this test's shared state.
+							// oxlint-disable-next-line no-await-in-loop
 							await writeFile(dataPath, JSON.stringify(data));
+							// Fixture transitions and their assertions run in order against this test's shared state.
+							// oxlint-disable-next-line no-await-in-loop
 							const result = await executeRegisteredTool(harness.tool, harness.ctx, {
 								args: ["--session", "fixture", "session", "info"],
 							});
+							// All three literal daemon states must preserve native receipts and caller ownership.
+							// oxlint-disable-next-line node-test/no-conditional-assertion
+							assert.ok(result.details);
+							// All three literal daemon states must preserve native receipts and caller ownership.
+							// oxlint-disable-next-line node-test/no-conditional-assertion
 							assert.equal(result.isError, false);
 							const text = result.content[0]?.text ?? "";
+							// All three literal daemon states must preserve native receipts and caller ownership.
+							// oxlint-disable-next-line node-test/no-conditional-assertion
 							assert.ok(
 								text.startsWith(
 									`Daemon: ${status.active ? "active" : "inactive"}; PID: ${status.pid ?? "unknown"}\n`,
 								),
 							);
+							// All three literal daemon states must preserve native receipts and caller ownership.
+							// oxlint-disable-next-line node-test/no-conditional-assertion
 							assert.match(
 								text,
 								/\nBrowser: unknown; alive: unknown; Chrome PID: unknown\nExact profile: unknown\nNative browser ownership: unknown; Pi cleanup ownership: caller-owned\n\n/,
 							);
+							// All three literal daemon states must preserve native receipts and caller ownership.
+							// oxlint-disable-next-line node-test/no-conditional-assertion
 							assert.deepEqual(
 								JSON.parse(text.slice(text.indexOf("\n\n") + 2).split("\n\nObservation:")[0]),
 								data,
 							);
-							assert.deepEqual(result.details?.data, {
+							// All three literal daemon states must preserve native receipts and caller ownership.
+							// oxlint-disable-next-line node-test/no-conditional-assertion
+							assert.deepEqual(result.details.data, {
 								...data,
 								piCleanupOwnership: "caller-owned",
 							});
@@ -240,33 +258,36 @@ if (args.includes("--version")) {
 					const version = await executeRegisteredTool(harness.tool, harness.ctx, {
 						args: ["--headed=false", "--version"],
 					});
+					assert.ok(version.details);
 					const rootHelp = await executeRegisteredTool(harness.tool, harness.ctx, {
 						args: ["--args=demo", "--help"],
 					});
+					assert.ok(rootHelp.details);
 					const commandHelp = await executeRegisteredTool(harness.tool, harness.ctx, {
 						args: ["snapshot", "--help"],
 					});
+					assert.ok(commandHelp.details);
 
 					assert.equal(version.isError, false);
 					assert.equal(version.content[0]?.type, "text");
-					assert.match((version.content[0] as { text: string }).text, /agent-browser 9\.9\.9/);
-					assert.equal(version.details?.inspection, true);
-					assert.equal(version.details?.stdout, "agent-browser 9.9.9");
-					assert.equal(version.details?.parseError, undefined);
-					assert.equal(version.details?.sessionName, undefined);
-					assert.equal(version.details?.usedImplicitSession, undefined);
+					assert.match(readString(readRecord(version.content[0]).text), /agent-browser 9\.9\.9/);
+					assert.equal(version.details.inspection, true);
+					assert.equal(version.details.stdout, "agent-browser 9.9.9");
+					assert.equal(version.details.parseError, undefined);
+					assert.equal(version.details.sessionName, undefined);
+					assert.equal(version.details.usedImplicitSession, undefined);
 					assert.equal(rootHelp.isError, false);
-					assert.equal(rootHelp.details?.inspection, true);
-					assert.equal(rootHelp.details?.sessionName, undefined);
+					assert.equal(rootHelp.details.inspection, true);
+					assert.equal(rootHelp.details.sessionName, undefined);
 					assert.match(
-						(rootHelp.content[0] as { text: string }).text,
+						readString(readRecord(rootHelp.content[0]).text),
 						/Usage: agent-browser --args=demo --help/,
 					);
 					assert.equal(commandHelp.isError, false);
-					assert.equal(commandHelp.details?.inspection, true);
-					assert.equal(commandHelp.details?.sessionName, undefined);
+					assert.equal(commandHelp.details.inspection, true);
+					assert.equal(commandHelp.details.sessionName, undefined);
 					assert.match(
-						(commandHelp.content[0] as { text: string }).text,
+						readString(readRecord(commandHelp.content[0]).text),
 						/Usage: agent-browser snapshot --help/,
 					);
 					assert.deepEqual(await readInvocationLog(logPath), [
@@ -305,10 +326,19 @@ process.stdout.write(JSON.stringify({ success: true, data: {} }));`,
 					["--args=--user-agent=TARS", "open", "https://example.com/"],
 					["screenshot", "page.png", "--user-agent=TARS"],
 				]) {
+					// Fixture transitions and their assertions run in order against this test's shared state.
+					// oxlint-disable-next-line no-await-in-loop
 					const result = await executeRegisteredTool(harness.tool, harness.ctx, { args });
+					// Both literal unsupported global-equals variants must fail before upstream dispatch.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
+					assert.ok(result.details);
+					// Both literal unsupported global-equals variants must fail before upstream dispatch.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
 					assert.equal(result.isError, true, args.join(" "));
+					// Both literal unsupported global-equals variants must fail before upstream dispatch.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
 					assert.match(
-						String(result.details?.validationError),
+						readString(result.details.validationError),
 						/does not support `--(?:args|user-agent)=<value>`/,
 					);
 				}
@@ -321,9 +351,18 @@ process.stdout.write(JSON.stringify({ success: true, data: {} }));`,
 					},
 					{ args: ["batch", "screenshot page.png --restore=auth"] },
 				]) {
+					// Fixture transitions and their assertions run in order against this test's shared state.
+					// oxlint-disable-next-line no-await-in-loop
 					const result = await executeRegisteredTool(harness.tool, harness.ctx, params);
+					// All three literal batch-global variants must fail before upstream dispatch.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
+					assert.ok(result.details);
+					// All three literal batch-global variants must fail before upstream dispatch.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
 					assert.equal(result.isError, true, params.args.join(" "));
-					assert.match(String(result.details?.validationError), /before `batch`/);
+					// All three literal batch-global variants must fail before upstream dispatch.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
+					assert.match(readString(result.details.validationError), /before `batch`/);
 				}
 				assert.deepEqual(await readInvocationLog(logPath), []);
 			});
@@ -367,13 +406,14 @@ process.stdout.write(JSON.stringify({ success: true, data: { title: "Example Dom
 						args: ["--idle-timeout", "5000", "open", "https://example.com/"],
 						sessionMode: "fresh",
 					});
+					assert.ok(mismatch.details);
 					assert.equal(mismatch.isError, true);
 					assert.match(
-						String(mismatch.details?.validationError),
+						readString(mismatch.details.validationError),
 						/conflicts with this Pi process's managed-session idle timeout/,
 					);
 					assert.match(
-						String(mismatch.details?.validationError),
+						readString(mismatch.details.validationError),
 						/PI_AGENT_BROWSER_IMPLICIT_SESSION_IDLE_TIMEOUT_MS=5000/,
 					);
 					assert.deepEqual(await readInvocationLog(logPath), []);
@@ -382,9 +422,10 @@ process.stdout.write(JSON.stringify({ success: true, data: { title: "Example Dom
 						args: ["--idle-timeout=1234", "open", "https://example.com/"],
 						sessionMode: "fresh",
 					});
+					assert.ok(inlineAligned.details);
 					assert.equal(inlineAligned.isError, true);
 					assert.match(
-						String(inlineAligned.details?.validationError),
+						readString(inlineAligned.details.validationError),
 						/does not support `--idle-timeout=<value>`/,
 					);
 					assert.deepEqual(await readInvocationLog(logPath), []);
@@ -410,12 +451,13 @@ process.stdout.write(JSON.stringify({ success: true, data: { title: "Example Dom
 					const activeSessionMismatch = await executeRegisteredTool(harness.tool, harness.ctx, {
 						args: ["--idle-timeout", "5000", "open", "https://example.com/next"],
 					});
+					assert.ok(activeSessionMismatch.details);
 					assert.equal(activeSessionMismatch.isError, true);
 					assert.match(
-						String(activeSessionMismatch.details?.validationError),
+						readString(activeSessionMismatch.details.validationError),
 						/PI_AGENT_BROWSER_IMPLICIT_SESSION_IDLE_TIMEOUT_MS=5000/,
 					);
-					assert.equal(activeSessionMismatch.details?.sessionRecoveryHint, undefined);
+					assert.equal(activeSessionMismatch.details.sessionRecoveryHint, undefined);
 					assert.deepEqual(await readInvocationLog(logPath), alignedInvocations);
 				},
 			);
@@ -462,34 +504,37 @@ if (command === "mcp" && args.includes("--help")) {
 				const pluginList = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: ["plugin", "list"],
 				});
+				assert.ok(pluginList.details);
 				const pluginShow = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: ["plugin", "show", "demo"],
 				});
+				assert.ok(pluginShow.details);
 				const bareMcp = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: ["mcp", "--tools", "core"],
 				});
 				const mcpHelp = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: ["mcp", "--help"],
 				});
+				assert.ok(mcpHelp.details);
 				const mcpHelpWord = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: ["mcp", "help"],
 				});
 
 				assert.equal(pluginList.isError, false);
-				assert.deepEqual(pluginList.details?.data, {
+				assert.deepEqual(pluginList.details.data, {
 					plugins: [{ name: "demo", capabilities: ["command.run"] }],
 				});
-				assert.equal(pluginList.details?.sessionName, undefined);
-				assert.equal(pluginList.details?.usedImplicitSession, undefined);
+				assert.equal(pluginList.details.sessionName, undefined);
+				assert.equal(pluginList.details.usedImplicitSession, undefined);
 				assert.equal(pluginShow.isError, false);
-				assert.deepEqual(pluginShow.details?.data, {
+				assert.deepEqual(pluginShow.details.data, {
 					plugin: { name: "demo", capabilities: ["command.run"] },
 				});
-				assert.equal(pluginShow.details?.sessionName, undefined);
+				assert.equal(pluginShow.details.sessionName, undefined);
 				assert.equal(bareMcp.isError, true);
 				assert.match(bareMcp.content[0]?.text ?? "", /external MCP clients/);
 				assert.equal(mcpHelp.isError, false);
-				assert.equal(mcpHelp.details?.inspection, true);
+				assert.equal(mcpHelp.details.inspection, true);
 				assert.match(mcpHelp.content[0]?.text ?? "", /Start an MCP stdio server/);
 				assert.equal(mcpHelpWord.isError, true);
 				assert.match(mcpHelpWord.content[0]?.text ?? "", /external MCP clients/);
@@ -542,26 +587,28 @@ if (subcommand === "list") {
 				const list = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: ["skills", "list"],
 				});
+				assert.ok(list.details);
 				const get = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: ["skills", "get", "core", "--full"],
 				});
 				const path = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: ["skills", "path", "core"],
 				});
+				assert.ok(path.details);
 
 				assert.equal(list.isError, false);
-				assert.match((list.content[0] as { text: string }).text, /1\. core — Core usage guide/);
-				assert.equal(list.details?.sessionName, undefined);
-				assert.equal(list.details?.usedImplicitSession, undefined);
+				assert.match(readString(readRecord(list.content[0]).text), /1\. core — Core usage guide/);
+				assert.equal(list.details.sessionName, undefined);
+				assert.equal(list.details.usedImplicitSession, undefined);
 				assert.equal(get.isError, false);
 				assert.match(
-					(get.content[0] as { text: string }).text,
+					readString(readRecord(get.content[0]).text),
 					/agent_browser \{ "args": \["snapshot","-i"\] \}/,
 				);
 				assert.equal(path.isError, false);
-				assert.equal(path.details?.summary, "agent-browser skill path");
+				assert.equal(path.details.summary, "agent-browser skill path");
 				assert.match(
-					(path.content[0] as { text: string }).text,
+					readString(readRecord(path.content[0]).text),
 					/\/tmp\/agent-browser-skills\/core/,
 				);
 
@@ -648,31 +695,51 @@ if (skillIndex >= 0 && args[skillIndex + 1] === "get") {
 					);
 
 					for (const args of providerCommands) {
+						// Fixture transitions and their assertions run in order against this test's shared state.
+						// oxlint-disable-next-line no-await-in-loop
 						const result = await executeRegisteredTool(harness.tool, harness.ctx, {
 							args: [...args],
 							sessionMode: "fresh",
 						});
+						// Every command in the fixed nonempty provider table checks success and credential redaction.
+						// oxlint-disable-next-line node-test/no-conditional-assertion
+						assert.ok(result.details);
+						// Every command in the fixed nonempty provider table checks success and credential redaction.
+						// oxlint-disable-next-line node-test/no-conditional-assertion
 						assert.equal(
 							result.isError,
 							false,
-							`${args.join(" ")}: ${result.content[0]?.type === "text" ? result.content[0].text : ""}`,
+							`${args.join(" ")}: ${result.content[0]?.type === "text" ? readString(result.content[0].text) : ""}`,
 						);
+						// Every command in the fixed nonempty provider table checks success and credential redaction.
+						// oxlint-disable-next-line node-test/no-conditional-assertion
 						assert.doesNotMatch(
 							JSON.stringify(result.details),
 							/agentcore-key|browserbase-key|browserless-key|browser-use-key|kernel-key/,
 						);
 					}
 					for (const args of skillCommands) {
+						// Fixture transitions and their assertions run in order against this test's shared state.
+						// oxlint-disable-next-line no-await-in-loop
 						const result = await executeRegisteredTool(harness.tool, harness.ctx, {
 							args: [...args],
 						});
+						// Every command in the fixed nonempty skills table checks success without implicit sessions.
+						// oxlint-disable-next-line node-test/no-conditional-assertion
+						assert.ok(result.details);
+						// Every command in the fixed nonempty skills table checks success without implicit sessions.
+						// oxlint-disable-next-line node-test/no-conditional-assertion
 						assert.equal(
 							result.isError,
 							false,
-							`${args.join(" ")}: ${result.content[0]?.type === "text" ? result.content[0].text : ""}`,
+							`${args.join(" ")}: ${result.content[0]?.type === "text" ? readString(result.content[0].text) : ""}`,
 						);
-						assert.equal(result.details?.sessionName, undefined, args.join(" "));
-						assert.equal(result.details?.usedImplicitSession, undefined, args.join(" "));
+						// Every command in the fixed nonempty skills table checks success without implicit sessions.
+						// oxlint-disable-next-line node-test/no-conditional-assertion
+						assert.equal(result.details.sessionName, undefined, args.join(" "));
+						// Every command in the fixed nonempty skills table checks success without implicit sessions.
+						// oxlint-disable-next-line node-test/no-conditional-assertion
+						assert.equal(result.details.usedImplicitSession, undefined, args.join(" "));
 					}
 
 					const invocations = await readInvocationLog(logPath);
@@ -681,11 +748,11 @@ if (skillIndex >= 0 && args[skillIndex + 1] === "get") {
 						return entry.args[1] === "--session" && userArgs.length > 0 && userArgs[0] !== "close";
 					});
 					const sessionfulProviderCommands = providerCommands.filter(
-						(args) => !(args[0] === "-p" && args[1] === "ios" && args[2] === "device"),
+						(args) => !(args[0] === "-p" && args.at(1) === "ios" && args[2] === "device"),
 					);
 					assert.deepEqual(
 						providerInvocations.map((entry) => stripWrapperPrefix(entry.args)),
-						sessionfulProviderCommands.map((args) => [...args]),
+						sessionfulProviderCommands.map((args) => args.slice()),
 					);
 					assert.deepEqual(
 						invocations.find(
@@ -712,7 +779,7 @@ if (skillIndex >= 0 && args[skillIndex + 1] === "get") {
 					assert.ok(providerInvocations.some((entry) => entry.kernelApiKey === "kernel-key"));
 					assert.deepEqual(
 						invocations.filter((entry) => entry.args[1] === "skills").map((entry) => entry.args),
-						skillCommands.map((args) => ["--json", ...args]),
+						skillCommands.map((args) => ["--json"].concat(args)),
 					);
 				},
 			);
@@ -818,47 +885,30 @@ process.stdout.write(JSON.stringify({ success: true, data }));`,
 					const snapshotAfterNestedClose = await executeRegisteredTool(harness.tool, harness.ctx, {
 						args: ["--session", "cloudflare-live", "snapshot", "-i"],
 					});
+					assert.ok(snapshotAfterNestedClose.details);
 					const freshLabeledUrl = await executeRegisteredTool(harness.tool, harness.ctx, {
 						args: ["--session", "cloudflare-live", "get", "url"],
 						sessionMode: "fresh",
 					});
 
-					assert.equal(
-						connect.isError,
-						false,
-						connect.content[0]?.type === "text" ? connect.content[0].text : "connect failed",
-					);
-					assert.equal(
-						url.isError,
-						false,
-						url.content[0]?.type === "text" ? url.content[0].text : "get url failed",
-					);
-					assert.equal(
-						snapshot.isError,
-						false,
-						snapshot.content[0]?.type === "text" ? snapshot.content[0].text : "snapshot failed",
-					);
+					assert.equal(connect.isError, false, readString(readRecord(connect.content[0]).text));
+					assert.equal(url.isError, false, readString(readRecord(url.content[0]).text));
+					assert.equal(snapshot.isError, false, readString(readRecord(snapshot.content[0]).text));
 					assert.equal(
 						attachedCloseThenOpen.isError,
 						false,
-						attachedCloseThenOpen.content[0]?.type === "text"
-							? attachedCloseThenOpen.content[0].text
-							: "close/open batch failed",
+						readString(readRecord(attachedCloseThenOpen.content[0]).text),
 					);
 					assert.equal(
 						snapshotAfterNestedClose.isError,
 						false,
-						snapshotAfterNestedClose.content[0]?.type === "text"
-							? snapshotAfterNestedClose.content[0].text
-							: "post-batch snapshot failed",
+						readString(readRecord(snapshotAfterNestedClose.content[0]).text),
 					);
-					assert.equal(snapshotAfterNestedClose.details?.attachedBrowserSession, true);
+					assert.equal(snapshotAfterNestedClose.details.attachedBrowserSession, true);
 					assert.equal(
 						freshLabeledUrl.isError,
 						false,
-						freshLabeledUrl.content[0]?.type === "text"
-							? freshLabeledUrl.content[0].text
-							: "fresh-labeled get url failed",
+						readString(readRecord(freshLabeledUrl.content[0]).text),
 					);
 					const attachedInvocations = (await readInvocationLog(logPath)).filter((entry) =>
 						entry.args.includes("cloudflare-live"),
@@ -886,29 +936,27 @@ process.stdout.write(JSON.stringify({ success: true, data }));`,
 							["close"],
 						]),
 					});
+					assert.ok(attachedTerminalClose.details);
 					assert.equal(
 						attachedTerminalClose.isError,
 						false,
-						attachedTerminalClose.content[0]?.type === "text"
-							? attachedTerminalClose.content[0].text
-							: "terminal close batch failed",
+						readString(readRecord(attachedTerminalClose.content[0]).text),
 					);
-					assert.equal(attachedTerminalClose.details?.refSnapshot, undefined);
+					assert.equal(attachedTerminalClose.details.refSnapshot, undefined);
 					const terminalBranch = harness.ctx.sessionManager.getBranch().slice();
 					const requestsAfterTerminalClose = await executeRegisteredTool(
 						harness.tool,
 						harness.ctx,
 						{ args: ["--session", "cloudflare-live", "network", "requests"] },
 					);
+					assert.ok(requestsAfterTerminalClose.details);
 					assert.equal(
 						requestsAfterTerminalClose.isError,
 						false,
-						requestsAfterTerminalClose.content[0]?.type === "text"
-							? requestsAfterTerminalClose.content[0].text
-							: "post-close requests failed",
+						readString(readRecord(requestsAfterTerminalClose.content[0]).text),
 					);
-					assert.equal(requestsAfterTerminalClose.details?.attachedBrowserSession, undefined);
-					assert.equal(requestsAfterTerminalClose.details?.networkRouteDiagnostics, undefined);
+					assert.equal(requestsAfterTerminalClose.details.attachedBrowserSession, undefined);
+					assert.equal(requestsAfterTerminalClose.details.networkRouteDiagnostics, undefined);
 					const postCloseInvocations = (await readInvocationLog(logPath)).slice(
 						terminalCloseInvocationCount,
 					);
@@ -916,7 +964,7 @@ process.stdout.write(JSON.stringify({ success: true, data }));`,
 						(entry) => entry.args.includes("network") && entry.args.includes("requests"),
 					);
 					assert.equal(postCloseRequests?.args.includes("--args"), false);
-					assert.equal(postCloseRequests?.args.includes("--allow-file-access"), false);
+					assert.equal(postCloseRequests.args.includes("--allow-file-access"), false);
 
 					const terminalResumeInvocationCount = (await readInvocationLog(logPath)).length;
 					const terminalResumeHarness = createExtensionHarness({
@@ -935,20 +983,19 @@ process.stdout.write(JSON.stringify({ success: true, data }));`,
 						terminalResumeHarness.ctx,
 						{ args: ["--session", "cloudflare-live", "network", "requests"] },
 					);
+					assert.ok(requestsAfterTerminalResume.details);
 					assert.equal(
 						requestsAfterTerminalResume.isError,
 						false,
-						requestsAfterTerminalResume.content[0]?.type === "text"
-							? requestsAfterTerminalResume.content[0].text
-							: "post-resume requests failed",
+						readString(readRecord(requestsAfterTerminalResume.content[0]).text),
 					);
-					assert.equal(requestsAfterTerminalResume.details?.attachedBrowserSession, undefined);
-					assert.equal(requestsAfterTerminalResume.details?.networkRouteDiagnostics, undefined);
+					assert.equal(requestsAfterTerminalResume.details.attachedBrowserSession, undefined);
+					assert.equal(requestsAfterTerminalResume.details.networkRouteDiagnostics, undefined);
 					const postResumeRequests = (await readInvocationLog(logPath))
 						.slice(terminalResumeInvocationCount)
 						.find((entry) => entry.args.includes("network") && entry.args.includes("requests"));
 					assert.equal(postResumeRequests?.args.includes("--args"), false);
-					assert.equal(postResumeRequests?.args.includes("--allow-file-access"), false);
+					assert.equal(postResumeRequests.args.includes("--allow-file-access"), false);
 
 					const invocationCount = (await readInvocationLog(logPath)).length;
 					const resumedHarness = createExtensionHarness({
@@ -970,9 +1017,7 @@ process.stdout.write(JSON.stringify({ success: true, data }));`,
 					assert.equal(
 						resumedSnapshot.isError,
 						false,
-						resumedSnapshot.content[0]?.type === "text"
-							? resumedSnapshot.content[0].text
-							: "resumed snapshot failed",
+						readString(readRecord(resumedSnapshot.content[0]).text),
 					);
 					const resumedInvocations = (await readInvocationLog(logPath)).slice(invocationCount);
 					assert.ok(resumedInvocations.length > 0);
@@ -1016,11 +1061,7 @@ process.stdout.write(JSON.stringify({ success: true, data }));`,
 						{ args: ["--cdp", "9222", "snapshot", "-i"], sessionMode: "fresh" },
 					);
 					assert.equal(blockedFirstUse.isError, true);
-					assert.match(
-						(blockedFirstUse.content[0]?.type === "text" ? blockedFirstUse.content[0].text : "") ??
-							"",
-						/unverified/i,
-					);
+					assert.match(readString(readRecord(blockedFirstUse.content[0]).text), /unverified/i);
 					assert.ok(
 						(await readInvocationLog(logPath))
 							.slice(implicitInvocationCount)
@@ -1042,9 +1083,10 @@ process.stdout.write(JSON.stringify({ success: true, data }));`,
 						args: ["--cdp", "9222", "get", "url"],
 						sessionMode: "fresh",
 					});
+					assert.ok(managedUrl.details);
 					assert.equal(managedUrl.isError, false);
 					const managedBranch = managedHarness.ctx.sessionManager.getBranch().slice();
-					const managedSessionName = managedUrl.details?.sessionName;
+					const managedSessionName = managedUrl.details.sessionName;
 					assert.equal(typeof managedSessionName, "string");
 					await writeFile(unsafeTargetPath, "unsafe", "utf8");
 					const localManagedSnapshot = await executeRegisteredTool(
@@ -1067,7 +1109,7 @@ process.stdout.write(JSON.stringify({ success: true, data }));`,
 						managedHarness.ctx,
 					);
 					const managedInvocations = (await readInvocationLog(logPath)).filter((entry) =>
-						entry.args.includes(managedSessionName as string),
+						entry.args.includes(readString(managedSessionName)),
 					);
 					assert.ok(managedInvocations.some((entry) => entry.args.includes("close")));
 					assert.ok(
@@ -1100,7 +1142,7 @@ process.stdout.write(JSON.stringify({ success: true, data }));`,
 					});
 					const namespaceResumeInvocations = (await readInvocationLog(logPath))
 						.slice(namespaceResumeInvocationCount)
-						.filter((entry) => entry.args.includes(managedSessionName as string));
+						.filter((entry) => entry.args.includes(readString(managedSessionName)));
 					assert.ok(namespaceResumeInvocations.some((entry) => entry.args.includes("close")));
 					assert.ok(
 						namespaceResumeInvocations.every(
@@ -1125,14 +1167,11 @@ process.stdout.write(JSON.stringify({ success: true, data }));`,
 							failedHarness.ctx,
 							{ args: ["--cdp", "9222", "get", "url"], sessionMode: "fresh" },
 						);
+						assert.ok(failedAttach.details);
 						assert.equal(failedAttach.isError, true);
-						assert.equal(
-							(failedAttach.details?.managedSessionOutcome as { activeAfter?: boolean } | undefined)
-								?.activeAfter,
-							true,
-						);
-						assert.equal(failedAttach.details?.attachedBrowserSession, true);
-						const failedSessionName = failedAttach.details?.sessionName;
+						assert.equal(readRecord(failedAttach.details.managedSessionOutcome).activeAfter, true);
+						assert.equal(failedAttach.details.attachedBrowserSession, true);
+						const failedSessionName = failedAttach.details.sessionName;
 						assert.equal(typeof failedSessionName, "string");
 						const failedInvocationCount = (await readInvocationLog(logPath)).length;
 						const failedResumeHarness = createExtensionHarness({
@@ -1154,7 +1193,7 @@ process.stdout.write(JSON.stringify({ success: true, data }));`,
 						);
 						const failedInvocations = (await readInvocationLog(logPath))
 							.slice(failedInvocationCount)
-							.filter((entry) => entry.args.includes(failedSessionName as string));
+							.filter((entry) => entry.args.includes(readString(failedSessionName)));
 						assert.ok(failedInvocations.some((entry) => entry.args.includes("close")));
 						assert.ok(
 							failedInvocations.every(
@@ -1181,9 +1220,10 @@ process.stdout.write(JSON.stringify({ success: true, data }));`,
 						const envSnapshot = await executeRegisteredTool(envHarness.tool, envHarness.ctx, {
 							args: ["--session", "env-cdp", "snapshot", "-i"],
 						});
+						assert.ok(envSnapshot.details);
 						assert.equal(envUrl.isError, false);
 						assert.equal(envSnapshot.isError, false);
-						assert.equal(envSnapshot.details?.attachedBrowserSession, true);
+						assert.equal(envSnapshot.details.attachedBrowserSession, true);
 						const envInvocations = (await readInvocationLog(logPath)).filter((entry) =>
 							entry.args.includes("env-cdp"),
 						);
@@ -1335,20 +1375,28 @@ process.stdout.write(JSON.stringify({ success: true, data }));`,
 				await runExtensionEvent(harness.handlers, "session_start", { reason: "new" }, harness.ctx);
 
 				for (const args of commands) {
+					// Fixture transitions and their assertions run in order against this test's shared state.
+					// oxlint-disable-next-line no-await-in-loop
 					const result = await executeRegisteredTool(harness.tool, harness.ctx, {
 						args: [...args],
 					});
+					// Every row in the fixed nonempty core-command sequence checks dispatch success.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
+					assert.ok(result.details);
+					// Every row in the fixed nonempty core-command sequence checks dispatch success.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
 					assert.equal(
 						result.isError,
 						false,
-						`${args.join(" ")}: ${result.content[0]?.type === "text" ? result.content[0].text : ""}`,
+						`${args.join(" ")}: ${result.content[0]?.type === "text" ? readString(result.content[0].text) : ""}`,
 					);
-					if (args[0] === "get" && args[1] === "url") {
-						assert.deepEqual(result.details?.args, ["get", "url"]);
-						assert.equal(
-							(result.details?.data as { url?: string })?.url,
-							"https://example.test/current",
-						);
+					if (args[0] === "get" && args.at(1) === "url") {
+						// The literal get-url row runs these payload checks; every command also checks success.
+						// oxlint-disable-next-line node-test/no-conditional-assertion
+						assert.deepEqual(result.details.args, ["get", "url"]);
+						// The literal get-url row runs these payload checks; every command also checks success.
+						// oxlint-disable-next-line node-test/no-conditional-assertion
+						assert.equal(readRecord(result.details.data).url, "https://example.test/current");
 					}
 				}
 
@@ -1360,10 +1408,12 @@ process.stdout.write(JSON.stringify({ success: true, data }));`,
 				// creation, selection and close always verify the active target title because same-URL tabs can have different titles.
 				let navigationSummaryTitleObserved = false;
 				const expectedInvocations = commands.flatMap((args) => {
-					const normalizedArgs = stripWrapperPrefix([...args]);
+					const normalizedArgs = stripWrapperPrefix(args);
 					const command = normalizedArgs[0];
 					const tabAction =
-						command === "tab" && normalizedArgs[1] !== undefined && normalizedArgs[1] !== "list";
+						command === "tab" &&
+						normalizedArgs.at(1) !== undefined &&
+						normalizedArgs.at(1) !== "list";
 					const probesSummary =
 						command === "click" ||
 						tabAction ||
@@ -1376,13 +1426,13 @@ process.stdout.write(JSON.stringify({ success: true, data }));`,
 					if (!probesSummary) {
 						return command === "get" && normalizedArgs[1] === "url"
 							? [normalizedArgs, ["tab", "list"]]
-							: [...pageCheck, normalizedArgs];
+							: pageCheck.concat([normalizedArgs]);
 					}
 					const titleProbe = !navigationSummaryTitleObserved || tabAction;
 					navigationSummaryTitleObserved = true;
 					return titleProbe
-						? [...pageCheck, normalizedArgs, ["get", "url"], ["get", "title"], ["tab", "list"]]
-						: [...pageCheck, normalizedArgs, ["get", "url"], ["tab", "list"]];
+						? pageCheck.concat([normalizedArgs, ["get", "url"], ["get", "title"], ["tab", "list"]])
+						: pageCheck.concat([normalizedArgs, ["get", "url"], ["tab", "list"]]);
 				});
 				// Exact argv and order including the root-session `get url` page checks: a missing or
 				// spurious URL probe fails here instead of being filtered away.
@@ -1475,18 +1525,29 @@ process.stdout.write(JSON.stringify({ success: true, data }));`,
 
 				let storageSetResult: Awaited<ReturnType<typeof executeRegisteredTool>> | undefined;
 				for (const args of commands) {
+					// Fixture transitions and their assertions run in order against this test's shared state.
+					// oxlint-disable-next-line no-await-in-loop
 					const result = await executeRegisteredTool(harness.tool, harness.ctx, {
 						args: [...args],
 					});
+					// Every row in the fixed nonempty stateful sequence checks success and secret redaction.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
+					assert.ok(result.details);
+					// Every row in the fixed nonempty stateful sequence checks success and secret redaction.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
 					assert.equal(
 						result.isError,
 						false,
-						`${args.join(" ")}: ${result.content[0]?.type === "text" ? result.content[0].text : ""}`,
+						`${args.join(" ")}: ${readString(readRecord(result.content[0]).text)}`,
 					);
+					// Every row in the fixed nonempty stateful sequence checks success and secret redaction.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
 					assert.doesNotMatch(
-						result.content[0]?.text ?? "",
+						readString(readRecord(result.content[0]).text),
 						/cookie-secret|cookie-get-secret|storage-secret/,
 					);
+					// Every row in the fixed nonempty stateful sequence checks success and secret redaction.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
 					assert.doesNotMatch(
 						JSON.stringify(result.details),
 						/cookie-secret|cookie-get-secret|storage-secret/,
@@ -1494,15 +1555,16 @@ process.stdout.write(JSON.stringify({ success: true, data }));`,
 					if (args[0] === "storage" && args[1] === "local" && args[2] === "set") {
 						storageSetResult = result;
 					}
-					if (args[0] === "get" && args[1] === "url") {
-						assert.deepEqual(result.details?.args, ["get", "url"]);
-						assert.equal(
-							(result.details?.data as { url?: string })?.url,
-							"https://example.test/current",
-						);
+					if (args[0] === "get" && args.at(1) === "url") {
+						// The literal get-url row checks routing/payload; every stateful row also checks success.
+						// oxlint-disable-next-line node-test/no-conditional-assertion
+						assert.deepEqual(result.details.args, ["get", "url"]);
+						// The literal get-url row checks routing/payload; every stateful row also checks success.
+						// oxlint-disable-next-line node-test/no-conditional-assertion
+						assert.equal(readRecord(result.details.data).url, "https://example.test/current");
 					}
 				}
-				assert.match(storageSetResult?.content[0]?.text ?? "", /theme: dark/);
+				assert.match(readString(readRecord(storageSetResult?.content[0]).text), /theme: dark/);
 				assert.match(JSON.stringify(storageSetResult?.details), /"value":"dark"/);
 
 				const jsonResult = await executeRegisteredTool(harness.tool, harness.ctx, {
@@ -1517,17 +1579,19 @@ process.stdout.write(JSON.stringify({ success: true, data }));`,
 					],
 				});
 				assert.equal(jsonResult.isError, false);
-				for (const item of jsonResult.content) {
-					if (item.type === "text") {
-						assert.doesNotMatch(item.text ?? "", /json-cookie-secret/);
-					}
+				const textItems = jsonResult.content.filter((item) => item.type === "text");
+				assert.ok(textItems.length > 0, "JSON cookie result must expose visible text");
+				for (const item of textItems) {
+					// The asserted nonempty text-result set checks every visible item for the cookie secret.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
+					assert.doesNotMatch(item.text, /json-cookie-secret/);
 				}
 
 				const invocations = await readInvocationLog(logPath);
-				const isSessionlessAuthRow = (args: string[]) =>
+				const isSessionlessAuthRow = (args: readonly string[]) =>
 					args[0] === "auth" &&
 					["save", "list", "show", "delete", "remove"].includes(args[1] ?? "");
-				const isSessionlessStateRow = (args: string[]) =>
+				const isSessionlessStateRow = (args: readonly string[]) =>
 					args[0] === "state" &&
 					(args[1] === "list" || (args[1] === "clear" && args[2] === "caller-owned"));
 				// Exact argv and order including the root-session `get url` page checks and the explicit
@@ -1537,7 +1601,7 @@ process.stdout.write(JSON.stringify({ success: true, data }));`,
 					invocations.map((entry) => stripWrapperPrefix(entry.args)),
 					[
 						...commands.flatMap((args): string[][] => {
-							const normalizedArgs = [...args];
+							const normalizedArgs = args.slice();
 							const pageCheck =
 								!isSessionlessAuthRow(normalizedArgs) &&
 								!isSessionlessStateRow(normalizedArgs) &&
@@ -1546,7 +1610,7 @@ process.stdout.write(JSON.stringify({ success: true, data }));`,
 									: [];
 							return normalizedArgs[0] === "get" && normalizedArgs[1] === "url"
 								? [normalizedArgs, ["tab", "list"]]
-								: [...pageCheck, normalizedArgs];
+								: pageCheck.concat([normalizedArgs]);
 						}),
 						["get", "url"],
 						[
@@ -1713,18 +1777,29 @@ process.stdout.write(JSON.stringify({ success: true, data }));`,
 
 					let networkRequestsResult: Awaited<ReturnType<typeof executeRegisteredTool>> | undefined;
 					for (const args of commands) {
+						// Fixture transitions and their assertions run in order against this test's shared state.
+						// oxlint-disable-next-line no-await-in-loop
 						const result = await executeRegisteredTool(harness.tool, harness.ctx, {
 							args: [...args],
 						});
+						// Every command in the fixed nonempty non-core sequence checks success and secret redaction.
+						// oxlint-disable-next-line node-test/no-conditional-assertion
+						assert.ok(result.details);
+						// Every command in the fixed nonempty non-core sequence checks success and secret redaction.
+						// oxlint-disable-next-line node-test/no-conditional-assertion
 						assert.equal(
 							result.isError,
 							false,
-							`${args.join(" ")}: ${result.content[0]?.type === "text" ? result.content[0].text : ""}`,
+							`${args.join(" ")}: ${result.content[0]?.type === "text" ? readString(result.content[0].text) : ""}`,
 						);
+						// Every command in the fixed nonempty non-core sequence checks success and secret redaction.
+						// oxlint-disable-next-line node-test/no-conditional-assertion
 						assert.doesNotMatch(
 							result.content[0]?.text ?? "",
 							/route-secret|clipboard-secret|chat-secret/,
 						);
+						// Every command in the fixed nonempty non-core sequence checks success and secret redaction.
+						// oxlint-disable-next-line node-test/no-conditional-assertion
 						assert.doesNotMatch(
 							JSON.stringify(result.details),
 							/route-secret|clipboard-secret|chat-secret/,
@@ -1734,11 +1809,11 @@ process.stdout.write(JSON.stringify({ success: true, data }));`,
 						}
 					}
 
-					const networkNextActions = networkRequestsResult?.details?.nextActions as
-						| Array<{ id?: string; params?: { args?: string[] } }>
-						| undefined;
+					const networkNextActions = readArray(networkRequestsResult?.details?.nextActions).map(
+						readRecord,
+					);
 					assert.deepEqual(
-						networkNextActions?.map((action) => action.id),
+						networkNextActions.map((action) => action.id),
 						[
 							"inspect-network-request",
 							"filter-network-requests-by-path",
@@ -1746,22 +1821,18 @@ process.stdout.write(JSON.stringify({ success: true, data }));`,
 							"start-network-har-capture",
 						],
 					);
-					assert.deepEqual(networkNextActions?.[0]?.params?.args?.slice(-3), [
-						"network",
-						"request",
-						"n1",
-					]);
-					assert.deepEqual(networkNextActions?.[1]?.params?.args?.slice(-4), [
-						"network",
-						"requests",
-						"--filter",
-						"/app.js",
-					]);
-					assert.deepEqual(networkNextActions?.[2]?.params?.args?.slice(-3), [
-						"network",
-						"requests",
-						"--clear",
-					]);
+					assert.deepEqual(
+						readArray(readRecord(networkNextActions[0].params).args).map(readString).slice(-3),
+						["network", "request", "n1"],
+					);
+					assert.deepEqual(
+						readArray(readRecord(networkNextActions[1].params).args).map(readString).slice(-4),
+						["network", "requests", "--filter", "/app.js"],
+					);
+					assert.deepEqual(
+						readArray(readRecord(networkNextActions[2].params).args).map(readString).slice(-3),
+						["network", "requests", "--clear"],
+					);
 
 					const invocations = await readInvocationLog(logPath);
 					const userInvocations = invocations.map((entry) => stripWrapperPrefix(entry.args));
@@ -1771,7 +1842,7 @@ process.stdout.write(JSON.stringify({ success: true, data }));`,
 					assert.deepEqual(
 						userInvocations,
 						commands.flatMap((args): string[][] => {
-							const normalizedArgs = stripWrapperPrefix([...args]);
+							const normalizedArgs = stripWrapperPrefix(args);
 							if (normalizedArgs[0] === "diff" && normalizedArgs[1] === "url") {
 								return [normalizedArgs, ["get", "url"], ["get", "title"], ["tab", "list"]];
 							}
@@ -1781,7 +1852,7 @@ process.stdout.write(JSON.stringify({ success: true, data }));`,
 								command !== "dashboard" && needsRootSessionPageCheck(normalizedArgs)
 									? [["get", "url"]]
 									: [];
-							return [...pageCheck, normalizedArgs];
+							return pageCheck.concat([normalizedArgs]);
 						}),
 					);
 					assert.ok(invocations.every((entry) => entry.args.includes("--json")));
@@ -1846,18 +1917,16 @@ test(
 					const result = await executeRegisteredTool(harness.tool, harness.ctx, {
 						args: ["stream", "enable"],
 					});
+					assert.ok(result.details);
 					assert.equal(result.isError, false);
-					assert.equal(result.details?.resultCategory, "success");
-					assert.equal(result.details?.successCategory, "completed");
-					assert.equal(
-						(result.details?.data as { alreadyEnabled?: unknown } | undefined)?.alreadyEnabled,
-						true,
-					);
+					assert.equal(result.details.resultCategory, "success");
+					assert.equal(result.details.successCategory, "completed");
+					assert.equal(readRecord(result.details.data).alreadyEnabled, true);
 					assert.match(result.content[0]?.text ?? "", /idempotent no-op/);
 					assert.deepEqual(
-						(result.details?.nextActions as Array<{ id?: string }> | undefined)?.map(
-							(action) => action.id,
-						),
+						readArray(result.details.nextActions)
+							.map(readRecord)
+							.map((action) => action.id),
 						["check-stream-status-after-noop", "disable-existing-stream-when-done"],
 					);
 				},
@@ -1893,8 +1962,9 @@ test(
 					const result = await executeRegisteredTool(harness.tool, harness.ctx, {
 						args: ["stream", "enable"],
 					});
+					assert.ok(result.details);
 					assert.equal(result.isError, true);
-					assert.equal(result.details?.failureCategory, "upstream-error");
+					assert.equal(result.details.failureCategory, "upstream-error");
 					assert.match(result.content[0]?.text ?? "", /health check failed/);
 				},
 			);
@@ -1940,19 +2010,19 @@ process.stdout.write(JSON.stringify({ success: true, data }));`,
 					const requestsResult = await executeRegisteredTool(harness.tool, harness.ctx, {
 						args: ["network", "requests"],
 					});
+					assert.ok(requestsResult.details);
 					assert.equal(requestsResult.isError, false);
 					assert.match(requestsResult.content[0]?.text ?? "", /Network route diagnostics/);
 					assert.deepEqual(
-						(
-							requestsResult.details?.networkRouteDiagnostics as
-								| Array<{ reason?: string }>
-								| undefined
-						)?.map((item) => item.reason),
+						readArray(requestsResult.details.networkRouteDiagnostics)
+							.map(readRecord)
+							.map((item) => item.reason),
 						["unfulfilled-routed-request"],
 					);
 					assert.deepEqual(
-						(requestsResult.details?.nextActions as Array<{ id?: string }> | undefined)
-							?.slice(0, 2)
+						readArray(requestsResult.details.nextActions)
+							.map(readRecord)
+							.slice(0, 2)
 							.map((action) => action.id),
 						["inspect-routed-network-request", "start-network-har-capture-for-route-mock"],
 					);
@@ -2011,25 +2081,25 @@ process.stdin.on("end", () => {
 							["network", "requests"],
 						]),
 					});
+					assert.ok(batchResult.details);
 					assert.equal(batchResult.isError, false);
-					const batchSteps = batchResult.details?.batchSteps as
-						| Array<{ networkRouteDiagnostics?: Array<{ reason?: string }> }>
-						| undefined;
+					const batchSteps = readArray(batchResult.details.batchSteps).map(readRecord);
 					assert.deepEqual(
-						batchSteps?.[1]?.networkRouteDiagnostics?.map((item) => item.reason),
+						readArray(batchSteps[1].networkRouteDiagnostics)
+							.map(readRecord)
+							.map((item) => item.reason),
 						["pending-routed-request"],
 					);
 
 					const requestsResult = await executeRegisteredTool(harness.tool, harness.ctx, {
 						args: ["network", "requests"],
 					});
+					assert.ok(requestsResult.details);
 					assert.equal(requestsResult.isError, false);
 					assert.deepEqual(
-						(
-							requestsResult.details?.networkRouteDiagnostics as
-								| Array<{ reason?: string }>
-								| undefined
-						)?.map((item) => item.reason),
+						readArray(requestsResult.details.networkRouteDiagnostics)
+							.map(readRecord)
+							.map((item) => item.reason),
 						["pending-routed-request"],
 					);
 				},
@@ -2073,11 +2143,12 @@ if (args.includes("get") && args.includes("url")) {
 				const result = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: ["--session", "warden-vfr", "screenshot", ".dogfood/run/foo.png"],
 				});
+				assert.ok(result.details);
 
 				const expectedPath = join(tempDir, ".dogfood/run/foo.png");
 				assert.equal(result.isError, false);
 				assert.equal(await readFile(expectedPath, "utf8"), "fake-png");
-				const text = result.content[0]?.type === "text" ? (result.content[0].text ?? "") : "";
+				const text = result.content[0]?.type === "text" ? result.content[0].text : "";
 				assert.match(text, /Saved image: \.dogfood\/run\/foo\.png/);
 				assert.match(text, /Artifact type: image/);
 				assert.match(text, /Requested path: \.dogfood\/run\/foo\.png/);
@@ -2094,13 +2165,13 @@ if (args.includes("get") && args.includes("url")) {
 				assert.match(text, /Session: warden-vfr/);
 				assert.match(text, new RegExp(`CWD: ${tempDir.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
 
-				const artifacts = result.details?.artifacts as Array<Record<string, unknown>> | undefined;
-				assert.equal(artifacts?.[0]?.requestedPath, ".dogfood/run/foo.png");
-				assert.equal(artifacts?.[0]?.absolutePath, expectedPath);
-				assert.equal(artifacts?.[0]?.cwd, tempDir);
-				assert.equal(artifacts?.[0]?.session, "warden-vfr");
-				assert.equal(artifacts?.[0]?.status, "repaired-from-temp");
-				assert.equal(artifacts?.[0]?.tempPath, upstreamTempPath);
+				const artifacts = readArray(result.details.artifacts).map(readRecord);
+				assert.equal(artifacts[0].requestedPath, ".dogfood/run/foo.png");
+				assert.equal(artifacts[0].absolutePath, expectedPath);
+				assert.equal(artifacts[0].cwd, tempDir);
+				assert.equal(artifacts[0].session, "warden-vfr");
+				assert.equal(artifacts[0].status, "repaired-from-temp");
+				assert.equal(artifacts[0].tempPath, upstreamTempPath);
 
 				const invocations = await readInvocationLog(logPath);
 				assert.deepEqual(invocations[0]?.args.at(-2), "get");
@@ -2147,6 +2218,7 @@ process.stdout.write(JSON.stringify({ success: true, data: { path } }));`,
 					const result = await executeRegisteredTool(harness.tool, harness.ctx, {
 						args: ["state", "save", statePath],
 					});
+					assert.ok(result.details);
 
 					assert.equal(result.isError, false, JSON.stringify(result));
 					assert.equal(await readFile(statePath, "utf8"), JSON.stringify({ ok: true }));
@@ -2185,11 +2257,15 @@ test(
 					const result = await executeRegisteredTool(harness.tool, harness.ctx, {
 						args: ["stream", "status", "--json"],
 					});
+					assert.ok(result.details);
 
-					const text = result.content[0]?.type === "text" ? (result.content[0].text ?? "") : "";
-					const parsed = JSON.parse(text) as { data?: { wsUrl?: string; frameFormat?: string } };
-					assert.equal(parsed.data?.wsUrl, "ws://127.0.0.1:9223");
-					assert.equal(parsed.data?.frameFormat, "JSON messages with base64 JPEG frame data");
+					const text = result.content[0]?.type === "text" ? result.content[0].text : "";
+					const parsed = readRecord(JSON.parse(text));
+					assert.equal(readRecord(parsed.data).wsUrl, "ws://127.0.0.1:9223");
+					assert.equal(
+						readRecord(parsed.data).frameFormat,
+						"JSON messages with base64 JPEG frame data",
+					);
 				},
 			);
 		} finally {
@@ -2207,10 +2283,11 @@ test("agentBrowserExtension blocks per-step batch screenshot annotation foot-gun
 		args: ["batch"],
 		stdin: '[["screenshot","--annotate","/tmp/foo.png"]]',
 	});
+	assert.ok(result.details);
 
 	assert.equal(result.isError, true);
 	assert.match(
-		result.content[0]?.type === "text" ? (result.content[0].text ?? "") : "",
+		result.content[0]?.type === "text" ? result.content[0].text : "",
 		/put --annotate in top-level args/i,
 	);
 });
@@ -2231,7 +2308,7 @@ const args = process.argv.slice(2);
 let stdin = "";
 process.stdin.on("data", chunk => stdin += chunk);
 process.stdin.on("end", () => {
-  fs.appendFileSync(${JSON.stringify(logPath)}, JSON.stringify({ args, stdin: JSON.parse(stdin) }) + "\\n");
+  fs.appendFileSync(${JSON.stringify(logPath)}, JSON.stringify({ args, stdin }) + "\\n");
   fs.mkdirSync(path.dirname(${JSON.stringify(upstreamTempPath)}), { recursive: true });
   fs.writeFileSync(${JSON.stringify(upstreamTempPath)}, "fake-batch-png");
   process.stdout.write(JSON.stringify([{ command: ["screenshot", ".dogfood/run/good-batch.png"], success: true, error: null, result: { path: ${JSON.stringify(upstreamTempPath)} } }]));
@@ -2256,11 +2333,12 @@ process.stdin.on("end", () => {
 						args: ["--annotate", "batch"],
 						stdin: '[["screenshot",".dogfood/run/good-batch.png"]]',
 					});
+					assert.ok(result.details);
 
 					const expectedPath = join(tempDir, ".dogfood/run/good-batch.png");
 					assert.equal(result.isError, false);
 					assert.equal(await readFile(expectedPath, "utf8"), "fake-batch-png");
-					const text = result.content[0]?.type === "text" ? (result.content[0].text ?? "") : "";
+					const text = result.content[0]?.type === "text" ? result.content[0].text : "";
 					assert.match(text, /Step 1 — screenshot/);
 					assert.match(text, /Saved image: \.dogfood\/run\/good-batch\.png/);
 					assert.match(text, /Requested path: \.dogfood\/run\/good-batch\.png/);
@@ -2270,14 +2348,16 @@ process.stdin.on("end", () => {
 						new RegExp(`Reported path: ${upstreamTempPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`),
 					);
 
-					const artifacts = result.details?.artifacts as Array<Record<string, unknown>> | undefined;
-					assert.equal(artifacts?.[0]?.requestedPath, ".dogfood/run/good-batch.png");
-					assert.equal(artifacts?.[0]?.absolutePath, expectedPath);
-					assert.equal(artifacts?.[0]?.status, "repaired-from-temp");
-					assert.equal(artifacts?.[0]?.tempPath, upstreamTempPath);
+					const artifacts = readArray(result.details.artifacts).map(readRecord);
+					assert.equal(artifacts[0].requestedPath, ".dogfood/run/good-batch.png");
+					assert.equal(artifacts[0].absolutePath, expectedPath);
+					assert.equal(artifacts[0].status, "repaired-from-temp");
+					assert.equal(artifacts[0].tempPath, upstreamTempPath);
 
 					const [invocation] = await readInvocationLog(logPath);
-					assert.deepEqual(invocation.stdin, [["screenshot", expectedPath]]);
+					assert.deepEqual(readArray(JSON.parse(readString(invocation.stdin))), [
+						["screenshot", expectedPath],
+					]);
 				},
 			);
 		} finally {
@@ -2323,7 +2403,7 @@ if (args.includes("batch")) {
 				});
 				assert.equal(profilerStart.isError, true);
 				assert.match(
-					profilerStart.content[0]?.type === "text" ? (profilerStart.content[0].text ?? "") : "",
+					profilerStart.content[0]?.type === "text" ? profilerStart.content[0].text : "",
 					/Wrapper believes trace tracing is active/,
 				);
 
@@ -2346,6 +2426,7 @@ if (args.includes("batch")) {
 					args: ["--session", "debug-session", "batch"],
 					stdin: JSON.stringify([["close"], ["open", "https://safe.example/"]]),
 				});
+				assert.ok(closeThenRelaunch.details);
 				assert.equal(closeThenRelaunch.isError, false);
 				const verifiedAfterBatchClose = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: ["--session", "debug-session", "get", "url"],
@@ -2354,6 +2435,7 @@ if (args.includes("batch")) {
 				const profilerAfterBatchClose = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: ["--session", "debug-session", "profiler", "start"],
 				});
+				assert.ok(profilerAfterBatchClose.details);
 				assert.equal(
 					profilerAfterBatchClose.isError,
 					false,
@@ -2378,8 +2460,9 @@ if (args.includes("batch")) {
 				const closeAll = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: ["close", "--all"],
 				});
+				assert.ok(closeAll.details);
 				assert.equal(closeAll.isError, false);
-				assert.equal(closeAll.details?.closeAllApplied, true);
+				assert.equal(closeAll.details.closeAllApplied, true);
 				const profilerAAfterCloseAll = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: ["--session", "all-a", "profiler", "start"],
 				});
@@ -2390,7 +2473,7 @@ if (args.includes("batch")) {
 				assert.equal(profilerOtherAfterCloseAll.isError, true);
 				assert.match(
 					profilerOtherAfterCloseAll.content[0]?.type === "text"
-						? (profilerOtherAfterCloseAll.content[0].text ?? "")
+						? profilerOtherAfterCloseAll.content[0].text
 						: "",
 					/Wrapper believes trace tracing is active/,
 				);

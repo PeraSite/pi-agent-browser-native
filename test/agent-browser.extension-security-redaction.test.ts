@@ -7,6 +7,7 @@
  */
 
 import assert from "node:assert/strict";
+import { readArray, readRecord, readString } from "./helpers/assertions.js";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -41,52 +42,65 @@ process.stdout.write(JSON.stringify({ success: true, data: { title: "ok", url: "
 				await runExtensionEvent(harness.handlers, "session_start", { reason: "new" }, harness.ctx);
 
 				const updates: unknown[] = [];
-				const result = (await harness.tool.execute(
-					"test-tool-call",
-					{
-						args: [
-							"--headers",
-							'{"Authorization":"Bearer s3cr3t-demo"}',
-							"open",
-							"https://user:pass@example.com/?token=abc",
-						],
-					},
-					new AbortController().signal,
-					(update) => updates.push(update),
-					harness.ctx,
-				)) as {
-					content: Array<{ type: string; text?: string }>;
-					details?: Record<string, unknown>;
-					isError?: boolean;
-				};
+				const result = readRecord(
+					await harness.tool.execute(
+						"test-tool-call",
+						{
+							args: [
+								"--headers",
+								'{"Authorization":"Bearer s3cr3t-demo"}',
+								"open",
+								"https://user:pass@example.com/?token=abc",
+							],
+						},
+						new AbortController().signal,
+						(update) => {
+							updates.push(update);
+						},
+						harness.ctx,
+					),
+				);
 
 				assert.equal(result.isError, false);
 				const [invocation] = await readInvocationLog(logPath);
-				assert.deepEqual(invocation?.args, [
+				assert.deepEqual(invocation.args, [
 					"--json",
 					"--session",
-					result.details?.sessionName,
+					readRecord(result.details).sessionName,
 					"--headers",
 					'{"Authorization":"Bearer s3cr3t-demo"}',
 					"open",
 					"https://user:pass@example.com/?token=abc",
 				]);
 				assert.equal(Array.isArray(updates), true);
-				const update = updates[0] as
-					| { content?: Array<{ text?: string }>; details?: Record<string, unknown> }
-					| undefined;
-				assert.match(update?.content?.[0]?.text ?? "", /\[REDACTED\]/);
-				assert.doesNotMatch(update?.content?.[0]?.text ?? "", /s3cr3t-demo/);
-				assert.doesNotMatch(update?.content?.[0]?.text ?? "", /user:pass/);
-				assert.deepEqual(result.details?.args, [
+				const update = readRecord(updates[0]);
+				assert.match(
+					readString(readArray(update.content).map(readRecord)[0].text ?? ""),
+					/\[REDACTED\]/,
+				);
+				assert.doesNotMatch(
+					readString(readArray(update.content).map(readRecord)[0].text ?? ""),
+					/s3cr3t-demo/,
+				);
+				assert.doesNotMatch(
+					readString(readArray(update.content).map(readRecord)[0].text ?? ""),
+					/user:pass/,
+				);
+				assert.deepEqual(readRecord(result.details).args, [
 					"--headers",
 					"[REDACTED]",
 					"open",
 					"https://%5BREDACTED%5D:%5BREDACTED%5D@example.com/?token=%5BREDACTED%5D",
 				]);
-				assert.equal(JSON.stringify(result.details?.effectiveArgs).includes("s3cr3t-demo"), false);
-				assert.equal(JSON.stringify(result.details?.effectiveArgs).includes("user:pass"), false);
-				assert.equal(JSON.stringify(result.details?.data).includes("user:pass"), false);
+				assert.equal(
+					JSON.stringify(readRecord(result.details).effectiveArgs).includes("s3cr3t-demo"),
+					false,
+				);
+				assert.equal(
+					JSON.stringify(readRecord(result.details).effectiveArgs).includes("user:pass"),
+					false,
+				);
+				assert.equal(JSON.stringify(readRecord(result.details).data).includes("user:pass"), false);
 				assert.equal(JSON.stringify(result.content).includes("user:pass"), false);
 				assert.equal(JSON.stringify(result).includes("openai-should-not-leak"), false);
 				assert.equal(JSON.stringify(result).includes("unrelated-should-not-leak"), false);
@@ -198,21 +212,40 @@ test(
 					["read", data.url],
 					["--json", "read", data.url],
 				]) {
+					// Fixture transitions and their assertions run in order against this test's shared state.
+					// oxlint-disable-next-line no-await-in-loop
 					const result = await executeRegisteredTool(harness.tool, harness.ctx, {
 						args,
 						outputPath: "read.json",
 					});
+					// Both literal prose/JSON read variants run these shared redaction checks.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
 					assert.equal(result.isError, false);
+					// Both literal prose/JSON read variants run these shared redaction checks.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
 					assert.deepEqual(result.details?.data, expectedData);
+					// Both literal prose/JSON read variants run these shared redaction checks.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
 					assert.deepEqual(
+						// Fixture transitions and their assertions run in order against this test's shared state.
+						// oxlint-disable-next-line no-await-in-loop
 						JSON.parse(await readFile(join(tempDir, "read.json"), "utf8")),
 						expectedData,
 					);
 					if (args.includes("--json")) {
-						assert.deepEqual(JSON.parse(result.content[0]?.text ?? "").data, expectedData);
+						// The two fixed read variants exercise both JSON and prose; each branch asserts its format.
+						// oxlint-disable-next-line node-test/no-conditional-assertion
+						assert.deepEqual(
+							readRecord(JSON.parse(result.content[0]?.text ?? "")).data,
+							expectedData,
+						);
 					} else {
-						assert.ok(result.content[0]?.text?.includes(expectedData.content));
+						// The two fixed read variants exercise both JSON and prose; each branch asserts its format.
+						// oxlint-disable-next-line node-test/no-conditional-assertion
+						assert.ok(result.content[0]?.text?.includes(expectedData.content) === true);
 					}
+					// Both literal prose/JSON read variants run these shared redaction checks.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
 					assert.doesNotMatch(JSON.stringify(result), /secrettoken|abc123_\.456|C123/);
 				}
 			});
@@ -263,7 +296,9 @@ test(
 						{
 							contentOrigin: result.content[0]?.text?.split("\n")[0],
 							data: result.details?.data,
-							exported: JSON.parse(await readFile(join(tempDir, "snapshot.json"), "utf8")),
+							exported: readRecord(
+								JSON.parse(await readFile(join(tempDir, "snapshot.json"), "utf8")),
+							),
 						},
 						{
 							contentOrigin: `Origin: ${redactedOrigin}`,
@@ -327,31 +362,55 @@ process.stdout.write(JSON.stringify({ success: true, data: { result: ${JSON.stri
 					["--json", "eval", "--stdin"],
 				]) {
 					const harness = createExtensionHarness({ cwd: tempDir });
+					// Fixture transitions and their assertions run in order against this test's shared state.
+					// oxlint-disable-next-line no-await-in-loop
 					await runExtensionEvent(
 						harness.handlers,
 						"session_start",
 						{ reason: "new" },
 						harness.ctx,
 					);
+					// Fixture transitions and their assertions run in order against this test's shared state.
+					// oxlint-disable-next-line no-await-in-loop
 					const result = await executeRegisteredTool(harness.tool, harness.ctx, {
 						args,
 						stdin,
 						outputPath: "eval.json",
 					});
+					// Both literal eval variants must pass the same export and nested-redaction checks.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
 					assert.equal(result.isError, false, JSON.stringify(result));
+					// Fixture transitions and their assertions run in order against this test's shared state.
+					// oxlint-disable-next-line no-await-in-loop
 					const exportedText = await readFile(join(tempDir, "eval.json"), "utf8");
-					const exported = JSON.parse(exportedText);
+					const exported = readRecord(JSON.parse(exportedText));
+					// Both literal eval variants must pass the same export and nested-redaction checks.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
 					assert.deepEqual(result.details?.data, exported);
+					// Both literal eval variants must pass the same export and nested-redaction checks.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
 					assert.equal(typeof exported.result, "string");
-					const parsed = JSON.parse(exported.result);
+					const parsed = readRecord(JSON.parse(readString(exported.result)));
+					// Both literal eval variants must pass the same export and nested-redaction checks.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
 					assert.deepEqual(parsed, expected);
-					assert.equal(typeof parsed.evidence.prehydration, "string");
-					assert.deepEqual(JSON.parse(parsed.evidence.prehydration), { url: expectedUrl });
+					// Both literal eval variants must pass the same export and nested-redaction checks.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
+					assert.equal(typeof readRecord(parsed.evidence).prehydration, "string");
+					// Both literal eval variants must pass the same export and nested-redaction checks.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
+					assert.deepEqual(JSON.parse(readString(readRecord(parsed.evidence).prehydration)), {
+						url: expectedUrl,
+					});
 					const text = result.content[0]?.text ?? "";
 					const visible = args.includes("--json")
-						? JSON.parse(text).data.result
+						? readRecord(readRecord(JSON.parse(text)).data).result
 						: text.split("\n\nOutput file:")[0];
-					assert.deepEqual(JSON.parse(visible), expected);
+					// Both literal eval variants must pass the same export and nested-redaction checks.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
+					assert.deepEqual(JSON.parse(readString(visible)), expected);
+					// Both literal eval variants must pass the same export and nested-redaction checks.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
 					assert.doesNotMatch(
 						JSON.stringify(result) + exportedText,
 						/private-fixture|flow-fixture|adjacent-fixture/,
@@ -407,28 +466,44 @@ process.stdout.write(JSON.stringify({ success: true, data: { result: JSON.parse(
 							["--json", "eval", "--stdin"],
 						]) {
 							const harness = createExtensionHarness({ cwd: tempDir });
+							// Fixture transitions and their assertions run in order against this test's shared state.
+							// oxlint-disable-next-line no-await-in-loop
 							await runExtensionEvent(
 								harness.handlers,
 								"session_start",
 								{ reason: "new" },
 								harness.ctx,
 							);
+							// Fixture transitions and their assertions run in order against this test's shared state.
+							// oxlint-disable-next-line no-await-in-loop
 							const result = await executeRegisteredTool(harness.tool, harness.ctx, {
 								args,
 								stdin,
 								outputPath: "eval-source.json",
 							});
+							// All three literal JSON sources run both eval formats and check exact source redaction.
+							// oxlint-disable-next-line node-test/no-conditional-assertion
 							assert.equal(result.isError, false, JSON.stringify(result));
+							// All three literal JSON sources run both eval formats and check exact source redaction.
+							// oxlint-disable-next-line node-test/no-conditional-assertion
 							assert.deepEqual(result.details?.data, { result: expected });
+							// Fixture transitions and their assertions run in order against this test's shared state.
+							// oxlint-disable-next-line no-await-in-loop
 							const exportedText = await readFile(join(tempDir, "eval-source.json"), "utf8");
+							// All three literal JSON sources run both eval formats and check exact source redaction.
+							// oxlint-disable-next-line node-test/no-conditional-assertion
 							assert.deepEqual(JSON.parse(exportedText), { result: expected });
 							const text = result.content[0]?.text ?? "";
+							// All three literal JSON sources run both eval formats and check exact source redaction.
+							// oxlint-disable-next-line node-test/no-conditional-assertion
 							assert.equal(
 								args.includes("--json")
-									? JSON.parse(text).data.result
+									? readRecord(readRecord(JSON.parse(text)).data).result
 									: text.split("\n\nOutput file:")[0],
 								expected,
 							);
+							// All three literal JSON sources run both eval formats and check exact source redaction.
+							// oxlint-disable-next-line node-test/no-conditional-assertion
 							assert.doesNotMatch(JSON.stringify(result) + exportedText, /synthetic-secret/);
 						}
 					}
@@ -488,7 +563,7 @@ process.stdout.write(JSON.stringify({ success: true, data: { result: JSON.parse(
 						outputPath: "minified.json",
 					});
 					assert.equal(result.isError, false);
-					assert.equal((result.details?.data as { compacted?: boolean })?.compacted, true);
+					assert.equal(readRecord(result.details?.data).compacted, true);
 					const spillPath = result.details?.fullOutputPath;
 					assert.ok(typeof spillPath === "string");
 					assert.deepEqual(JSON.parse(await readFile(spillPath, "utf8")), { result: expected });
@@ -545,24 +620,24 @@ process.stdout.write(JSON.stringify({ success: true, data: { saved: true, echoed
 				await runExtensionEvent(harness.handlers, "session_start", { reason: "new" }, harness.ctx);
 
 				const updates: unknown[] = [];
-				const result = (await harness.tool.execute(
-					"test-tool-call",
-					{ args: ["auth", "save", "demo", "--password-stdin"], stdin: "pin" },
-					new AbortController().signal,
-					(update) => updates.push(update),
-					harness.ctx,
-				)) as {
-					content: Array<{ type: string; text?: string }>;
-					details?: Record<string, unknown>;
-					isError?: boolean;
-				};
+				const result = readRecord(
+					await harness.tool.execute(
+						"test-tool-call",
+						{ args: ["auth", "save", "demo", "--password-stdin"], stdin: "pin" },
+						new AbortController().signal,
+						(update) => {
+							updates.push(update);
+						},
+						harness.ctx,
+					),
+				);
 
 				assert.equal(result.isError, false);
 				const [invocation] = await readInvocationLog(logPath);
-				assert.deepEqual(invocation?.args, ["--json", "auth", "save", "demo", "--password-stdin"]);
-				assert.equal(result.details?.sessionName, undefined);
-				assert.equal(result.details?.usedImplicitSession, undefined);
-				assert.equal(invocation?.stdin, "pin");
+				assert.deepEqual(invocation.args, ["--json", "auth", "save", "demo", "--password-stdin"]);
+				assert.equal(readRecord(result.details).sessionName, undefined);
+				assert.equal(readRecord(result.details).usedImplicitSession, undefined);
+				assert.equal(invocation.stdin, "pin");
 				assert.equal(JSON.stringify(updates).includes("pin"), false);
 				assert.equal(JSON.stringify(result.details).includes("pin"), false);
 				assert.equal(JSON.stringify(result.content).includes("pin"), false);
@@ -605,7 +680,7 @@ process.exit(1);`,
 				assert.match(JSON.stringify(result.content), /\[REDACTED\]/);
 				assert.match(JSON.stringify(result.details), /\[REDACTED\]/);
 				assert.equal(result.details?.resultCategory, "failure");
-				assert.equal(result.details?.failureCategory, "upstream-error");
+				assert.equal(result.details.failureCategory, "upstream-error");
 			});
 		} finally {
 			await rm(tempDir, { force: true, recursive: true });
@@ -641,7 +716,7 @@ process.stdout.write("invalid-json " + stdin + " " + "x".repeat(600000));`,
 				assert.equal(JSON.stringify(result.details).includes("super-secret-password"), false);
 				assert.equal(result.details?.fullOutputPath, undefined);
 				assert.match(
-					String(result.details?.fullOutputUnavailable ?? ""),
+					readString(result.details?.fullOutputUnavailable ?? ""),
 					/discarded because it may contain sensitive browser data/,
 				);
 			});
@@ -681,22 +756,23 @@ process.exit(1);`,
 
 					assert.equal(result.isError, true);
 					assert.equal(result.content[0]?.type, "text");
-					const text = (result.content[0] as { text: string }).text;
-					assert.match(text, /Confirmation required\./);
-					assert.match(text, /Pending confirmation id: c_sensitive/);
-					assert.match(text, /\["confirm", "c_sensitive"\]/);
-					assert.match(text, /\["deny", "c_sensitive"\]/);
-					assert.match(String(result.details?.summary ?? ""), /Confirmation required: c_sensitive/);
+					const text = readRecord(result.content[0]).text;
+					assert.match(readString(text), /Confirmation required\./);
+					assert.match(readString(text), /Pending confirmation id: c_sensitive/);
+					assert.match(readString(text), /\["confirm", "c_sensitive"\]/);
+					assert.match(readString(text), /\["deny", "c_sensitive"\]/);
+					assert.match(
+						readString(result.details?.summary ?? ""),
+						/Confirmation required: c_sensitive/,
+					);
 					assert.equal(result.details?.resultCategory, "failure");
-					assert.equal(result.details?.failureCategory, "confirmation-required");
-					const nextActions = result.details?.nextActions as
-						| Array<{ params?: { args: string[] } }>
-						| undefined;
+					assert.equal(result.details.failureCategory, "confirmation-required");
+					const nextActions = readArray(result.details.nextActions).map(readRecord);
 					assert.deepEqual(
-						nextActions?.map((action) => action.params?.args),
+						nextActions.map((action) => readRecord(action.params).args),
 						[
-							["--session", result.details?.sessionName, "confirm", "c_sensitive"],
-							["--session", result.details?.sessionName, "deny", "c_sensitive"],
+							["--session", result.details.sessionName, "confirm", "c_sensitive"],
+							["--session", result.details.sessionName, "deny", "c_sensitive"],
 						],
 					);
 					assert.doesNotMatch(JSON.stringify(result.content), /user:pass|raw-token|token=secret/);
@@ -735,13 +811,13 @@ else process.stdout.write(JSON.stringify({ success: true, data: "ok" }));`,
 					args: ["confirm", "c_demo"],
 				});
 				assert.equal(confirmed.isError, false);
-				assert.match((confirmed.content[0] as { text: string }).text, /Action confirmed/);
+				assert.match(readString(readRecord(confirmed.content[0]).text), /Action confirmed/);
 
 				const denied = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: ["deny", "c_demo"],
 				});
 				assert.equal(denied.isError, false);
-				assert.match((denied.content[0] as { text: string }).text, /Action denied/);
+				assert.match(readString(readRecord(denied.content[0]).text), /Action denied/);
 
 				const invocations = await readInvocationLog(logPath);
 				assert.deepEqual(

@@ -7,6 +7,7 @@
  */
 
 import assert from "node:assert/strict";
+import { readArray, readRecord, readString } from "./helpers/assertions.js";
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import test from "node:test";
@@ -46,8 +47,8 @@ import {
 	validateToolArgs,
 } from "../extensions/agent-browser/lib/runtime.js";
 import { convertBrowserEntries } from "../extensions/agent-browser/lib/browser-session-conversion.js";
-const restoreManagedSessionStateFromBranch = (branch: unknown[], baseName: string) =>
-	restoreCanonicalManagedSessionState(convertBrowserEntries(branch), baseName);
+const restoreManagedSessionStateFromBranch = (branch: readonly unknown[], baseName: string) =>
+	restoreCanonicalManagedSessionState(convertBrowserEntries([...branch]), baseName);
 import { createToolBranchEntry } from "./helpers/agent-browser-harness.js";
 
 test("buildExecutionPlan rejects ambiguous session identity flags without rejecting command text", () => {
@@ -891,8 +892,14 @@ test("restoreManagedSessionStateFromBranch treats upstream close aliases as mana
 			"piab-demo-123",
 		);
 
+		// All three close aliases must retire ownership in this fixed matrix.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.equal(restored.active, false, command);
+		// All close aliases must retain the same restored session identity.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.equal(restored.sessionName, "piab-demo-123", command);
+		// All close aliases must publish the retired session identity.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.equal(restored.closedSessionName, "piab-demo-123", command);
 	}
 });
@@ -1217,13 +1224,21 @@ test("buildExecutionPlan treats upstream close aliases as managed-session closes
 			sessionMode: "auto",
 		});
 
+		// Every declared close alias must preserve exact upstream argv.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.deepEqual(
 			plan.effectiveArgs,
 			["--json", "--session", "piab-demo-123", command],
 			command,
 		);
+		// Every close alias must retain managed identity until its close executes.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.equal(plan.managedSessionName, "piab-demo-123", command);
+		// Every close alias must target the managed session.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.equal(plan.sessionName, "piab-demo-123", command);
+		// Every close alias must retain implicit routing in this fixed matrix.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.equal(plan.usedImplicitSession, true, command);
 	}
 });
@@ -1387,11 +1402,23 @@ test("buildExecutionPlan resolves caller-owned session namespaces from argv befo
 				managedSessionNamespace: "owned-space",
 				sessionMode: "fresh",
 			});
+			// Every fixed namespace override must preserve native close-all routing.
+			// oxlint-disable-next-line node-test/no-conditional-assertion
 			assert.equal(freshClose.namespace, override ?? "review-space");
+			// Every namespace variant must leave close-all argv unchanged.
+			// oxlint-disable-next-line node-test/no-conditional-assertion
 			assert.deepEqual(freshClose.effectiveArgs, ["--json", ...args]);
+			// Every close-all variant must avoid selecting a single session.
+			// oxlint-disable-next-line node-test/no-conditional-assertion
 			assert.equal(freshClose.sessionName, undefined);
+			// Every close-all variant must avoid assigning managed identity.
+			// oxlint-disable-next-line node-test/no-conditional-assertion
 			assert.equal(freshClose.managedSessionName, undefined);
+			// Every close-all variant must stay namespace-scoped, not implicit-session scoped.
+			// oxlint-disable-next-line node-test/no-conditional-assertion
 			assert.equal(freshClose.usedImplicitSession, false);
+			// Every declared close-all variant must remain supported.
+			// oxlint-disable-next-line node-test/no-conditional-assertion
 			assert.equal(freshClose.validationError, undefined);
 		}
 		for (const sessionMode of ["auto", "fresh"] as const) {
@@ -1403,7 +1430,11 @@ test("buildExecutionPlan resolves caller-owned session namespaces from argv befo
 				sessionMode,
 			});
 			const selectedSession = sessionMode === "fresh" ? freshSessionName : "piab-demo-123";
+			// Both fixed auto/fresh modes must use the default namespace.
+			// oxlint-disable-next-line node-test/no-conditional-assertion
 			assert.equal(opened.namespace, undefined);
+			// Both fixed session modes must emit the exact selected-session argv.
+			// oxlint-disable-next-line node-test/no-conditional-assertion
 			assert.deepEqual(opened.effectiveArgs, [
 				"--json",
 				"--session",
@@ -1411,9 +1442,17 @@ test("buildExecutionPlan resolves caller-owned session namespaces from argv befo
 				"open",
 				"https://example.com",
 			]);
+			// Both fixed session modes must select their expected identity.
+			// oxlint-disable-next-line node-test/no-conditional-assertion
 			assert.equal(opened.sessionName, selectedSession);
+			// Both fixed session modes must retain their selected managed identity.
+			// oxlint-disable-next-line node-test/no-conditional-assertion
 			assert.equal(opened.managedSessionName, selectedSession);
+			// The exhaustive mode matrix distinguishes ordinary implicit reuse from fresh selection.
+			// oxlint-disable-next-line node-test/no-conditional-assertion
 			assert.equal(opened.usedImplicitSession, sessionMode === "auto");
+			// Both declared open modes must remain valid.
+			// oxlint-disable-next-line node-test/no-conditional-assertion
 			assert.equal(opened.validationError, undefined);
 
 			const listed = buildExecutionPlan(["session", "list"], {
@@ -1423,11 +1462,23 @@ test("buildExecutionPlan resolves caller-owned session namespaces from argv befo
 				managedSessionNamespace: "owned-space",
 				sessionMode,
 			});
+			// Both session-mode variants must leave session listing in the native namespace.
+			// oxlint-disable-next-line node-test/no-conditional-assertion
 			assert.equal(listed.namespace, "review-space");
+			// Both fixed session modes must leave local listing argv unchanged.
+			// oxlint-disable-next-line node-test/no-conditional-assertion
 			assert.deepEqual(listed.effectiveArgs, ["--json", "session", "list"]);
+			// Both fixed modes must keep local listing sessionless.
+			// oxlint-disable-next-line node-test/no-conditional-assertion
 			assert.equal(listed.sessionName, undefined);
+			// Both fixed modes must avoid creating managed identity for local listing.
+			// oxlint-disable-next-line node-test/no-conditional-assertion
 			assert.equal(listed.managedSessionName, undefined);
+			// Both fixed modes must avoid implicit-session injection for local listing.
+			// oxlint-disable-next-line node-test/no-conditional-assertion
 			assert.equal(listed.usedImplicitSession, false);
+			// Both declared listing modes must remain valid.
+			// oxlint-disable-next-line node-test/no-conditional-assertion
 			assert.equal(listed.validationError, undefined);
 		}
 	} finally {
@@ -1472,11 +1523,23 @@ test("buildExecutionPlan keeps inspection commands stateless", () => {
 			sessionMode: "auto",
 		});
 
+		// Every fixed help/version shape must use native inspection output.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.equal(plan.plainTextInspection, true);
+		// Every fixed help/version shape must retain caller argv.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.deepEqual(plan.effectiveArgs, [...args]);
+		// Every local/inspection fixture in these nonempty matrices must remain unmanaged.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.equal(plan.managedSessionName, undefined);
+		// Every local/inspection or invalid-argv fixture must avoid selecting a session.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.equal(plan.sessionName, undefined);
+		// Every local/inspection or invalid-argv fixture must avoid implicit injection.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.equal(plan.usedImplicitSession, false);
+		// Every declared valid local/inspection case must remain supported.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.equal(plan.validationError, undefined);
 	}
 });
@@ -1541,11 +1604,23 @@ test("buildExecutionPlan keeps sessionless commands free of implicit managed ses
 			? callerArgs
 			: ["--json", ...callerArgs];
 
+		// Every fixed local-command case retains structured output, unlike help/version.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.equal(plan.plainTextInspection, false);
+		// Every local-command case must retain its exact argv plus required JSON output.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.deepEqual(plan.effectiveArgs, expectedEffectiveArgs);
+		// Every local/inspection fixture in these nonempty matrices must remain unmanaged.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.equal(plan.managedSessionName, undefined);
+		// Every local/inspection or invalid-argv fixture must avoid selecting a session.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.equal(plan.sessionName, undefined);
+		// Every local/inspection or invalid-argv fixture must avoid implicit injection.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.equal(plan.usedImplicitSession, false);
+		// Every declared valid local/inspection case must remain supported.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.equal(plan.validationError, undefined);
 	}
 });
@@ -1571,8 +1646,14 @@ test("buildExecutionPlan still injects managed sessions for browser-backed state
 			sessionMode: "auto",
 		});
 
+		// Every fixed browser-backed state/auth command must receive managed routing.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.deepEqual(plan.effectiveArgs, ["--json", "--session", "piab-demo-123", ...args]);
+		// Every browser-backed state/auth fixture must retain implicit routing.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.equal(plan.usedImplicitSession, true);
+		// Every browser-backed state/auth fixture must retain its managed identity.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.equal(plan.managedSessionName, "piab-demo-123");
 	}
 });
@@ -1600,11 +1681,15 @@ test("buildExecutionPlan limits sessionless allowlists to documented subcommands
 			sessionMode: "auto",
 		});
 
+		// Every unknown-subcommand fixture conservatively receives managed routing.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.deepEqual(
 			plan.effectiveArgs,
 			["--json", "--session", "piab-demo-123", ...args],
 			args.join(" "),
 		);
+		// Every declared browser-backed argv variant must retain implicit routing.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.equal(plan.usedImplicitSession, true, args.join(" "));
 	}
 });
@@ -1619,12 +1704,18 @@ test("buildExecutionPlan rejects unsupported global equals assignments except re
 	for (const flag of [...GLOBAL_VALUE_FLAGS, ...GLOBAL_BOOLEAN_FLAGS_WITH_OPTIONAL_VALUES]) {
 		const args = [`${flag}=demo`, "open", "https://example.com"];
 		const plan = buildExecutionPlan(args, options);
+		// Validate every declared global flag; none are selected from a runtime result.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.equal(
 			plan.validationError?.includes(`does not support \`${flag}=<value>\``),
 			true,
 			args.join(" "),
 		);
+		// Every global-equals fixture must fail before command discovery.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.deepEqual(plan.commandInfo, {}, args.join(" "));
+		// Every fixed argv variant must retain the expected empty startup-flag set.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.deepEqual(plan.startupScopedFlags, [], args.join(" "));
 	}
 
@@ -1678,11 +1769,23 @@ test("buildExecutionPlan rejects missing values for global value-taking flags be
 		});
 
 		const expectedFlag = [...args].reverse().find((token) => token.startsWith("-"));
+		// Every fixed missing-value fixture must fail validation.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.match(plan.validationError ?? "", /requires a value/i);
+		// Every missing-value fixture must identify its own offending flag.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.equal(plan.invalidValueFlag?.flag, expectedFlag);
-		assert.equal(plan.invalidValueFlag?.reason, "missing-value");
+		// Every missing-value fixture must retain the structured failure reason.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
+		assert.equal(readRecord(plan.invalidValueFlag).reason, "missing-value");
+		// Every missing-value fixture must fail before discovering a command.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.deepEqual(plan.commandInfo, {});
+		// Every local/inspection or invalid-argv fixture must avoid selecting a session.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.equal(plan.sessionName, undefined);
+		// Every local/inspection or invalid-argv fixture must avoid implicit injection.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.equal(plan.usedImplicitSession, false);
 	}
 });
@@ -1705,6 +1808,8 @@ test("buildExecutionPlan leaves command-scoped flags and literal text to upstrea
 			sessionMode: "auto",
 		});
 
+		// Every fixed literal-operand or valid-global fixture must remain valid.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.equal(plan.validationError, undefined, args.join(" "));
 	}
 });
@@ -1716,6 +1821,8 @@ test("validateToolArgs rejects press/key commands with selector-like extra args"
 		["keydown", "@e1", "Enter"],
 		["keyup"],
 	] as const) {
+		// Every fixed invalid keyboard argv must reject selector-like extra operands.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.match(
 			validateToolArgs([...args]) ?? "",
 			/accepts exactly one key argument/,
@@ -1739,8 +1846,8 @@ test("buildExecutionPlan rejects value-taking flags followed by another flag", (
 
 	assert.match(plan.validationError ?? "", /received `--profile`/i);
 	assert.equal(plan.invalidValueFlag?.flag, "--cdp");
-	assert.equal(plan.invalidValueFlag?.reason, "unexpected-flag");
-	assert.equal(plan.invalidValueFlag?.receivedToken, "--profile");
+	assert.equal(readRecord(plan.invalidValueFlag).reason, "unexpected-flag");
+	assert.equal(readRecord(plan.invalidValueFlag).receivedToken, "--profile");
 	assert.deepEqual(plan.commandInfo, {});
 	assert.equal(plan.usedImplicitSession, false);
 });
@@ -1829,7 +1936,11 @@ test("buildExecutionPlan parses restore and namespace globals before command dis
 		},
 	] as const) {
 		const descriptor = parseArgvDescriptor([...args]);
+		// Every fixed restore-flag shape must identify the actual command.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.equal(descriptor.commandInfo.command, command, args.join(" "));
+		// Every fixed restore-flag shape must retain its actual first operand.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.equal(descriptor.commandInfo.subcommand, subcommand, args.join(" "));
 	}
 });
@@ -1902,7 +2013,11 @@ test("launch-scoped flag metadata is reflected in playbook and command reference
 		const delimitedFlag = new RegExp(
 			`(?<![\\w-])${flag.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\w-])`,
 		);
+		// Every declared launch flag must be documented; the inventory is the fixture.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.match(playbookText, delimitedFlag, `playbook missing ${flag}`);
+		// Every declared launch flag must also appear in the human command guide.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.match(commandReference, delimitedFlag, `command reference missing ${flag}`);
 	}
 });
@@ -1976,12 +2091,27 @@ test("buildExecutionPlan blocks startup-scoped flags from silently reusing an ac
 			sessionMode: "auto",
 		});
 
+		// Every fixed active-session launch-flag fixture must reject ignored launch options.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.match(plan.validationError ?? "", /launch-scoped flags/i);
+		// Every fixed launch-flag fixture has exactly one startup option.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.equal(plan.startupScopedFlags.length, 1);
+		// Every fixed launch-flag fixture must identify its own option.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.equal(plan.startupScopedFlags[0], flag);
+		// Every local/inspection or invalid-argv fixture must avoid implicit injection.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.equal(plan.usedImplicitSession, false);
+		// Every fixed active-session launch fixture must provide fresh-session recovery.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.equal(plan.recoveryHint?.recommendedSessionMode, "fresh");
-		assert.deepEqual(plan.recoveryHint?.exampleParams, { args: [...args], sessionMode: "fresh" });
+		// Every fixed launch-flag fixture must retain its exact recovery argv.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
+		assert.deepEqual(readRecord(plan.recoveryHint).exampleParams, {
+			args: [...args],
+			sessionMode: "fresh",
+		});
 	}
 });
 
@@ -2001,17 +2131,25 @@ test("buildExecutionPlan preserves engine selection for new, fresh and caller-ow
 				managedSessionName: "piab-current",
 				sessionMode: mode === "fresh" ? "fresh" : "auto",
 			});
+			// The complete fixed engine/mode matrix must remain supported.
+			// oxlint-disable-next-line node-test/no-conditional-assertion
 			assert.equal(plan.validationError, undefined, `${engine} ${mode}`);
+			// Every engine/mode pair must select the fixture's expected identity.
+			// oxlint-disable-next-line node-test/no-conditional-assertion
 			assert.equal(
 				plan.sessionName,
-				mode === "caller" ? "caller" : mode === "fresh" ? "piab-fresh" : "piab-current",
+				{ caller: "caller", fresh: "piab-fresh", new: "piab-current" }[mode],
 			);
+			// Every engine/mode pair must preserve the caller's engine and command tail.
+			// oxlint-disable-next-line node-test/no-conditional-assertion
 			assert.deepEqual(plan.effectiveArgs.slice(-4), [
 				"--engine",
 				engine,
 				"open",
 				"https://example.com",
 			]);
+			// The exhaustive mode matrix distinguishes new implicit selection from explicit/fresh.
+			// oxlint-disable-next-line node-test/no-conditional-assertion
 			assert.equal(plan.usedImplicitSession, mode === "new");
 		}
 	}
@@ -2102,9 +2240,17 @@ test("buildExecutionPlan treats pin-tab as a sticky global boolean, not launch-s
 		["--no-pin-tab", "false", "open", "https://example.com"],
 	] as const) {
 		const plan = buildExecutionPlan([...args], options);
+		// Every fixed literal-operand or valid-global fixture must remain valid.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.equal(plan.validationError, undefined, args.join(" "));
+		// Every fixed argv variant must retain the expected empty startup-flag set.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.deepEqual(plan.startupScopedFlags, [], args.join(" "));
+		// Every declared browser-backed argv variant must retain implicit routing.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.equal(plan.usedImplicitSession, true, args.join(" "));
+		// Every fixed pinning-flag fixture must discover the unchanged open command.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.deepEqual(
 			plan.commandInfo,
 			{ command: "open", subcommand: "https://example.com" },
@@ -2126,7 +2272,11 @@ test("buildExecutionPlan treats provider and iOS device flags as launch-scoped",
 			sessionMode: "auto",
 		});
 
+		// Every fixed provider-selection fixture must reject active-session relaunch flags.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.match(plan.validationError ?? "", /launch-scoped flags/i, args.join(" "));
+		// Every fixed provider fixture must recommend a genuinely fresh launch.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.equal(plan.recoveryHint?.recommendedSessionMode, "fresh", args.join(" "));
 	}
 });
@@ -2178,11 +2328,19 @@ test("buildExecutionPlan injects and retains site-specific headless compatibilit
 			managedSessionName: "piab-demo-123",
 			sessionMode: "auto",
 		});
+		// Every fixed affected-site fixture must select its expected workaround.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.equal(plan.compatibilityWorkaround?.id, expectedId);
 		const userAgentFlagIndex = plan.effectiveArgs.indexOf("--user-agent");
+		// Every fixed affected-site fixture must actually inject a user-agent option.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.ok(userAgentFlagIndex >= 0);
-		assert.match(plan.effectiveArgs[userAgentFlagIndex + 1] ?? "", /Chrome\/146\.0\.0\.0/);
-		assert.doesNotMatch(plan.effectiveArgs[userAgentFlagIndex + 1] ?? "", /HeadlessChrome/);
+		// Every fixed affected-site fixture must use the qualified Chrome user agent.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
+		assert.match(readString(plan.effectiveArgs[userAgentFlagIndex + 1]), /Chrome\/146\.0\.0\.0/);
+		// Every fixed affected-site fixture must omit the problematic headless brand.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
+		assert.doesNotMatch(readString(plan.effectiveArgs[userAgentFlagIndex + 1]), /HeadlessChrome/);
 	}
 
 	const cloudflarePlan = buildExecutionPlan(["open", "https://dash.cloudflare.com"], {
@@ -2247,7 +2405,7 @@ test("buildExecutionPlan injects and retains site-specific headless compatibilit
 		1,
 	);
 	const explicitUserAgentRetry = buildExecutionPlan(
-		explicitUserAgentFollowup.recoveryHint?.exampleArgs ?? [],
+		readArray(readRecord(explicitUserAgentFollowup.recoveryHint).exampleArgs).map(readString),
 		{
 			freshSessionName: createFreshSessionName("piab-demo-123", "seed", 2),
 			managedSessionActive: true,
@@ -2364,6 +2522,8 @@ test("buildExecutionPlan injects and retains site-specific headless compatibilit
 		{ AGENT_BROWSER_USER_AGENT: "Custom/1" },
 		{ AGENT_BROWSER_AUTO_CONNECT: "true" },
 	]) {
+		// Every fixed caller launch-environment fixture must suppress wrapper compatibility defaults.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.equal(
 			canUseHeadlessCompatibilityUserAgent(["open", "https://dash.cloudflare.com"], env),
 			false,
@@ -2470,14 +2630,22 @@ test("redaction preserves harmless URL spelling", () => {
 		"HTTPS://EXAMPLE.com:443/A%2fb?q=a%20b&state=open&nonce=7#part",
 		"ws://127.0.0.1:9222",
 	]) {
+		// Every harmless URL fixture must retain exact source spelling.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.equal(redactSensitiveText(`Read ${url}`), `Read ${url}`);
+		// Every harmless URL fixture must retain exact invocation spelling.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.deepEqual(redactInvocationArgs(["open", url]), ["open", url]);
 		const serialized = JSON.stringify(
 			{ evidence: { prehydration: JSON.stringify({ url }) } },
 			null,
 			2,
 		);
+		// Every harmless serialized URL fixture must remain byte-preserving.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.equal(redactSensitiveText(serialized), serialized);
+		// Every harmless nested URL fixture must remain unchanged.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.deepEqual(redactSensitiveValue({ result: serialized }), { result: serialized });
 	}
 });
@@ -2517,13 +2685,13 @@ test("redactSensitiveText preserves nested serialized JSON through repeated reda
 		2,
 	);
 	const redacted = redactSensitiveText(serialized);
-	const parsed = JSON.parse(redacted);
-	assert.equal(typeof parsed.evidence.prehydration, "string");
-	assert.deepEqual(JSON.parse(parsed.evidence.prehydration), {
+	const parsed = readRecord(JSON.parse(redacted));
+	assert.equal(typeof readRecord(parsed.evidence).prehydration, "string");
+	assert.deepEqual(JSON.parse(readString(readRecord(parsed.evidence).prehydration)), {
 		...prehydration,
 		url: "https://example.test/callback?authorization_session_id=%5BREDACTED%5D&state=%5BREDACTED%5D",
 	});
-	assert.equal(parsed.evidence.apiKey, "[REDACTED]");
+	assert.equal(readRecord(parsed.evidence).apiKey, "[REDACTED]");
 	assert.deepEqual(parsed.values, [1, false, null]);
 	assert.doesNotMatch(redacted, /private-fixture|flow-fixture|adjacent-fixture/);
 	assert.equal(redactSensitiveText(redacted), redacted);
@@ -2550,8 +2718,14 @@ test("redactSensitiveText redacts every serialized JSON member without dropping 
 		],
 	]) {
 		const redacted = redactSensitiveText(source);
+		// Every fixed duplicate-key fixture must retain the independently specified redacted bytes.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.equal(redacted, expected);
+		// Every fixed duplicate-key fixture must also be redaction-idempotent.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.equal(redactSensitiveText(redacted), expected);
+		// Every fixed duplicate-key fixture must retain nested redaction behavior.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.deepEqual(redactSensitiveValue({ result: source }), { result: expected });
 	}
 });
@@ -2565,6 +2739,8 @@ test("redactSensitiveText preserves serialized JSON numeric and literal source",
 	assert.equal(redactSensitiveText(source), expected);
 	assert.equal(redactSensitiveText(expected), expected);
 	for (const value of ['"\\u0041"', '[null,true,false,9007199254740993,"0","false","null"]']) {
+		// Both fixed primitive-JSON fixtures must retain exact noncredential bytes.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.equal(redactSensitiveText(value), value);
 	}
 });
@@ -2605,6 +2781,8 @@ test("redactSensitiveText finds embedded secrets after malformed JSON prefixes",
 		'Payload: ["unclosed ',
 		String.raw`Payload: [\"escaped `,
 	]) {
+		// Every fixed malformed-prefix fixture must still redact embedded credentials.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.equal(redactSensitiveText(prefix + source), prefix + expected);
 	}
 });
@@ -2722,6 +2900,8 @@ test("redactInvocationArgs masks sensitive flags and auth-bearing urls", () => {
 		["cookies", "set", "unused", "ignored", "--curl", "/tmp/cookies.txt"],
 		["batch", "cookies set --curl '/tmp/cookie file.txt'"],
 	]) {
+		// Every fixed curl-cookie path fixture must remain a usable native file operand.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.deepEqual(redactInvocationArgs(args), args);
 	}
 	assert.deepEqual(
@@ -2785,6 +2965,8 @@ test("redactSensitiveText preserves bearer prose while redacting credential cont
 		"Bearer https://docs.example/guide",
 		"Use `bearer token.` or **bearer authentication.** as technical terms.",
 	]) {
+		// Every fixed public bearer-description fixture must remain unredacted.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.equal(redactSensitiveText(text), text);
 	}
 	assert.equal(
@@ -2820,7 +3002,11 @@ test("redactSensitiveText preserves bearer prose while redacting credential cont
 		"X-Api-Key: Bearer canary",
 	]) {
 		const redacted = redactSensitiveText(text);
+		// Every fixed authorization-header fixture must replace its credential.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.match(redacted, /\[REDACTED\]/);
+		// Every fixed authorization-header fixture must remove its independent canary.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.doesNotMatch(redacted, /canary/);
 	}
 	assert.equal(
@@ -2841,6 +3027,8 @@ test("redactSensitiveText preserves bearer prose while redacting credential cont
 		"OPENAI_API_KEY=[REDACTED] AWS_SECRET_ACCESS_KEY: [REDACTED] export STRIPE_SECRET_KEY=[REDACTED] PRIVATE_KEY=[REDACTED] X-Private-Key: [REDACTED] private-key=[REDACTED] API-KEY=[REDACTED] Secret-Key: [REDACTED] apiKey=[REDACTED] privateKey: [REDACTED] connectionString=[REDACTED] databaseUrl: [REDACTED] mongodbUri=[REDACTED] MONGODB_URI=[REDACTED] failedChecks=true",
 	);
 	for (const prefix of ["API_KEY=", "X-Api-Key: "]) {
+		// Both fixed secret-field spellings must redact their JSON-shaped assignment.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.equal(
 			redactSensitiveText(`${prefix}{"value":"assignment-fixture"} status=ok`),
 			`${prefix}[REDACTED] status=ok`,
@@ -2930,7 +3118,11 @@ test("redactSensitiveText does not rescan unmatched JSON prefixes", () => {
 		],
 		{ encoding: "utf8", timeout: 5_000 },
 	);
-	assert.equal(probe.error, undefined, `redaction did not finish: ${probe.error?.message}`);
+	assert.equal(
+		probe.error,
+		undefined,
+		`redaction did not finish: ${probe.error?.message ?? "none"}`,
+	);
 	assert.equal(probe.status, 0, probe.stderr);
 });
 

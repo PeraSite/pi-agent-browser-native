@@ -73,6 +73,7 @@ async function runAgentBrowser(args) {
 	} catch (error) {
 		throw new Error(
 			`Failed to run agent-browser ${args.join(" ")}. Install or update agent-browser before verifying the command reference.\n${error instanceof Error ? error.message : String(error)}`,
+			{ cause: error },
 		);
 	}
 }
@@ -94,9 +95,23 @@ export async function verifyCommandReference({
 
 	const helpByLabel = new Map();
 	for (const command of HELP_COMMANDS) {
+		// Sample one upstream process at a time; skills commands can load shared native state.
+		// oxlint-disable-next-line no-await-in-loop
 		helpByLabel.set(command.label, await run(command.args));
 	}
 
+	return [
+		...failures,
+		...collectHelpFailures(helpByLabel),
+		...collectMissingTokens(
+			stripGeneratedCapabilityBaselineBlocks(await readDoc(join(cwd, COMMAND_REFERENCE_DOC_PATH))),
+			DOC_REQUIRED_TOKENS,
+		).map((token) => `${COMMAND_REFERENCE_DOC_PATH} is missing human-authored token: ${token}`),
+	];
+}
+
+function collectHelpFailures(helpByLabel) {
+	const failures = [];
 	for (const expectation of UPSTREAM_EXPECTATIONS) {
 		const helpText = helpByLabel.get(expectation.help) ?? "";
 		if (!helpText.includes(expectation.token)) {
@@ -104,12 +119,6 @@ export async function verifyCommandReference({
 				`Upstream ${expectation.help} no longer includes expected token from ${CAPABILITY_BASELINE_SOURCE}: ${expectation.token}`,
 			);
 		}
-	}
-
-	const doc = await readDoc(join(cwd, COMMAND_REFERENCE_DOC_PATH));
-	const humanAuthoredDoc = stripGeneratedCapabilityBaselineBlocks(doc);
-	for (const missingToken of collectMissingTokens(humanAuthoredDoc, DOC_REQUIRED_TOKENS)) {
-		failures.push(`${COMMAND_REFERENCE_DOC_PATH} is missing human-authored token: ${missingToken}`);
 	}
 
 	return failures;
@@ -145,7 +154,12 @@ export async function main(argv = process.argv.slice(2)) {
 }
 
 if (import.meta.main) {
-	main().then((exitCode) => {
-		process.exitCode = exitCode;
-	});
+	main()
+		.then((exitCode) => {
+			process.exitCode = exitCode;
+		})
+		.catch((error) => {
+			console.error(error instanceof Error ? error.message : error);
+			process.exitCode = 1;
+		});
 }

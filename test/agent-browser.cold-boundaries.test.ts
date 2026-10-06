@@ -4,6 +4,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import test from "node:test";
+import { readRecord, readArray, readString, readBoolean } from "./helpers/assertions.js";
 
 import { extractUpstreamCommandTokens } from "../extensions/agent-browser/lib/argv-descriptor.js";
 import {
@@ -23,23 +24,27 @@ const chosenUrl = "http://127.0.0.1:43210/chosen";
 const hashRouteUrl = "http://127.0.0.1:43210/app#/reports/weekly?range=7d";
 
 type Page = {
-	call: (params: AgentBrowserToolParams) => ReturnType<typeof executeRegisteredTool>;
-	calls: () => ReturnType<typeof readInvocationLog>;
-	patch: (patch: Record<string, unknown>) => Promise<void>;
-	reload: () => Promise<void>;
-	state: () => Promise<{ active: boolean; browser: boolean; url: string }>;
-	tree: () => Promise<void>;
-	url: string;
+	readonly call: (params: AgentBrowserToolParams) => ReturnType<typeof executeRegisteredTool>;
+	readonly calls: () => ReturnType<typeof readInvocationLog>;
+	readonly patch: (patch: Readonly<Record<string, unknown>>) => Promise<void>;
+	readonly reload: () => Promise<void>;
+	readonly state: () => Promise<{
+		readonly active: boolean;
+		readonly browser: boolean;
+		readonly url: string;
+	}>;
+	readonly tree: () => Promise<void>;
+	readonly url: string;
 };
 
 async function withPage(
 	run: (page: Page) => Promise<void>,
 	options: {
-		live?: boolean;
-		url?: string;
-		explicit?: boolean;
-		attached?: boolean;
-		restoreDisabled?: boolean;
+		readonly live?: boolean;
+		readonly url?: string;
+		readonly explicit?: boolean;
+		readonly attached?: boolean;
+		readonly restoreDisabled?: boolean;
 	} = {},
 ): Promise<void> {
 	const root = await mkdtemp(join(tmpdir(), "cb-"));
@@ -131,7 +136,8 @@ process.exitCode = failed ? 1 : 0;
 				// Automatic restore requires upstream encryption on Windows; this is fixture data only.
 				AGENT_BROWSER_ENCRYPTION_KEY: "a".repeat(64),
 				PI_AGENT_BROWSER_SOCKET_DIR: socketDir,
-				PI_AGENT_BROWSER_MANAGED_SESSION_RESTORE: options.restoreDisabled ? "0" : undefined,
+				PI_AGENT_BROWSER_MANAGED_SESSION_RESTORE:
+					options.restoreDisabled === true ? "0" : undefined,
 				PI_AGENT_BROWSER_TEST_CUSTOM_SESSION_INFO: "1",
 			},
 			async () => {
@@ -139,25 +145,29 @@ process.exitCode = failed ? 1 : 0;
 				const prefix = [
 					"--namespace",
 					"cold",
-					...(options.explicit ? ["--session", "caller"] : []),
+					...(options.explicit === true ? ["--session", "caller"] : []),
 				];
 				let harness = createExtensionHarness({ branch, cwd });
 				const call = async (params: AgentBrowserToolParams) => {
 					const result = await executeRegisteredTool(harness.tool, harness.ctx, params);
-					branch.push(createToolBranchEntry({ details: result.details!, isError: result.isError }));
+					branch.push(
+						createToolBranchEntry({ details: readRecord(result.details), isError: result.isError }),
+					);
 					return result;
 				};
 				await runExtensionEvent(harness.handlers, "session_start", { reason: "new" }, harness.ctx);
 				for (const args of [
-					[...prefix, ...(options.attached ? ["connect", "9222"] : ["open", url])],
-					...(options.attached ? [[...prefix, "get", "url"]] : []),
+					[...prefix, ...(options.attached === true ? ["connect", "9222"] : ["open", url])],
+					...(options.attached === true ? [[...prefix, "get", "url"]] : []),
 					[...prefix, "snapshot", "-i"],
 				]) {
+					// These dependent calls reuse the same page, restore state, and shutdown ownership.
+					// oxlint-disable-next-line no-await-in-loop
 					const result = await call({
 						args,
 						...(args.includes("open") ? { sessionMode: "fresh" as const } : {}),
 					});
-					assert.equal(result.isError, false, result.content[0]?.text);
+					assert.equal(result.isError, false, readString(readRecord(result.content[0]).text));
 				}
 				const restore = async (reason: "quit" | "reload") => {
 					await runExtensionEvent(harness.handlers, "session_shutdown", { reason }, harness.ctx);
@@ -170,21 +180,37 @@ process.exitCode = failed ? 1 : 0;
 						harness.ctx,
 					);
 				};
-				await restore(options.live ? "reload" : "quit");
+				await restore(options.live === true ? "reload" : "quit");
 				await writeFile(logPath, "");
 				try {
 					await run({
-						call: options.explicit
-							? (params) => call({ ...params, args: [...prefix, ...params.args!] })
-							: call,
+						call:
+							options.explicit === true
+								? (params) =>
+										call({
+											...params,
+											args: [...prefix, ...readArray(params.args).map(readString)],
+										})
+								: call,
 						calls: () => readInvocationLog(logPath),
 						patch: async (patch) =>
 							writeFile(
 								statePath,
-								JSON.stringify({ ...JSON.parse(await readFile(statePath, "utf8")), ...patch }),
+								JSON.stringify({
+									...readRecord(JSON.parse(await readFile(statePath, "utf8"))),
+									...patch,
+								}),
 							),
 						reload: () => restore("reload"),
-						state: async () => JSON.parse(await readFile(statePath, "utf8")),
+						state: async () => {
+							const state = readRecord(JSON.parse(await readFile(statePath, "utf8")));
+							return {
+								...state,
+								active: readBoolean(state.active),
+								browser: readBoolean(state.browser),
+								url: readString(state.url),
+							};
+						},
 						tree: async () => {
 							harness.setBranch(structuredClone(branch));
 							await runExtensionEvent(harness.handlers, "session_tree", {}, harness.ctx);
@@ -214,27 +240,37 @@ for (const state of ["cold", "known", "unknown", "reopen"]) {
 		async () => {
 			await withPage(
 				async (page) => {
+					const initialArgs = {
+						cold: ["--namespace", "cold", "--session", "cold-inspected", "session", "info"],
+						reopen: ["tab", "list"],
+						unknown: ["webmcp", "invoke", "wait_for_navigation", "--detach"],
+						known: ["snapshot", "-i"],
+					};
 					const before = await page.call({
-						args:
-							state === "cold"
-								? ["--namespace", "cold", "--session", "cold-inspected", "session", "info"]
-								: state === "reopen"
-									? ["tab", "list"]
-									: state === "unknown"
-										? ["webmcp", "invoke", "wait_for_navigation", "--detach"]
-										: ["snapshot", "-i"],
+						args: readArray(readRecord(initialArgs)[state]).map(readString),
 					});
-					assert.equal(before.isError, false, before.content[0]?.text);
+					assert.equal(before.isError, false, readString(readRecord(before.content[0]).text));
 					if (state === "known") {
-						assert.ok(before.details?.refSnapshot);
+						// Fixed cold/known/unknown/reopen and batch fixtures require different state assertions; common dispatch checks remain unconditional.
+						// oxlint-disable-next-line node-test/no-conditional-assertion
+						assert.notEqual(readRecord(readRecord(before.details).refSnapshot), undefined);
 					}
 					if (state === "unknown") {
-						assert.equal(before.details?.sessionTabTargetUnknown, true);
+						// Fixed cold/known/unknown/reopen and batch fixtures require different state assertions; common dispatch checks remain unconditional.
+						// oxlint-disable-next-line node-test/no-conditional-assertion
+						assert.equal(readRecord(before.details).sessionTabTargetUnknown, true);
 					}
 					if (state === "reopen") {
-						assert.equal(before.details?.sessionTabReopenPending, true);
+						// Fixed cold/known/unknown/reopen and batch fixtures require different state assertions; common dispatch checks remain unconditional.
+						// oxlint-disable-next-line node-test/no-conditional-assertion
+						assert.equal(readRecord(before.details).sessionTabReopenPending, true);
 					}
-					const prefix = ["--namespace", "cold", "--session", String(before.details?.sessionName)];
+					const prefix = [
+						"--namespace",
+						"cold",
+						"--session",
+						readString(readRecord(before.details).sessionName),
+					];
 					const args = [...prefix, "session", "info"];
 					const nativeBefore = await page.state();
 					const offset = (await page.calls()).length;
@@ -246,9 +282,12 @@ for (const state of ["cold", "known", "unknown", "reopen"]) {
 						await page.patch({ timeoutInfo: false });
 					}
 					assert.equal(timedOut.isError, true);
-					assert.equal(timedOut.details?.exitCode, process.platform === "win32" ? 1 : 124);
-					assert.equal(timedOut.details?.timedOut, true);
-					assert.equal(timedOut.details?.failureCategory, "timeout");
+					assert.equal(
+						readRecord(timedOut.details).exitCode,
+						process.platform === "win32" ? 1 : 124,
+					);
+					assert.equal(readRecord(timedOut.details).timedOut, true);
+					assert.equal(readRecord(timedOut.details).failureCategory, "timeout");
 					assert.deepEqual(
 						(await page.calls()).slice(offset).map((row) => row.args),
 						[["--json", ...args]],
@@ -263,7 +302,13 @@ for (const state of ["cold", "known", "unknown", "reopen"]) {
 						"refSnapshotInvalidation",
 						"sessionTabReopenPending",
 					]) {
-						assert.deepEqual(timedOut.details?.[key], before.details?.[key], key);
+						// Fixed cold/known/unknown/reopen and batch fixtures require different state assertions; common dispatch checks remain unconditional.
+						// oxlint-disable-next-line node-test/no-conditional-assertion
+						assert.deepEqual(
+							readRecord(timedOut.details)[key],
+							readRecord(before.details)[key],
+							key,
+						);
 					}
 					for (const key of [
 						"timeoutPartialProgress",
@@ -274,20 +319,24 @@ for (const state of ["cold", "known", "unknown", "reopen"]) {
 						"data",
 						"managedSessionOutcome",
 					]) {
-						assert.equal(timedOut.details?.[key], undefined, key);
+						// Fixed cold/known/unknown/reopen and batch fixtures require different state assertions; common dispatch checks remain unconditional.
+						// oxlint-disable-next-line node-test/no-conditional-assertion
+						assert.equal(readRecord(timedOut.details)[key], undefined, key);
 					}
-					const actions = timedOut.details?.nextActions as Array<{
-						id: string;
-						params: { args: string[] };
-					}>;
+					const actions = readArray(readRecord(timedOut.details).nextActions);
 					assert.deepEqual(
-						actions.map((action) => ({ id: action.id, args: action.params.args })),
+						actions.map((action) => ({
+							id: readRecord(action).id,
+							args: readRecord(readRecord(action).params).args,
+						})),
 						[{ id: "retry-session-info", args }],
 					);
-					const retried = await page.call(actions[0].params);
-					assert.equal(retried.isError, false, retried.content[0]?.text);
+					const retried = await page.call({
+						args: readArray(readRecord(readRecord(actions[0]).params).args).map(readString),
+					});
+					assert.equal(retried.isError, false, readString(readRecord(retried.content[0]).text));
 					assert.equal(
-						(retried.details?.data as { piCleanupOwnership: string }).piCleanupOwnership,
+						readRecord(readRecord(retried.details).data).piCleanupOwnership,
 						state === "cold" ? "caller-owned" : "wrapper-managed",
 					);
 					assert.deepEqual(
@@ -303,14 +352,27 @@ for (const state of ["cold", "known", "unknown", "reopen"]) {
 					);
 					if (state === "unknown") {
 						const blocked = await page.call({ args: [...prefix, "snapshot", "-i"] });
+						// Fixed cold/known/unknown/reopen and batch fixtures require different state assertions; common dispatch checks remain unconditional.
+						// oxlint-disable-next-line node-test/no-conditional-assertion
 						assert.equal(blocked.isError, true);
-						assert.match(blocked.content[0]?.text ?? "", /active page became unverified/);
+						// Fixed cold/known/unknown/reopen and batch fixtures require different state assertions; common dispatch checks remain unconditional.
+						// oxlint-disable-next-line node-test/no-conditional-assertion
+						assert.match(
+							readString(readRecord(blocked.content[0]).text),
+							/active page became unverified/,
+						);
+						// Fixed cold/known/unknown/reopen and batch fixtures require different state assertions; common dispatch checks remain unconditional.
+						// oxlint-disable-next-line node-test/no-conditional-assertion
 						assert.equal((await page.calls()).length, offset + 2);
 					}
 					if (state === "reopen") {
 						const snapshot = await page.call({ args: [...prefix, "snapshot", "-i"] });
-						assert.equal(snapshot.isError, false, snapshot.content[0]?.text);
-						assert.equal((snapshot.details?.data as { origin: string }).origin, page.url);
+						// Fixed cold/known/unknown/reopen and batch fixtures require different state assertions; common dispatch checks remain unconditional.
+						// oxlint-disable-next-line node-test/no-conditional-assertion
+						assert.equal(snapshot.isError, false, readString(readRecord(snapshot.content[0]).text));
+						// Fixed cold/known/unknown/reopen and batch fixtures require different state assertions; common dispatch checks remain unconditional.
+						// oxlint-disable-next-line node-test/no-conditional-assertion
+						assert.equal(readRecord(readRecord(snapshot.details).data).origin, page.url);
 					}
 				},
 				{ live: state === "known" || state === "unknown" },
@@ -329,7 +391,7 @@ for (const prefix of [
 		async () => {
 			await withPage(async (page) => {
 				const first = await page.call({ args: prefix });
-				assert.equal(first.isError, false, first.content[0]?.text);
+				assert.equal(first.isError, false, readString(readRecord(first.content[0]).text));
 				assert.equal((await page.state()).active, prefix[0] !== "read");
 				assert.equal((await page.state()).browser, prefix[0] === "tab");
 				assert.equal(
@@ -341,8 +403,8 @@ for (const prefix of [
 					false,
 				);
 				const snapshot = await page.call({ args: ["snapshot", "-i"] });
-				assert.equal(snapshot.isError, false, snapshot.content[0]?.text);
-				assert.equal((snapshot.details?.data as { origin: string }).origin, page.url);
+				assert.equal(snapshot.isError, false, readString(readRecord(snapshot.content[0]).text));
+				assert.equal(readRecord(readRecord(snapshot.details).data).origin, page.url);
 				assert.deepEqual(
 					(await page.calls())
 						.filter((row) => row.args.includes("open"))
@@ -368,7 +430,7 @@ for (const args of [
 		async () => {
 			await withPage(async (page) => {
 				const result = await page.call({ args });
-				assert.equal(result.isError, false, result.content[0]?.text);
+				assert.equal(result.isError, false, readString(readRecord(result.content[0]).text));
 				const commands = (await page.calls()).map((row) => extractUpstreamCommandTokens(row.args));
 				assert.ok(
 					commands.findIndex((row) => row[0] === "open") <
@@ -395,7 +457,7 @@ for (const prefix of [
 		async () => {
 			await withPage(async (page) => {
 				const first = await page.call({ args: prefix });
-				assert.equal(first.isError, false, first.content[0]?.text);
+				assert.equal(first.isError, false, readString(readRecord(first.content[0]).text));
 				assert.equal(
 					(await page.state()).active,
 					prefix[0] !== "read",
@@ -408,11 +470,11 @@ for (const prefix of [
 				await page.tree();
 				await page.reload();
 				const result = await page.call({ args: ["get", "url"] });
-				assert.equal(result.isError, false, result.content[0]?.text);
-				assert.equal((result.details?.data as { url: string }).url, page.url);
+				assert.equal(result.isError, false, readString(readRecord(result.content[0]).text));
+				assert.equal(readRecord(readRecord(result.details).data).url, page.url);
 				const snapshot = await page.call({ args: ["snapshot", "-i"] });
-				assert.equal(snapshot.isError, false, snapshot.content[0]?.text);
-				assert.equal((snapshot.details?.data as { origin: string }).origin, page.url);
+				assert.equal(snapshot.isError, false, readString(readRecord(snapshot.content[0]).text));
+				assert.equal(readRecord(readRecord(snapshot.details).data).origin, page.url);
 				assert.deepEqual(
 					(await page.calls())
 						.filter((row) => row.args.includes("open"))
@@ -437,9 +499,9 @@ for (const prefix of [
 			await withPage(async (page) => {
 				const stdin = JSON.stringify([prefix, ["snapshot", "-i"]]);
 				const result = await page.call({ args: ["batch", "--bail"], stdin });
-				assert.equal(result.isError, false, result.content[0]?.text);
+				assert.equal(result.isError, false, readString(readRecord(result.content[0]).text));
 				assert.equal(
-					(result.details?.data as Array<{ result: { origin?: string } }>).at(-1)?.result.origin,
+					readRecord(readRecord(readArray(readRecord(result.details).data).at(-1)).result).origin,
 					page.url,
 				);
 				const calls = await page.calls();
@@ -469,7 +531,7 @@ for (const boundary of [
 			await withPage(async (page) => {
 				const stdin = JSON.stringify([["tab", "list"], boundary, ["get", "url"]]);
 				const result = await page.call({ args: ["batch", "--bail"], stdin });
-				assert.equal(result.isError, false, result.content[0]?.text);
+				assert.equal(result.isError, false, readString(readRecord(result.content[0]).text));
 				const calls = await page.calls();
 				assert.equal(
 					calls.some((row) => extractUpstreamCommandTokens(row.args)[0] === "open"),
@@ -492,9 +554,9 @@ for (const bail of [false, true]) {
 				const stdin = JSON.stringify([["tab", "list"], ["not-a-command"], ["snapshot", "-i"]]);
 				const result = await page.call({ args, stdin });
 				assert.equal(result.isError, true);
-				const rows = result.details?.batchSteps as Array<{ command: string[]; success: boolean }>;
+				const rows = readArray(readRecord(result.details).batchSteps);
 				assert.deepEqual(
-					rows.map((row) => row.success),
+					rows.map((row) => readRecord(row).success),
 					bail ? [true, false] : [true, false, true],
 				);
 				const batches = (await page.calls()).filter((row) => row.args.includes("batch"));
@@ -502,9 +564,10 @@ for (const bail of [false, true]) {
 				assert.deepEqual(extractUpstreamCommandTokens(batches[0].args), args);
 				assert.equal(batches[0].stdin, stdin);
 				if (!bail) {
+					// Fixed cold/known/unknown/reopen and batch fixtures require different state assertions; common dispatch checks remain unconditional.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
 					assert.equal(
-						(result.details?.data as Array<{ result?: { origin?: string } }>).at(-1)?.result
-							?.origin,
+						readRecord(readRecord(readArray(readRecord(result.details).data).at(-1)).result).origin,
 						page.url,
 					);
 				}
@@ -530,7 +593,7 @@ for (const params of [
 			await withPage(
 				async (page) => {
 					const result = await page.call(params);
-					assert.equal(result.isError, false, result.content[0]?.text);
+					assert.equal(result.isError, false, readString(readRecord(result.content[0]).text));
 					assert.equal((await page.state()).url, hashRouteUrl);
 					assert.deepEqual(
 						(await page.calls())
@@ -539,7 +602,7 @@ for (const params of [
 						[["open", hashRouteUrl]],
 					);
 					assert.equal(
-						(result.details?.refSnapshot as { target: { url: string } }).target.url,
+						readRecord(readRecord(readRecord(result.details).refSnapshot).target).url,
 						hashRouteUrl,
 					);
 				},
@@ -557,7 +620,7 @@ test(
 			async (page) => {
 				await page.patch({ url: "http://127.0.0.1:43210/app#/other", refName: "Different field" });
 				const result = await page.call({ args: ["get", "value", "@e1"] });
-				assert.equal(result.details?.failureCategory, "stale-ref");
+				assert.equal(readRecord(result.details).failureCategory, "stale-ref");
 				assert.equal(
 					(await page.calls()).some(
 						(row) => row.args.includes("open") || row.args.includes("value"),
@@ -576,14 +639,14 @@ test(
 	async () => {
 		await withPage(async (page) => {
 			const result = await page.call({ args: ["network", "requests", "--current-url"] });
-			assert.equal(result.isError, false, result.content[0]?.text);
+			assert.equal(result.isError, false, readString(readRecord(result.content[0]).text));
 			assert.equal(
-				(result.details?.networkRequestsPageFilter as { currentUrl: string }).currentUrl,
+				readRecord(readRecord(result.details).networkRequestsPageFilter).currentUrl,
 				page.url,
 			);
 			await page.reload();
 			const stale = await page.call({ args: ["get", "value", "@e1"] });
-			assert.equal(stale.details?.failureCategory, "stale-ref");
+			assert.equal(readRecord(stale.details).failureCategory, "stale-ref");
 			assert.equal(
 				(await page.calls()).some((row) => row.args.includes("value")),
 				false,
@@ -614,7 +677,7 @@ for (const command of explicitDestinations) {
 						const args = batch ? ["batch"] : command;
 						const stdin = batch ? JSON.stringify([command]) : undefined;
 						const result = await page.call({ args, stdin });
-						assert.equal(result.isError, false, result.content[0]?.text);
+						assert.equal(result.isError, false, readString(readRecord(result.content[0]).text));
 						const calls = await page.calls();
 						const userCalls = calls.filter(
 							(row) => extractUpstreamCommandTokens(row.args)[0] === args[0],
@@ -622,6 +685,8 @@ for (const command of explicitDestinations) {
 						assert.equal(userCalls.length, 1, "the requested command must actually dispatch");
 						assert.deepEqual(extractUpstreamCommandTokens(userCalls[0].args), args);
 						if (batch) {
+							// Fixed cold/known/unknown/reopen and batch fixtures require different state assertions; common dispatch checks remain unconditional.
+							// oxlint-disable-next-line node-test/no-conditional-assertion
 							assert.equal(userCalls[0].stdin, stdin);
 						}
 						assert.equal(
@@ -647,13 +712,13 @@ test(
 				const stdin = JSON.stringify([["snapshot", "-i"]]);
 				const args = ["--headers", '{"x-fixture":"boundary"}', "--no-pin-tab", "batch", raw];
 				const result = await page.call({ args, stdin });
-				assert.equal(result.isError, false, result.content[0]?.text);
+				assert.equal(result.isError, false, readString(readRecord(result.content[0]).text));
 				const batch = (await page.calls()).find((row) => row.args.includes("batch"));
 				assert.ok(batch);
 				assert.deepEqual(batch.args.slice(-args.length), args);
 				assert.equal(batch.stdin, stdin);
 				assert.deepEqual(
-					(result.details?.batchSteps as Array<{ command: string[] }>).map((row) => row.command),
+					readArray(readRecord(result.details).batchSteps).map((row) => readRecord(row).command),
 					[["read", "--timeout", "100", chosenUrl]],
 				);
 				assert.equal(
@@ -692,8 +757,12 @@ for (const command of [
 						{ args: command },
 						{ args: ["batch"], stdin: JSON.stringify([["read", chosenUrl], command]) },
 					]) {
+						// These dependent calls reuse the same page, restore state, and shutdown ownership.
+						// oxlint-disable-next-line no-await-in-loop
 						const result = await page.call(params);
-						assert.equal(result.details?.failureCategory, "tab-drift");
+						// Fixed cold/known/unknown/reopen and batch fixtures require different state assertions; common dispatch checks remain unconditional.
+						// oxlint-disable-next-line node-test/no-conditional-assertion
+						assert.equal(readRecord(result.details).failureCategory, "tab-drift");
 					}
 					assert.equal(
 						(await page.calls()).some(
@@ -715,11 +784,15 @@ for (const options of [{ explicit: true }, { attached: true }, { restoreDisabled
 		{ concurrency: false },
 		async () => {
 			for (const inspectFirst of [false, true]) {
+				// These dependent calls reuse the same page, restore state, and shutdown ownership.
+				// oxlint-disable-next-line no-await-in-loop
 				await withPage(async (page) => {
 					if (inspectFirst) {
 						await page.call({ args: ["tab", "list"] });
 					}
 					await page.call({ args: ["snapshot", "-i"] });
+					// Fixed cold/known/unknown/reopen and batch fixtures require different state assertions; common dispatch checks remain unconditional.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
 					assert.equal(
 						(await page.calls()).some(
 							(row) => extractUpstreamCommandTokens(row.args)[0] === "open",
@@ -739,7 +812,7 @@ for (const reachedNavigation of [false, true]) {
 		async () => {
 			await withPage(async (page) => {
 				const tabs = await page.call({ args: ["tab", "list"] });
-				assert.equal(tabs.isError, false, tabs.content[0]?.text);
+				assert.equal(tabs.isError, false, readString(readRecord(tabs.content[0]).text));
 				await page.patch({ failNext: reachedNavigation ? "open" : "console" });
 				const result = await page.call({
 					args: ["batch", "--bail"],

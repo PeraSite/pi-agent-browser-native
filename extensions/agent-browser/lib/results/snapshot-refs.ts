@@ -3,20 +3,20 @@ import { getEditableRefEvidence } from "./editable-ref-evidence.js";
 import { compareRefIds, normalizeWhitespace } from "./text.js";
 
 export interface SnapshotRefEntry {
-	id: string;
-	isEditable?: boolean;
-	lineIndex?: number;
-	name: string;
-	refData?: Record<string, unknown>;
-	role: string;
+	readonly id: string;
+	readonly isEditable?: boolean;
+	readonly lineIndex?: number;
+	readonly name: string;
+	readonly refData?: Readonly<Record<string, unknown>>;
+	readonly role: string;
 }
 
 export interface SnapshotLineRefInfo {
-	index: number;
-	name: string;
-	raw: string;
-	ref?: string;
-	role: string;
+	readonly index: number;
+	readonly name: string;
+	readonly raw: string;
+	readonly ref?: string;
+	readonly role: string;
 }
 
 /** Project native delta full responses onto the ordinary snapshot shape for local readers. */
@@ -43,7 +43,7 @@ export function getSnapshotLineTextByRef(data: unknown): Map<string, string> {
 	const lineByRef = new Map<string, string>();
 	for (const line of snapshot.split("\n")) {
 		const ref = line.match(/\bref=([^,\]\s]+)/)?.[1];
-		if (!ref || lineByRef.has(ref)) {
+		if (ref === undefined || ref.length === 0 || lineByRef.has(ref)) {
 			continue;
 		}
 		lineByRef.set(ref, line);
@@ -51,7 +51,7 @@ export function getSnapshotLineTextByRef(data: unknown): Map<string, string> {
 	return lineByRef;
 }
 
-export function getSnapshotRefEntries(data: Record<string, unknown>): SnapshotRefEntry[] {
+export function getSnapshotRefEntries(data: Readonly<Record<string, unknown>>): SnapshotRefEntry[] {
 	const refs = getSnapshotRefRecord(data);
 	if (!refs) {
 		return [];
@@ -81,7 +81,7 @@ function isEditableSnapshotLine(line: SnapshotLineRefInfo): boolean | undefined 
 }
 
 export function getSnapshotRefRole(
-	entry: { role?: unknown },
+	entry: { readonly role?: unknown },
 	editableEvidence: boolean | undefined,
 ): string {
 	const rawRole = typeof entry.role === "string" && entry.role.length > 0 ? entry.role : "unknown";
@@ -92,13 +92,34 @@ export function getSnapshotRefRole(
 	return rawRole;
 }
 
+function getSnapshotRefFallbackRole(role: string, line: SnapshotLineRefInfo | undefined): string {
+	if (role !== "unknown" && role !== "generic") {
+		return role;
+	}
+	return line && line.role !== "unknown" ? line.role : role;
+}
+
+function resolveSnapshotRefEditableEvidence(
+	evidence: boolean | undefined,
+	line: SnapshotLineRefInfo | undefined,
+): boolean {
+	if (evidence !== undefined) {
+		return evidence;
+	}
+	return (
+		line !== undefined &&
+		isEditableSnapshotLine(line) === true &&
+		!["unknown", "generic"].includes(line.role)
+	);
+}
+
 export function enrichSnapshotRefEntries(
-	refEntries: SnapshotRefEntry[],
-	snapshotLines: SnapshotLineRefInfo[],
+	refEntries: readonly SnapshotRefEntry[],
+	snapshotLines: readonly SnapshotLineRefInfo[],
 ): SnapshotRefEntry[] {
 	const lineByRef = new Map<string, SnapshotLineRefInfo>();
 	for (const line of snapshotLines) {
-		if (!line.ref || lineByRef.has(line.ref)) {
+		if (line.ref === undefined || line.ref.length === 0 || lineByRef.has(line.ref)) {
 			continue;
 		}
 		lineByRef.set(line.ref, line);
@@ -106,14 +127,9 @@ export function enrichSnapshotRefEntries(
 
 	return refEntries.map((entry) => {
 		const line = lineByRef.get(entry.id);
-		const lineRole = line && line.role !== "unknown" ? line.role : undefined;
 		const editableEvidence = getEditableRefEvidence({ ref: entry.refData, text: line?.raw });
-		const hasEditableRole = line
-			? isEditableSnapshotLine(line) === true && !["unknown", "generic"].includes(line.role)
-			: false;
-		const isEditable = editableEvidence === true || (editableEvidence !== false && hasEditableRole);
-		const roleFromRefOrLine =
-			entry.role !== "unknown" && entry.role !== "generic" ? entry.role : (lineRole ?? entry.role);
+		const isEditable = resolveSnapshotRefEditableEvidence(editableEvidence, line);
+		const roleFromRefOrLine = getSnapshotRefFallbackRole(entry.role, line);
 		const role = getSnapshotRefRole({ role: roleFromRefOrLine }, isEditable);
 		return {
 			...entry,

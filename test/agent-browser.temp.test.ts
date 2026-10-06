@@ -21,6 +21,7 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
+import { readRecord, readArray, readString, readNumber } from "./helpers/assertions.js";
 
 import {
 	cleanupSecureTempArtifacts,
@@ -57,6 +58,8 @@ test("persistent session artifact budget accepts zero without changing bounded d
 		1_024,
 	);
 	for (const value of ["", "invalid", "-1", "1.5", "00", "-0", "0.0", "0e0", "9007199254740992"]) {
+		// Fixed pruning variants validate each observed child/allocation; the final remaining-root assertion is unconditional.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.equal(
 			getPersistentSessionArtifactMaxBytes({ PI_AGENT_BROWSER_SESSION_ARTIFACT_MAX_BYTES: value }),
 			defaultBytes,
@@ -109,7 +112,9 @@ const originalTempEnv = {
 let suiteTempDir: string;
 test.before(async () => {
 	suiteTempDir = await mkdtemp(join(tmpdir(), "piab-temp-tests-"));
-	process.env.TMPDIR = process.env.TEMP = process.env.TMP = suiteTempDir;
+	process.env.TMPDIR = suiteTempDir;
+	process.env.TEMP = suiteTempDir;
+	process.env.TMP = suiteTempDir;
 });
 test.after(async () => {
 	await cleanupSecureTempArtifacts();
@@ -143,10 +148,7 @@ test(
 		const secondRoot = dirname(secondFile.path);
 		assert.notEqual(secondRoot, firstRoot);
 		const markerPath = join(secondRoot, ".pi-agent-browser-owner.json");
-		const marker = JSON.parse(await readFile(markerPath, "utf8")) as {
-			kind?: unknown;
-			version?: unknown;
-		};
+		const marker = readRecord(JSON.parse(await readFile(markerPath, "utf8")));
 		assert.equal(marker.version, 2);
 
 		const debugState = await getSecureTempDebugState();
@@ -184,8 +186,12 @@ test("stale temp pruning only removes explicitly owned roots", { concurrency: fa
 		await rm(unownedRoot, { force: true, recursive: true });
 		await cleanupSecureTempArtifacts();
 	} finally {
-		await rm(unownedRoot, { force: true, recursive: true }).catch(() => undefined);
-		await rm(ownedRoot, { force: true, recursive: true }).catch(() => undefined);
+		await rm(unownedRoot, { force: true, recursive: true }).catch(() => {
+			/* Best-effort teardown: these task-owned paths may already be absent. */
+		});
+		await rm(ownedRoot, { force: true, recursive: true }).catch(() => {
+			/* Best-effort teardown: these task-owned paths may already be absent. */
+		});
 		await cleanupSecureTempArtifacts();
 	}
 });
@@ -202,7 +208,11 @@ for (const shortLived of [false, true]) {
 					const old = Date.now() - 25 * 60 * 60 * 1_000;
 					for (let index = 0; index < 20; index += 1) {
 						const path = join(tempDir, `pi-agent-browser-${String(index).padStart(2, "0")}`);
+						// Finish each root before advancing; setup failures must not leave writes racing teardown.
+						// oxlint-disable-next-line no-await-in-loop
 						await mkdir(path, { mode: 0o700 });
+						// Finish this root's ownership marker before any later root construction or teardown.
+						// oxlint-disable-next-line no-await-in-loop
 						await writeSecureTempRootOwnershipMarker(path, {
 							createdAtMs: index < 8 ? Date.now() : old,
 							ownerPid: 2_147_483_647,
@@ -243,22 +253,44 @@ for (const shortLived of [false, true]) {
 							);
 							const exited = once(child, "exit");
 							try {
-								const receipt = await readChildStdoutJsonLine<{ done: boolean; reads: number }>(
-									child,
-								);
+								// Each allocation/child cleanup must finish before measuring the next shared-root pruning cycle.
+								// oxlint-disable-next-line no-await-in-loop
+								const receipt = readRecord(await readChildStdoutJsonLine(child));
+								// Fixed pruning variants validate each observed child/allocation; the final remaining-root assertion is unconditional.
+								// oxlint-disable-next-line node-test/no-conditional-assertion
 								assert.equal(receipt.done, true);
-								assert.ok(receipt.reads <= 8, "retained roots count against the inspection limit");
-								assert.equal((await exited)[0], 0);
+								// Fixed pruning variants validate each observed child/allocation; the final remaining-root assertion is unconditional.
+								// oxlint-disable-next-line node-test/no-conditional-assertion
+								assert.ok(
+									readNumber(receipt.reads) <= 8,
+									"retained roots count against the inspection limit",
+								);
+								// Each allocation/child cleanup must finish before measuring the next shared-root pruning cycle.
+								// oxlint-disable-next-line no-await-in-loop
+								const exit = readArray(await exited);
+								// Fixed pruning variants validate each observed child/allocation; the final remaining-root assertion is unconditional.
+								// oxlint-disable-next-line node-test/no-conditional-assertion
+								assert.equal(exit[0], 0);
 							} finally {
+								// Each allocation/child cleanup must finish before measuring the next shared-root pruning cycle.
+								// oxlint-disable-next-line no-await-in-loop
 								await stopChildProcess(child);
 							}
 						} else {
+							// Each allocation/child cleanup must finish before measuring the next shared-root pruning cycle.
+							// oxlint-disable-next-line no-await-in-loop
 							const file = await openSecureTempFile("bounded-gc", ".txt");
+							// Each allocation/child cleanup must finish before measuring the next shared-root pruning cycle.
+							// oxlint-disable-next-line no-await-in-loop
 							await file.fileHandle.close();
 						}
+						// Each allocation/child cleanup must finish before measuring the next shared-root pruning cycle.
+						// oxlint-disable-next-line no-await-in-loop
 						const after = (await readdir(tempDir)).filter((name) =>
 							/^pi-agent-browser-\d{2}$/.test(name),
 						).length;
+						// Fixed pruning variants validate each observed child/allocation; the final remaining-root assertion is unconditional.
+						// oxlint-disable-next-line node-test/no-conditional-assertion
 						assert.ok(remaining - after <= 8, "one allocation must not sweep all stale roots");
 						remaining = after;
 					}
@@ -286,7 +318,7 @@ test(
 		});
 
 		try {
-			assert.ok(child.pid);
+			assert.ok(child.pid !== undefined && child.pid !== 0);
 			await writeSecureTempRootOwnershipMarker(staleRoot, {
 				createdAtMs: staleTime.getTime(),
 				leaseUpdatedAtMs: staleTime.getTime(),
@@ -309,7 +341,9 @@ test(
 			assert.deepEqual({ after, before }, { after: false, before: true });
 		} finally {
 			await stopChildProcess(child);
-			await rm(staleRoot, { force: true, recursive: true }).catch(() => undefined);
+			await rm(staleRoot, { force: true, recursive: true }).catch(() => {
+				/* Best-effort teardown: these task-owned paths may already be absent. */
+			});
 			await cleanupSecureTempArtifacts();
 		}
 	},
@@ -340,9 +374,9 @@ test(
 
 		let liveRoot: string | undefined;
 		try {
-			liveRoot = (await readChildStdoutJsonLine<{ root: string }>(childA)).root;
-			const markerPath = join(liveRoot, ".pi-agent-browser-owner.json");
-			const marker = JSON.parse(await readFile(markerPath, "utf8")) as Record<string, unknown>;
+			liveRoot = readString(readRecord(await readChildStdoutJsonLine(childA)).root);
+			const markerPath = join(readString(liveRoot), ".pi-agent-browser-owner.json");
+			const marker = readRecord(JSON.parse(await readFile(markerPath, "utf8")));
 			delete marker.ownerProcessStartIdentity;
 			await writeFile(
 				markerPath,
@@ -374,8 +408,8 @@ test(
 				},
 			);
 			const childBExit = once(childB, "exit");
-			await readChildStdoutJsonLine<{ done: boolean }>(childB);
-			const [childBExitCode] = await childBExit;
+			readRecord(await readChildStdoutJsonLine(childB));
+			const [childBExitCode] = readArray(await childBExit);
 			assert.equal(childBExitCode, 0);
 
 			const after = await stat(liveRoot).then(
@@ -385,8 +419,10 @@ test(
 			assert.deepEqual({ after, before }, { after: true, before: true });
 		} finally {
 			await stopChildProcess(childA);
-			if (liveRoot) {
-				await rm(liveRoot, { force: true, recursive: true }).catch(() => undefined);
+			if (liveRoot !== undefined && liveRoot !== "") {
+				await rm(liveRoot, { force: true, recursive: true }).catch(() => {
+					/* Best-effort teardown: these task-owned paths may already be absent. */
+				});
 			}
 			await cleanupSecureTempArtifacts();
 		}
@@ -419,20 +455,18 @@ test(
 		let root: string | undefined;
 		try {
 			const childExit = once(child, "exit");
-			const result = await readChildStdoutJsonLine<{
-				profile: string;
-				root: string;
-				spill: string;
-			}>(child);
-			root = result.root;
-			const [exitCode] = await childExit;
+			const result = readRecord(await readChildStdoutJsonLine(child));
+			root = readString(result.root);
+			const [exitCode] = readArray(await childExit);
 			assert.equal(exitCode, 0);
-			await stat(result.profile);
-			await assert.rejects(stat(result.spill), { code: "ENOENT" });
+			await stat(readString(result.profile));
+			await assert.rejects(stat(readString(result.spill)), { code: "ENOENT" });
 		} finally {
 			await stopChildProcess(child);
-			if (root) {
-				await rm(root, { force: true, recursive: true }).catch(() => undefined);
+			if (root !== undefined && root !== "") {
+				await rm(root, { force: true, recursive: true }).catch(() => {
+					/* Best-effort teardown: these task-owned paths may already be absent. */
+				});
 			}
 			await cleanupSecureTempArtifacts();
 		}
@@ -465,15 +499,15 @@ test(
 		let childB: ReturnType<typeof spawn> | undefined;
 		try {
 			const childAExit = once(childA, "exit");
-			const result = await readChildStdoutJsonLine<{ profile: string; root: string }>(childA);
-			root = result.root;
-			const [childAExitCode] = await childAExit;
+			const result = readRecord(await readChildStdoutJsonLine(childA));
+			root = readString(result.root);
+			const [childAExitCode] = readArray(await childAExit);
 			assert.equal(childAExitCode, 0);
-			await stat(result.profile);
+			await stat(readString(result.profile));
 
-			const markerPath = join(result.root, ".pi-agent-browser-owner.json");
+			const markerPath = join(readString(result.root), ".pi-agent-browser-owner.json");
 			const staleTime = new Date(Date.now() - 2 * 24 * 60 * 60 * 1_000);
-			const marker = JSON.parse(await readFile(markerPath, "utf8")) as Record<string, unknown>;
+			const marker = readRecord(JSON.parse(await readFile(markerPath, "utf8")));
 			await writeFile(
 				markerPath,
 				JSON.stringify(
@@ -483,8 +517,8 @@ test(
 				),
 				"utf8",
 			);
-			await writeFile(join(result.root, "unprotected-spill.txt"), "delete", "utf8");
-			await utimes(result.root, staleTime, staleTime);
+			await writeFile(join(readString(result.root), "unprotected-spill.txt"), "delete", "utf8");
+			await utimes(readString(result.root), staleTime, staleTime);
 
 			const childBScript = `
 			import { openSecureTempFile } from "./extensions/agent-browser/lib/temp.ts";
@@ -501,19 +535,23 @@ test(
 				},
 			);
 			const childBExit = once(childB, "exit");
-			await readChildStdoutJsonLine<{ done: boolean }>(childB);
-			const [childBExitCode] = await childBExit;
+			readRecord(await readChildStdoutJsonLine(childB));
+			const [childBExitCode] = readArray(await childBExit);
 			assert.equal(childBExitCode, 0);
 
-			await stat(result.profile);
-			await assert.rejects(stat(join(result.root, "unprotected-spill.txt")), { code: "ENOENT" });
+			await stat(readString(result.profile));
+			await assert.rejects(stat(join(readString(result.root), "unprotected-spill.txt")), {
+				code: "ENOENT",
+			});
 		} finally {
 			await stopChildProcess(childA);
 			if (childB) {
 				await stopChildProcess(childB);
 			}
-			if (root) {
-				await rm(root, { force: true, recursive: true }).catch(() => undefined);
+			if (root !== undefined && root !== "") {
+				await rm(root, { force: true, recursive: true }).catch(() => {
+					/* Best-effort teardown: these task-owned paths may already be absent. */
+				});
 			}
 			await cleanupSecureTempArtifacts();
 		}

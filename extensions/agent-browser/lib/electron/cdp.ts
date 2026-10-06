@@ -3,20 +3,20 @@ import { isRecord } from "../parsing.js";
 const ELECTRON_CDP_FETCH_TIMEOUT_MS = 1_000;
 
 export interface ElectronCdpVersion {
-	browser?: string;
-	protocolVersion?: string;
-	userAgent?: string;
-	v8Version?: string;
-	webKitVersion?: string;
-	webSocketDebuggerUrl?: string;
+	readonly browser?: string;
+	readonly protocolVersion?: string;
+	readonly userAgent?: string;
+	readonly v8Version?: string;
+	readonly webKitVersion?: string;
+	readonly webSocketDebuggerUrl?: string;
 }
 
 export interface ElectronCdpTarget {
-	id?: string;
-	title?: string;
-	type?: string;
-	url?: string;
-	webSocketDebuggerUrl?: string;
+	readonly id?: string;
+	readonly title?: string;
+	readonly type?: string;
+	readonly url?: string;
+	readonly webSocketDebuggerUrl?: string;
 }
 
 function asString(value: unknown): string | undefined {
@@ -50,10 +50,7 @@ export function parseCdpTargets(value: unknown): ElectronCdpTarget[] {
 	}));
 }
 
-export async function fetchCdpJson(
-	url: string,
-	signal?: AbortSignal,
-): Promise<unknown | undefined> {
+export async function fetchCdpJson(url: string, signal?: AbortSignal): Promise<unknown> {
 	const controller = new AbortController();
 	const timeout = setTimeout(() => controller.abort(), ELECTRON_CDP_FETCH_TIMEOUT_MS);
 	try {
@@ -76,7 +73,7 @@ export function boundElectronProbeString(
 	maxLength = 240,
 ): string | undefined {
 	const trimmed = value?.trim();
-	if (!trimmed) {
+	if (trimmed === undefined || trimmed.length === 0) {
 		return undefined;
 	}
 	return trimmed.length > maxLength

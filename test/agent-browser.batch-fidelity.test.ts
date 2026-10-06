@@ -1,3 +1,4 @@
+import { readArray, readBoolean, readRecord, readString } from "./helpers/assertions.js";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -22,16 +23,14 @@ import {
 	withOwnedManagedSessionContext,
 } from "../extensions/agent-browser/lib/managed-session-restore.js";
 import { runAgentBrowserProcess } from "../extensions/agent-browser/lib/process.js";
-import type {
-	AgentBrowserNextAction,
-	FileArtifactMetadata,
-} from "../extensions/agent-browser/lib/results/contracts.js";
 import { waitForTestPidExit } from "./helpers/extension-validation-fixtures.js";
 
 import {
 	createExtensionHarness,
+	createShortPrivateSocketDir,
 	createToolBranchEntry,
 	executeRegisteredTool,
+	readInvocationLog,
 	runExtensionEvent,
 	startAgentBrowserContractFixtureServer,
 	withPatchedEnv,
@@ -39,18 +38,28 @@ import {
 } from "./helpers/agent-browser-harness.js";
 
 test("global argv flags match the audited upstream grammar baseline", async () => {
-	const grammar = JSON.parse(
-		await readFile(new URL("./fixtures/agent-browser-argv-grammar.json", import.meta.url), "utf8"),
+	const grammar = readRecord(
+		JSON.parse(
+			await readFile(
+				new URL("./fixtures/agent-browser-argv-grammar.json", import.meta.url),
+				"utf8",
+			),
+		),
 	);
 	assert.equal(
 		grammar.version,
 		TARGET_AGENT_BROWSER_VERSION,
 		"Re-audit flags.rs clean_args when rebaselining upstream",
 	);
-	assert.deepEqual(new Set(GLOBAL_VALUE_FLAGS), new Set(grammar.globalValueFlags));
-	assert.deepEqual(GLOBAL_BOOLEAN_FLAGS_WITH_OPTIONAL_VALUES, new Set(grammar.globalBooleanFlags));
-	for (const flag of grammar.globalValueFlags) {
-		assert.equal(VALUE_FLAGS.has(flag), true, flag);
+	assert.deepEqual(new Set(GLOBAL_VALUE_FLAGS), new Set(readArray(grammar.globalValueFlags)));
+	assert.deepEqual(
+		GLOBAL_BOOLEAN_FLAGS_WITH_OPTIONAL_VALUES,
+		new Set(readArray(grammar.globalBooleanFlags)),
+	);
+	for (const flag of readArray(grammar.globalValueFlags)) {
+		// Exhaustive fixture variant (readArray(grammar.globalValueFlags)): this selected path must satisfy its own contract.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
+		assert.equal(VALUE_FLAGS.has(readString(flag)), true, readString(flag));
 	}
 });
 
@@ -64,6 +73,8 @@ test("ref guards follow upstream selector slots, not literal operands or key/mou
 			["scroll", "down", "--selector", ref],
 			["diff", "screenshot", "-s", ref],
 		]) {
+			// Every ref spelling and selector command is asserted; no matrix variant can silently pass.
+			// oxlint-disable-next-line node-test/no-conditional-assertion
 			assert.deepEqual(getGuardedRefUsage(args), ["e1"], JSON.stringify(args));
 		}
 	}
@@ -87,12 +98,16 @@ test("ref guards follow upstream selector slots, not literal operands or key/mou
 		["diff", "snapshot", "--selector", "e999"],
 		["diff", "snapshot", "-s", "@e999"],
 	]) {
+		// Every literal-operand variant is asserted to stay outside selector-ref scanning.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.deepEqual(getGuardedRefUsage(args), [], JSON.stringify(args));
 	}
 });
 
 test("tab pinning leaves explicit recovery available but still guards content after read-only batch prefixes", () => {
 	for (const first of [["tab", "list"], ["tab"], ["session", "info"], ["get", "url"]]) {
+		// Exhaustive fixture variant ([["tab", "list"], ["tab"], ["session", "info"], ["get", "url"]]): this selected path must satisfy its own contract.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.equal(
 			shouldPinSessionTabForCommand({
 				command: "batch",
@@ -112,6 +127,8 @@ test("tab pinning leaves explicit recovery available but still guards content af
 		["connect", "9222"],
 		["state", "load", "state.json"],
 	]) {
+		// Every explicit tab/navigation/lifecycle recovery command is asserted to bypass the old pin.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.equal(
 			shouldPinSessionTabForCommand({
 				command: "batch",
@@ -139,6 +156,8 @@ test("tab pinning leaves explicit recovery available but still guards content af
 		["connect", "9222"],
 		["state", "load", "state.json"],
 	]) {
+		// Every non-content prefix variant must leave the later guarded snapshot visible.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.equal(
 			shouldPinSessionTabForCommand({
 				command: commandTokens[0],
@@ -156,6 +175,8 @@ test("tab pinning leaves explicit recovery available but still guards content af
 		["click", "#field"],
 		["frame", "#child"],
 	]) {
+		// Exhaustive fixture variant ([ ["back"], ["forward"], ["reload"], ["click", "#field"], ["frame", "#child"], ]): this selected path must satisfy its own contract.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.equal(
 			shouldPinSessionTabForCommand({
 				command: commandTokens[0],
@@ -174,6 +195,8 @@ test("recording FPS options alone keep the intended tab", () => {
 			["record", subcommand, "capture.webm", "--fps", "30"],
 			["record", subcommand, "--fps", "12", "capture.webm", "--fps", "24"],
 		]) {
+			// Both start/restart and FPS positions are checked for the same path and ref policy.
+			// oxlint-disable-next-line node-test/no-conditional-assertion
 			assert.equal(
 				shouldPinSessionTabForCommand({
 					command: "record",
@@ -184,6 +207,8 @@ test("recording FPS options alone keep the intended tab", () => {
 				true,
 				JSON.stringify(step),
 			);
+			// Both start/restart and FPS positions are checked for the same path and ref policy.
+			// oxlint-disable-next-line node-test/no-conditional-assertion
 			assert.equal(
 				shouldPinSessionTabForCommand({
 					command: "batch",
@@ -194,6 +219,8 @@ test("recording FPS options alone keep the intended tab", () => {
 				}),
 				true,
 			);
+			// Both start/restart and FPS positions are checked for the same path and ref policy.
+			// oxlint-disable-next-line node-test/no-conditional-assertion
 			assert.equal(
 				shouldPinSessionTabForCommand({
 					command: "batch",
@@ -208,6 +235,8 @@ test("recording FPS options alone keep the intended tab", () => {
 				[...step, "https://chosen.example/"],
 				["record", subcommand, "capture.webm", "https://chosen.example/", "--fps", "24"],
 			]) {
+				// Every explicit-URL recording variant is checked to retain its chosen target.
+				// oxlint-disable-next-line node-test/no-conditional-assertion
 				assert.equal(
 					shouldPinSessionTabForCommand({
 						command: "record",
@@ -224,12 +253,16 @@ test("recording FPS options alone keep the intended tab", () => {
 
 test("unsupported batch bail assignment explains raw argv precedence without recovering ignored stdin", () => {
 	for (const pageUrlUnknown of [false, true]) {
+		// Exhaustive fixture variant ([false, true]): this selected path must satisfy its own contract.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.match(
-			getPageTargetValidationError({
-				args: ["batch", "--bail=true"],
-				stdin: '[["get","url"]]',
-				pageUrlUnknown,
-			}) ?? "",
+			readString(
+				getPageTargetValidationError({
+					args: ["batch", "--bail=true"],
+					stdin: '[["get","url"]]',
+					pageUrlUnknown,
+				}) ?? "",
+			),
 			/exact.*--bail.*stdin.*ignored/i,
 		);
 	}
@@ -243,6 +276,90 @@ test("unsupported batch bail assignment explains raw argv precedence without rec
 });
 
 const real = process.env.PI_AGENT_BROWSER_REAL_UPSTREAM === "1";
+
+test("registered batch keeps empty raw input errors unchanged by ignored stdin", async (t) => {
+	const dir = await mkdtemp(join(tmpdir(), "piab-empty-batch-"));
+	const log = join(dir, "calls.jsonl");
+	await writeFakeAgentBrowserBinary(
+		dir,
+		`const fs = require("node:fs"), args = process.argv.slice(2), stdin = fs.readFileSync(0, "utf8");
+fs.appendFileSync(${JSON.stringify(log)}, JSON.stringify({args, stdin}) + "\\n");
+const data = {url:"https://fixture.test/",title:"Fixture"};
+if (args.includes("snapshot")) Object.assign(data, {snapshot:'- button "Submit" [ref=e1]',refs:{e1:{role:"button",name:"Submit"}}});
+console.log(JSON.stringify({success:true,data}));`,
+	);
+	try {
+		await withPatchedEnv(
+			{
+				HOME: dir,
+				USERPROFILE: dir,
+				PI_CODING_AGENT_DIR: join(dir, "pi"),
+				PI_AGENT_BROWSER_SOCKET_DIR: join(dir, "s"),
+				PATH: `${dir}${delimiter}${process.env.PATH ?? ""}`,
+				AGENT_BROWSER_SESSION: undefined,
+				AGENT_BROWSER_NAMESPACE: undefined,
+				AGENT_BROWSER_CONFIG: undefined,
+			},
+			async () => {
+				const h = createExtensionHarness({ cwd: dir });
+				try {
+					const snapshot = await executeRegisteredTool(h.tool, h.ctx, {
+						args: ["--session", "empty-raw", "snapshot", "-i"],
+					});
+					assert.equal(snapshot.isError, false, snapshot.content[0].text);
+					for (const raw of ["", "   "]) {
+						await t.test(
+							`raw ${JSON.stringify(raw)} rejects its own shape, not ignored stdin`,
+							async () => {
+								const ignoredDirectory = join(dir, `ignored-${raw.length}`);
+								const stdin = JSON.stringify([
+									["open"],
+									["click", "@e999"],
+									["screenshot", join(ignoredDirectory, "capture.png")],
+								]);
+								const args = ["--session", "empty-raw", "batch", raw];
+								await writeFile(log, "");
+								const baseline = await executeRegisteredTool(h.tool, h.ctx, { args });
+								const result = await executeRegisteredTool(h.tool, h.ctx, { args, stdin });
+								assert.equal(baseline.isError, true);
+								assert.match(readString(baseline.content[0].text), /batch command is empty/);
+								assert.equal(result.isError, true);
+								assert.deepEqual(result.content, baseline.content);
+								assert.deepEqual(result.details, baseline.details);
+								const details = readRecord(result.details);
+								assert.equal(details.agentBrowserStarted, undefined);
+								assert.equal(details.exitCode, undefined);
+								assert.equal(details.failureCategory, "validation-error");
+								assert.deepEqual(
+									await readInvocationLog(log),
+									[],
+									"invalid raw input must not dispatch ignored stdin or helpers",
+								);
+								await assert.rejects(stat(ignoredDirectory), { code: "ENOENT" });
+								const followup = await executeRegisteredTool(h.tool, h.ctx, {
+									args: ["--session", "empty-raw", "get", "text", "@e1"],
+								});
+								assert.equal(
+									followup.isError,
+									false,
+									"ignored actions must not invalidate live refs",
+								);
+								assert.ok(
+									(await readInvocationLog(log)).some((call) => call.args.includes("@e1")),
+									"the preserved ref reaches native dispatch",
+								);
+							},
+						);
+					}
+				} finally {
+					await runExtensionEvent(h.handlers, "session_shutdown", { reason: "quit" }, h.ctx);
+				}
+			},
+		);
+	} finally {
+		await rm(dir, { recursive: true, force: true });
+	}
+});
 
 test(
 	"real upstream artifact argv matches native operand selection",
@@ -272,18 +389,20 @@ test(
 					const prefix = ["--session", session];
 					const h = createExtensionHarness({ cwd: dir, sessionId: randomUUID() });
 					await runExtensionEvent(h.handlers, "session_start", { reason: "new" }, h.ctx);
-					const call = (args: string[], stdin?: string, timeoutMs?: number) =>
+					const call = (args: readonly string[], stdin?: string, timeoutMs?: number) =>
 						executeRegisteredTool(h.tool, h.ctx, { args: [...prefix, ...args], stdin, timeoutMs });
 					let daemonPid: number | undefined;
 					try {
 						const opened = await call(["open", `${fixture.baseUrl}/download`]);
-						assert.equal(opened.isError, false, opened.content[0]?.text);
+						assert.equal(opened.isError, false, opened.content[0].text);
 						daemonPid = Number(await readFile(join(socketDir, `${session}.pid`), "utf8"));
 						await t.test("outer CLI globals still clean before PDF operand selection", async () => {
 							const result = await call(["pdf", "--quick", "outer.pdf"]);
-							assert.equal(result.isError, false, result.content[0]?.text);
+							const resultDetails = readRecord(result.details);
+							assert.equal(result.isError, false, result.content[0].text);
 							assert.equal(
-								(result.details?.artifacts as FileArtifactMetadata[])[0]?.requestedPath,
+								readArray(resultDetails.artifacts).map((value) => readRecord(value))[0]
+									?.requestedPath,
 								"outer.pdf",
 							);
 							assert.equal(
@@ -313,7 +432,8 @@ test(
 											raw ? ["batch", step.join(" ")] : ["batch"],
 											raw ? undefined : JSON.stringify([step]),
 										);
-										assert.equal(result.isError, false, result.content[0]?.text);
+										const resultDetails = readRecord(result.details);
+										assert.equal(result.isError, false, result.content[0].text);
 										const bytes = await readFile(join(dir, path));
 										assert.equal(
 											step[0] === "screenshot"
@@ -321,18 +441,20 @@ test(
 												: bytes.subarray(0, header.length).toString(),
 											header,
 										);
-										const artifact = (result.details?.artifacts as FileArtifactMetadata[])[0];
+										const artifact = readArray(resultDetails.artifacts).map((value) =>
+											readRecord(value),
+										)[0];
 										t.diagnostic(
 											JSON.stringify({
 												step,
 												raw,
-												nativePath: artifact?.path,
-												requestedPath: artifact?.requestedPath,
+												nativePath: artifact.path,
+												requestedPath: artifact.requestedPath,
 												sizeBytes: bytes.length,
 											}),
 										);
-										assert.equal(artifact?.requestedPath, path);
-										assert.equal(artifact?.exists, true);
+										assert.equal(artifact.requestedPath, path);
+										assert.equal(artifact.exists, true);
 										await assert.rejects(stat(join(dir, "ignored")), { code: "ENOENT" });
 									},
 								);
@@ -350,16 +472,19 @@ test(
 											["wait", flag, "--timeout", "30000", path, "ignored.csv"],
 										]),
 									);
-									const artifact = (result.details?.artifacts as FileArtifactMetadata[])[0];
+									const resultDetails = readRecord(result.details);
+									const artifact = readArray(resultDetails.artifacts).map((value) =>
+										readRecord(value),
+									)[0];
 									t.diagnostic(
 										JSON.stringify({
 											flag,
-											nativePath: artifact?.path,
-											requestedPath: artifact?.requestedPath,
-											exists: artifact?.exists,
+											nativePath: artifact.path,
+											requestedPath: artifact.requestedPath,
+											exists: artifact.exists,
 										}),
 									);
-									assert.equal(artifact?.path, path);
+									assert.equal(artifact.path, path);
 									await wait.test(
 										"prepares the native retained path's parent directory",
 										async () => {
@@ -370,11 +495,11 @@ test(
 										},
 									);
 									await wait.test("retains the native requested path in artifact metadata", () =>
-										assert.equal(artifact?.requestedPath, path),
+										assert.equal(artifact.requestedPath, path),
 									);
 									// Native 0.36 reports the requested wait path without moving the completed download there.
 									assert.equal(result.isError, true);
-									assert.equal(artifact?.exists, false);
+									assert.equal(artifact.exists, false);
 									await assert.rejects(readFile(join(dir, path)), { code: "ENOENT" });
 								},
 							);
@@ -396,18 +521,19 @@ test(
 										JSON.stringify(raw ? [["pdf", "ignored-stdin.pdf"]] : steps),
 										1000,
 									);
-									assert.equal(result.details?.timedOut, true, result.content[0]?.text);
+									const resultDetails = readRecord(result.details);
+									assert.equal(resultDetails.timedOut, true, result.content[0].text);
 									assert.equal((await readFile(join(dir, pdf))).subarray(0, 5).toString(), "%PDF-");
 									assert.equal(
 										await readFile(join(dir, download), "utf8"),
 										"download contract fixture report\n",
 									);
-									const progress = result.details?.timeoutPartialProgress as {
-										artifacts: Array<{ exists: boolean; path: string }>;
-									};
-									t.diagnostic(JSON.stringify({ raw, timeoutArtifacts: progress?.artifacts }));
+									const progress = readRecord(resultDetails.timeoutPartialProgress);
+									t.diagnostic(JSON.stringify({ raw, timeoutArtifacts: progress.artifacts }));
 									assert.deepEqual(
-										progress?.artifacts.map(({ path, exists }) => ({ path, exists })),
+										readArray(progress.artifacts)
+											.map(readRecord)
+											.map(({ path, exists }) => ({ path, exists })),
 										[pdf, download, "--quick"].map((path) => ({ path, exists: true })),
 									);
 									await assert.rejects(stat(join(dir, "ignored-stdin.pdf")), { code: "ENOENT" });
@@ -433,38 +559,38 @@ test(
 										JSON.stringify([step, ["wait", "3000"]]),
 										1000,
 									);
-									assert.equal(timedOut.details?.timedOut, true, timedOut.content[0]?.text);
-									const retry = (timedOut.details?.nextActions as AgentBrowserNextAction[]).find(
-										(action) => action.id === "retry-timeout-step",
-									);
+									const timedOutDetails = readRecord(timedOut.details);
+									assert.equal(timedOutDetails.timedOut, true, timedOut.content[0].text);
+									const retry = readArray(timedOutDetails.nextActions)
+										.map((value) => readRecord(value))
+										.find((action) => action.id === "retry-timeout-step");
 									assert.equal(retry, undefined);
 									assert.doesNotMatch(
-										timedOut.content[0]?.text ?? "",
+										readString(timedOut.content[0].text ?? ""),
 										/Retry candidate|Retry failed step/,
 									);
 									assert.deepEqual(
-										(
-											timedOut.details?.timeoutPartialProgress as {
-												steps: Array<{ status: string }>;
-											}
-										).steps.map((step) => step.status),
+										readArray(readRecord(timedOutDetails.timeoutPartialProgress).steps).map(
+											(row) => readRecord(row).status,
+										),
 										["unknown", "unknown"],
 									);
 									await rm(path);
 									const retried = await call(["batch"], JSON.stringify([step]));
+									const retriedDetails = readRecord(retried.details);
 									t.diagnostic(
 										JSON.stringify({
 											step,
 											retriedError: retried.isError,
-											retriedPaths: (
-												retried.details?.artifacts as FileArtifactMetadata[] | undefined
-											)?.map((artifact) => artifact.path),
+											retriedPaths: readArray(retriedDetails.artifacts ?? [])
+												.map((value) => readRecord(value))
+												.map((artifact) => artifact.path),
 										}),
 									);
 									await retryTest.test(
 										"explicitly rerunning the original row preserves its native destination",
 										async () => {
-											assert.equal(retried.isError, false, retried.content[0]?.text);
+											assert.equal(retried.isError, false, retried.content[0].text);
 											const bytes = await readFile(path);
 											assert.equal(
 												command === "pdf"
@@ -487,9 +613,10 @@ test(
 								await writeFile(held, "");
 								await link(held, literal); // Keep the literal-global alias while 0.37 requires a recording extension.
 								const started = await call(["record", "start", held]);
-								assert.equal(started.isError, false, started.content[0]?.text);
+								const startedDetails = readRecord(started.details);
+								assert.equal(started.isError, false, started.content[0].text);
 								assert.equal(
-									(started.details?.artifacts as FileArtifactMetadata[])[0]?.status,
+									readArray(startedDetails.artifacts).map((value) => readRecord(value))[0]?.status,
 									"pending",
 								);
 								for (const [index, params] of [
@@ -505,16 +632,17 @@ test(
 										`reserved native path rejects command ${index + 1}`,
 										async () => {
 											const blocked = await executeRegisteredTool(h.tool, h.ctx, params);
+											const blockedDetails = readRecord(blocked.details);
 											assert.equal(
-												blocked.details?.failureCategory,
+												blockedDetails.failureCategory,
 												"validation-error",
-												blocked.content[0]?.text,
+												blocked.content[0].text,
 											);
 											assert.match(
-												blocked.content[0]?.text ?? "",
+												readString(blocked.content[0].text ?? ""),
 												/reserved by an active recording/,
 											);
-											assert.equal(blocked.details?.exitCode, undefined);
+											assert.equal(blockedDetails.exitCode, undefined);
 										},
 									);
 								}
@@ -549,8 +677,8 @@ test(
 	{ skip: !real, timeout: 180_000 },
 	async (t) => {
 		const dir = await mkdtemp(join(tmpdir(), "rf-"));
-		const socketDir = join(dir, "s");
-		await mkdir(socketDir, { mode: 0o700 });
+		const socketDir = createShortPrivateSocketDir(dir);
+		await mkdir(socketDir, { mode: 0o700, recursive: true });
 		const fixture = await startAgentBrowserContractFixtureServer();
 		const url = `${fixture.baseUrl}/contract`;
 		try {
@@ -581,7 +709,7 @@ test(
 					}
 					const h = createExtensionHarness({ cwd: dir, sessionId: randomUUID() });
 					await runExtensionEvent(h.handlers, "session_start", { reason: "new" }, h.ctx);
-					const call = (args: string[], stdin?: string, outputPath?: string) =>
+					const call = (args: readonly string[], stdin?: string, outputPath?: string) =>
 						executeRegisteredTool(h.tool, h.ctx, { args, stdin, outputPath });
 					let daemonPid: number | undefined;
 					try {
@@ -589,12 +717,13 @@ test(
 							args: ["open", url],
 							sessionMode: "fresh",
 						});
-						assert.equal(opened.isError, false, opened.content[0]?.text);
-						const sessionName = opened.details?.sessionName;
+						const openedDetails = readRecord(opened.details);
+						assert.equal(opened.isError, false, opened.content[0].text);
+						const sessionName = openedDetails.sessionName;
 						assert.ok(typeof sessionName === "string");
 						daemonPid = Number(await readFile(join(socketDir, `${sessionName}.pid`), "utf8"));
 						const owned = { cwd: dir, sessionName, restoreState: new ManagedSessionRestoreState() };
-						const direct = (args: string[]) =>
+						const direct = (args: readonly string[]) =>
 							withOwnedManagedSessionContext(owned, () =>
 								runAgentBrowserProcess({
 									args: ["--json", "--session", sessionName, ...args],
@@ -609,25 +738,33 @@ test(
 									const row = ["record", "start", "--fps", "12", path];
 									let reached = false;
 									try {
+										let effectiveArgs: string[];
+										switch (mode) {
+											case "direct":
+												effectiveArgs = row;
+												break;
+											case "raw":
+												effectiveArgs = ["batch", row.join(" ")];
+												break;
+											default:
+												effectiveArgs = ["batch"];
+										}
 										const result = await call(
-											mode === "direct"
-												? row
-												: mode === "raw"
-													? ["batch", row.join(" ")]
-													: ["batch"],
+											effectiveArgs,
 											mode === "stdin" ? JSON.stringify([row]) : undefined,
 											path,
 										);
-										reached = result.details?.agentBrowserStarted === true;
+										const resultDetails = readRecord(result.details);
+										reached = resultDetails.agentBrowserStarted === true;
 										t.diagnostic(
 											JSON.stringify({
 												mode,
 												nativeReached: reached,
-												outputFile: result.details?.outputFile,
-												error: result.content[0]?.text,
+												outputFile: resultDetails.outputFile,
+												error: result.content[0].text,
 											}),
 										);
-										assert.equal(result.details?.failureCategory, "validation-error");
+										assert.equal(resultDetails.failureCategory, "validation-error");
 										assert.equal(
 											reached,
 											false,
@@ -637,28 +774,35 @@ test(
 									} finally {
 										if (reached) {
 											const stopped = await call(["record", "stop"]);
-											if (stopped.isError) await call(["record", "stop"]); // Retire a native failed-encoder take during RED too.
+											if (stopped.isError === true) {
+												await call(["record", "stop"]);
+											} // Retire a native failed-encoder take during RED too.
 										}
 									}
 								},
 							);
 						}
 						for (const subcommand of ["start", "restart"]) {
+							// Exhaustive fixture variant (["start", "restart"]): this selected path must satisfy its own contract.
+							// oxlint-disable-next-line node-test/no-conditional-assertion
 							assert.equal((await call(["open", url])).isError, false);
+							// Exhaustive fixture variant (["start", "restart"]): this selected path must satisfy its own contract.
+							// oxlint-disable-next-line node-test/no-conditional-assertion
 							assert.equal((await direct(["tab", "new", "about:blank"])).exitCode, 0);
 							const recovered = await call(["snapshot", "-i"]);
-							assert.equal(
-								(recovered.details?.sessionTabCorrection as { targetUrl?: string })?.targetUrl,
-								url,
-							);
+							const recoveredDetails = readRecord(recovered.details);
+							// Exhaustive fixture variant (["start", "restart"]): this selected path must satisfy its own contract.
+							// oxlint-disable-next-line node-test/no-conditional-assertion
+							assert.equal(readRecord(recoveredDetails.sessionTabCorrection).targetUrl, url);
 							const snapshot = await call(["snapshot", "-i"]);
-							const refs = (
-								snapshot.details?.refSnapshot as { refs: Record<string, { name: string }> }
-							).refs;
-							const ref = Object.entries(refs).find(
-								([, entry]) => entry.name === "Go to next fixture page",
+							const snapshotDetails = readRecord(snapshot.details);
+							const refs = readRecord(snapshotDetails.refSnapshot).refs;
+							const ref = Object.entries(readRecord(refs)).find(
+								([, entry]) => readRecord(entry).name === "Go to next fixture page",
 							)?.[0];
-							assert.ok(ref);
+							// Exhaustive fixture variant (["start", "restart"]): this selected path must satisfy its own contract.
+							// oxlint-disable-next-line node-test/no-conditional-assertion
+							assert.ok(ref !== undefined && ref.length > 0);
 							if (subcommand === "start") {
 								const blocked = await call(
 									["batch"],
@@ -667,28 +811,42 @@ test(
 										["get", "text", `@${ref}`],
 									]),
 								);
+								const blockedDetails = readRecord(blocked.details);
+								// Exhaustive fixture variant (subcommand === "start"): this selected path must satisfy its own contract.
+								// oxlint-disable-next-line node-test/no-conditional-assertion
 								assert.equal(
-									blocked.details?.failureCategory,
+									blockedDetails.failureCategory,
 									"stale-ref",
 									"keep the older-native start-then-ref latch",
 								);
-								assert.notEqual(blocked.details?.agentBrowserStarted, true);
+								// Exhaustive fixture variant (subcommand === "start"): this selected path must satisfy its own contract.
+								// oxlint-disable-next-line node-test/no-conditional-assertion
+								assert.notEqual(blockedDetails.agentBrowserStarted, true);
 							}
+							// Exhaustive fixture variant (["start", "restart"]): this selected path must satisfy its own contract.
+							// oxlint-disable-next-line node-test/no-conditional-assertion
 							assert.equal((await direct(["tab", "new", `${fixture.baseUrl}/next`])).exitCode, 0);
 							const path = join(dir, `${subcommand}.webm`);
 							const args = ["record", subcommand, "--fps", "12", path];
 							const recording = await call(args);
-							assert.equal(recording.isError, false, recording.content[0]?.text);
-							const observedUrl = JSON.parse((await direct(["get", "url"])).stdout).data.url;
+							const recordingDetails = readRecord(recording.details);
+							// Exhaustive fixture variant (["start", "restart"]): this selected path must satisfy its own contract.
+							// oxlint-disable-next-line node-test/no-conditional-assertion
+							assert.equal(recording.isError, false, recording.content[0].text);
+							const observedUrl = readRecord(
+								readRecord(JSON.parse((await direct(["get", "url"])).stdout)).data,
+							).url;
 							await t.test(`${subcommand} FPS retains the declared native destination`, () => {
 								assert.equal(
-									(recording.details?.artifacts as FileArtifactMetadata[]).find(
-										(artifact) => artifact.subcommand === subcommand,
-									)?.requestedPath,
+									readArray(recordingDetails.artifacts)
+										.map((value) => readRecord(value))
+										.find((artifact) => artifact.subcommand === subcommand)?.requestedPath,
 									path,
 								);
 								assert.deepEqual(
-									(recording.details?.effectiveArgs as string[]).slice(-args.length),
+									readArray(recordingDetails.effectiveArgs)
+										.map((value) => readString(value))
+										.slice(-args.length),
 									args,
 								);
 							});
@@ -699,24 +857,33 @@ test(
 							await t.test(
 								`${subcommand} FPS ref policy is conservative rather than false page-change evidence`,
 								async () => {
-									const invalidation = recording.details?.refSnapshotInvalidation as
-										| { summary?: string }
-										| undefined;
+									const invalidation = recordingDetails.refSnapshotInvalidation;
 									const read = await call(["get", "text", `@${ref}`]);
+									const readDetails = readRecord(read.details);
 									if (subcommand === "start") {
-										assert.equal(read.details?.failureCategory, "stale-ref");
-										assert.match(invalidation?.summary ?? "", /conservatively/);
+										// Exhaustive fixture variant (subcommand === "start"): this selected path must satisfy its own contract.
+										// oxlint-disable-next-line node-test/no-conditional-assertion
+										assert.equal(readDetails.failureCategory, "stale-ref");
+										// Exhaustive fixture variant (subcommand === "start"): this selected path must satisfy its own contract.
+										// oxlint-disable-next-line node-test/no-conditional-assertion
+										assert.match(readString(readRecord(invalidation).summary), /conservatively/);
 									} else {
+										// Exhaustive fixture variant (subcommand === "start"): this selected path must satisfy its own contract.
+										// oxlint-disable-next-line node-test/no-conditional-assertion
 										assert.equal(invalidation, undefined);
-										assert.equal(read.isError, false, read.content[0]?.text);
+										// Exhaustive fixture variant (subcommand === "start"): this selected path must satisfy its own contract.
+										// oxlint-disable-next-line node-test/no-conditional-assertion
+										assert.equal(read.isError, false, read.content[0].text);
 									}
 									assert.doesNotMatch(
-										`${recording.content[0]?.text}\n${invalidation?.summary}`,
+										`${readString(recording.content[0].text)}\n${invalidation === undefined ? "undefined" : readString(readRecord(invalidation).summary)}`,
 										/fresh active page|replaced or navigated/,
 									);
 								},
 							);
 							const began = Date.now();
+							// Exhaustive fixture variant (["start", "restart"]): this selected path must satisfy its own contract.
+							// oxlint-disable-next-line node-test/no-conditional-assertion
 							assert.equal((await direct(["wait", "12000"])).exitCode, 0);
 							t.diagnostic(
 								JSON.stringify({
@@ -727,9 +894,16 @@ test(
 								}),
 							);
 							const stopped = await call(["record", "stop"]);
-							assert.equal(stopped.isError, false, stopped.content[0]?.text);
+							const stoppedDetails = readRecord(stopped.details);
+							// Exhaustive fixture variant (["start", "restart"]): this selected path must satisfy its own contract.
+							// oxlint-disable-next-line node-test/no-conditional-assertion
+							assert.equal(stopped.isError, false, stopped.content[0].text);
+							// Exhaustive fixture variant (["start", "restart"]): this selected path must satisfy its own contract.
+							// oxlint-disable-next-line node-test/no-conditional-assertion
 							assert.equal((await readFile(path)).subarray(0, 4).toString("hex"), "1a45dfa3");
-							assert.equal((stopped.details?.data as { fps: number }).fps, 12);
+							// Exhaustive fixture variant (["start", "restart"]): this selected path must satisfy its own contract.
+							// oxlint-disable-next-line node-test/no-conditional-assertion
+							assert.equal(readRecord(stoppedDetails.data).fps, 12);
 						}
 					} finally {
 						await call(["close"]);
@@ -744,6 +918,7 @@ test(
 			);
 		} finally {
 			await fixture.close();
+			await rm(socketDir, { recursive: true, force: true });
 			await rm(dir, { recursive: true, force: true });
 		}
 	},
@@ -754,11 +929,15 @@ test(
 	{ skip: !real, timeout: 180_000 },
 	async (t) => {
 		const dir = await mkdtemp(join(tmpdir(), "bf-"));
-		const socketDir = join(dir, "s");
-		await mkdir(socketDir, { mode: 0o700 });
+		const socketDir = createShortPrivateSocketDir(dir);
+		await mkdir(socketDir, { mode: 0o700, recursive: true });
 		const browserBin = join(dir, "bin");
 		await mkdir(browserBin);
-		if (process.platform === "linux" && process.env.AGENT_BROWSER_EXECUTABLE_PATH) {
+		if (
+			process.platform === "linux" &&
+			process.env.AGENT_BROWSER_EXECUTABLE_PATH !== undefined &&
+			process.env.AGENT_BROWSER_EXECUTABLE_PATH.length > 0
+		) {
 			await symlink(process.env.AGENT_BROWSER_EXECUTABLE_PATH, join(browserBin, "google-chrome"));
 		}
 		const fixture = await startAgentBrowserContractFixtureServer();
@@ -780,7 +959,7 @@ test(
 					AGENT_BROWSER_AUTO_CONNECT: undefined,
 					// Native browser discovery avoids passive launch flags reconfiguring the CDP fixture.
 					AGENT_BROWSER_EXECUTABLE_PATH: undefined,
-					PATH: `${browserBin}${delimiter}${process.env.PATH}`,
+					PATH: `${browserBin}${delimiter}${process.env.PATH ?? ""}`,
 				},
 				async () => {
 					for (const pinned of [false, true]) {
@@ -788,11 +967,13 @@ test(
 						const namespace = `bf-${randomUUID().slice(0, 8)}`;
 						const prefix = ["--namespace", namespace, "--session", sessionName];
 						const extraSessions: string[] = [];
-						const direct = (args: string[], stdin?: string) =>
+						const direct = (args: readonly string[], stdin?: string) =>
 							runAgentBrowserProcess({ args: ["--json", ...prefix, ...args], cwd: dir, stdin });
 						const opened = await direct(["open", url]);
+						// Exhaustive fixture variant ([false, true]): this selected path must satisfy its own contract.
+						// oxlint-disable-next-line node-test/no-conditional-assertion
 						assert.equal(opened.exitCode, 0, opened.stderr);
-						const makeHarness = async (extraDetails: Record<string, unknown> = {}) => {
+						const makeHarness = async (extraDetails: Readonly<Record<string, unknown>> = {}) => {
 							const h = createExtensionHarness({
 								cwd: dir,
 								sessionId: randomUUID(),
@@ -824,13 +1005,20 @@ test(
 						if (pinned) {
 							await direct(["tab", "new", `${fixture.baseUrl}/next`]);
 						}
-						const call = (args: string[], stdin?: string) =>
+						const call = (args: readonly string[], stdin?: string) =>
 							executeRegisteredTool(h.tool, h.ctx, { args: [...prefix, ...args], stdin });
+						const nativeTabs = async () =>
+							readArray(
+								readRecord(readRecord(JSON.parse((await direct(["tab", "list"])).stdout)).data)
+									.tabs,
+							).map(readRecord);
 						const keepActiveTab = async () => {
-							const tabs = JSON.parse((await direct(["tab", "list"])).stdout).data.tabs;
-							for (const tab of tabs) {
-								if (!tab.active) {
-									const closed = await direct(["tab", "close", tab.tabId]);
+							const tabs = await nativeTabs();
+							for (const tab of readArray(tabs).map(readRecord)) {
+								if (!readBoolean(tab.active)) {
+									const closed = await direct(["tab", "close", readString(tab.tabId)]);
+									// Exhaustive fixture variant (!readBoolean(tab.active)): this selected path must satisfy its own contract.
+									// oxlint-disable-next-line node-test/no-conditional-assertion
 									assert.equal(closed.exitCode, 0, JSON.stringify(closed));
 								}
 							}
@@ -841,16 +1029,22 @@ test(
 								`${label}: same-tab ref spellings remain usable and text stays literal`,
 								async () => {
 									const snapshot = await call(["snapshot", "-i"]);
+									const snapshotDetails = readRecord(snapshot.details);
 									assert.equal(snapshot.isError, false, JSON.stringify(snapshot));
-									const refs = (
-										snapshot.details?.refSnapshot as { refs: Record<string, { name: string }> }
-									).refs;
-									const id = Object.entries(refs).find(([, ref]) => ref.name === "Name")?.[0];
-									assert.ok(id, JSON.stringify(refs));
+									const refs = readRecord(snapshotDetails.refSnapshot).refs;
+									const id = Object.entries(readRecord(refs)).find(
+										([, ref]) => readRecord(ref).name === "Name",
+									)?.[0];
+									assert.ok(id !== undefined && id.length > 0, JSON.stringify(refs));
 									for (const ref of [`@${id}`, id, `ref=${id}`]) {
 										const filled = await call(["fill", ref, "--bail"]);
+										const filledDetails = readRecord(filled.details);
+										// Exhaustive fixture variant ([`@${id}`, id, `ref=${id}`]): this selected path must satisfy its own contract.
+										// oxlint-disable-next-line node-test/no-conditional-assertion
 										assert.equal(filled.isError, false, JSON.stringify(filled));
-										assert.deepEqual(filled.details?.effectiveArgs, [
+										// Exhaustive fixture variant ([`@${id}`, id, `ref=${id}`]): this selected path must satisfy its own contract.
+										// oxlint-disable-next-line node-test/no-conditional-assertion
+										assert.deepEqual(filledDetails.effectiveArgs, [
 											"--json",
 											...prefix,
 											"fill",
@@ -859,9 +1053,13 @@ test(
 										]);
 									}
 									for (const text of ["@e999", "e999", "ref=e999", "--bail=true"]) {
+										// Exhaustive fixture variant (["@e999", "e999", "ref=e999", "--bail=true"]): this selected path must satisfy its own contract.
+										// oxlint-disable-next-line node-test/no-conditional-assertion
 										assert.equal((await call(["fill", "#name-input", text])).isError, false);
 										const value = await direct(["get", "value", "#name-input"]);
-										assert.equal(JSON.parse(value.stdout).data.value, text);
+										// Exhaustive fixture variant (["@e999", "e999", "ref=e999", "--bail=true"]): this selected path must satisfy its own contract.
+										// oxlint-disable-next-line node-test/no-conditional-assertion
+										assert.equal(readRecord(readRecord(JSON.parse(value.stdout)).data).value, text);
 									}
 								},
 							);
@@ -870,6 +1068,8 @@ test(
 								async () => {
 									for (const bail of [false, true]) {
 										if (pinned) {
+											// Exhaustive fixture variant (pinned): this selected path must satisfy its own contract.
+											// oxlint-disable-next-line node-test/no-conditional-assertion
 											assert.equal(
 												(await direct(["tab", "new", `${fixture.baseUrl}/next`])).exitCode,
 												0,
@@ -884,26 +1084,43 @@ test(
 											["batch", ...(bail ? ["--bail"] : [])],
 											JSON.stringify(steps),
 										);
+										const resultDetails = readRecord(result.details);
+										// Exhaustive fixture variant ([false, true]): this selected path must satisfy its own contract.
+										// oxlint-disable-next-line node-test/no-conditional-assertion
 										assert.equal(result.isError, true, JSON.stringify(result));
-										assert.equal(result.details?.resultCategory, "failure");
-										const rows = result.details?.batchSteps as Array<{
-											index: number;
-											success: boolean;
-										}>;
-										assert.equal(rows?.length, bail ? 2 : 3, JSON.stringify(result));
+										// Exhaustive fixture variant ([false, true]): this selected path must satisfy its own contract.
+										// oxlint-disable-next-line node-test/no-conditional-assertion
+										assert.equal(resultDetails.resultCategory, "failure");
+										const rows = readArray(resultDetails.batchSteps).map((value) =>
+											readRecord(value),
+										);
+										// Exhaustive fixture variant ([false, true]): this selected path must satisfy its own contract.
+										// oxlint-disable-next-line node-test/no-conditional-assertion
+										assert.equal(rows.length, bail ? 2 : 3, JSON.stringify(result));
+										// Exhaustive fixture variant ([false, true]): this selected path must satisfy its own contract.
+										// oxlint-disable-next-line node-test/no-conditional-assertion
 										assert.deepEqual(
 											rows.map((row) => row.success),
 											bail ? [true, false] : [true, false, true],
 										);
+										// Exhaustive fixture variant ([false, true]): this selected path must satisfy its own contract.
+										// oxlint-disable-next-line node-test/no-conditional-assertion
 										assert.equal(
-											(result.details?.batchFailure as { failedStep: { index: number } }).failedStep
-												.index,
+											readRecord(readRecord(resultDetails.batchFailure).failedStep).index,
 											1,
 										);
-										assert.match(result.content[0]?.text ?? "", /Batch failed:/);
+										// Exhaustive fixture variant ([false, true]): this selected path must satisfy its own contract.
+										// oxlint-disable-next-line node-test/no-conditional-assertion
+										assert.match(readString(result.content[0].text ?? ""), /Batch failed:/);
 										// Canonical failure projection: the returned result already carries isError; the removed tool_result patch hook is covered by the handler-list contract.
+										// Exhaustive fixture variant ([false, true]): this selected path must satisfy its own contract.
+										// oxlint-disable-next-line node-test/no-conditional-assertion
 										assert.equal(
-											JSON.parse((await direct(["get", "value", "#name-input"])).stdout).data.value,
+											readRecord(
+												readRecord(
+													JSON.parse((await direct(["get", "value", "#name-input"])).stdout),
+												).data,
+											).value,
 											bail ? "before" : "after",
 										);
 									}
@@ -913,6 +1130,8 @@ test(
 								`${label}: global headers and explicit native pin preferences survive dispatch`,
 								async () => {
 									if (pinned) {
+										// Exhaustive fixture variant (pinned): this selected path must satisfy its own contract.
+										// oxlint-disable-next-line node-test/no-conditional-assertion
 										assert.equal(
 											(await direct(["tab", "new", `${fixture.baseUrl}/next`])).exitCode,
 											0,
@@ -932,14 +1151,19 @@ test(
 											["get", "value", "#header-value"],
 										]),
 									);
+									const resultDetails = readRecord(result.details);
 									assert.equal(result.isError, false, JSON.stringify(result));
-									assert.deepEqual(result.details?.effectiveArgs, [
+									assert.deepEqual(resultDetails.effectiveArgs, [
 										"--json",
 										...prefix,
 										...args.map((arg) => (arg.startsWith("{") ? "[REDACTED]" : arg)),
 									]);
 									assert.equal(
-										JSON.parse((await direct(["get", "value", "#header-value"])).stdout).data.value,
+										readRecord(
+											readRecord(
+												JSON.parse((await direct(["get", "value", "#header-value"])).stdout),
+											).data,
+										).value,
 										"present",
 									);
 									assert.equal((await call(["open", url])).isError, false);
@@ -954,7 +1178,10 @@ test(
 									);
 									assert.equal(result.isError, false, JSON.stringify(result));
 									assert.equal(
-										JSON.parse((await direct(["get", "value", "#name-input"])).stdout).data.value,
+										readRecord(
+											readRecord(JSON.parse((await direct(["get", "value", "#name-input"])).stdout))
+												.data,
+										).value,
 										"raw text",
 									);
 									const misplacedTimeout = await call([
@@ -964,8 +1191,9 @@ test(
 										"#name-input",
 										"must-not-run",
 									]);
+									const misplacedTimeoutDetails = readRecord(misplacedTimeout.details);
 									assert.equal(misplacedTimeout.isError, true, JSON.stringify(misplacedTimeout));
-									assert.deepEqual(misplacedTimeout.details?.effectiveArgs, [
+									assert.deepEqual(misplacedTimeoutDetails.effectiveArgs, [
 										"--json",
 										...prefix,
 										"--timeout",
@@ -975,7 +1203,10 @@ test(
 										"must-not-run",
 									]);
 									assert.equal(
-										JSON.parse((await direct(["get", "value", "#name-input"])).stdout).data.value,
+										readRecord(
+											readRecord(JSON.parse((await direct(["get", "value", "#name-input"])).stdout))
+												.data,
+										).value,
 										"raw text",
 									);
 									const wait = await call([
@@ -985,8 +1216,9 @@ test(
 										"--timeout",
 										"50",
 									]);
+									const waitDetails = readRecord(wait.details);
 									assert.equal(wait.isError, true);
-									assert.deepEqual(wait.details?.effectiveArgs, [
+									assert.deepEqual(waitDetails.effectiveArgs, [
 										"--json",
 										...prefix,
 										"wait",
@@ -999,8 +1231,12 @@ test(
 										["batch", "--bail=true"],
 										'[["fill","#name-input","ignored"]]',
 									);
-									assert.match(bad.content[0]?.text ?? "", /exact.*--bail.*stdin.*ignored/i);
-									assert.equal(bad.details?.exitCode, undefined);
+									const badDetails = readRecord(bad.details);
+									assert.match(
+										readString(bad.content[0].text ?? ""),
+										/exact.*--bail.*stdin.*ignored/i,
+									);
+									assert.equal(badDetails.exitCode, undefined);
 								},
 							);
 							await t.test(
@@ -1009,12 +1245,13 @@ test(
 									await call(["snapshot", "-i"]);
 									for (const ref of ["@e999", "e999", "ref=e999"]) {
 										const stale = await call(["fill", ref, "wrong"]);
-										assert.equal(
-											stale.details?.failureCategory,
-											"stale-ref",
-											JSON.stringify(stale),
-										);
-										assert.equal(stale.details?.exitCode, undefined);
+										const staleDetails = readRecord(stale.details);
+										// Exhaustive fixture variant (["@e999", "e999", "ref=e999"]): this selected path must satisfy its own contract.
+										// oxlint-disable-next-line node-test/no-conditional-assertion
+										assert.equal(staleDetails.failureCategory, "stale-ref", JSON.stringify(stale));
+										// Exhaustive fixture variant (["@e999", "e999", "ref=e999"]): this selected path must satisfy its own contract.
+										// oxlint-disable-next-line node-test/no-conditional-assertion
+										assert.equal(staleDetails.exitCode, undefined);
 									}
 									await call(["focus", "#name-input"]);
 									for (const args of [
@@ -1024,12 +1261,17 @@ test(
 										["mouse", "wheel", "@e999"],
 									]) {
 										const result = await call(args);
+										const resultDetails = readRecord(result.details);
+										// Every keyboard/mouse literal variant is dispatched and checked, never mistaken for a ref.
+										// oxlint-disable-next-line node-test/no-conditional-assertion
 										assert.notEqual(
-											result.details?.failureCategory,
+											resultDetails.failureCategory,
 											"stale-ref",
 											JSON.stringify(result),
 										);
-										assert.equal(result.details?.agentBrowserStarted, true, JSON.stringify(result));
+										// Every keyboard/mouse literal variant is dispatched and checked, never mistaken for a ref.
+										// oxlint-disable-next-line node-test/no-conditional-assertion
+										assert.equal(resultDetails.agentBrowserStarted, true, JSON.stringify(result));
 									}
 								},
 							);
@@ -1053,22 +1295,38 @@ test(
 											["e998", 0],
 										] as const) {
 											const native = await direct(["get", "count", selector]);
+											// Exhaustive fixture variant ([ ["e999", 1], ["e998", 0], ] as const): this selected path must satisfy its own contract.
+											// oxlint-disable-next-line node-test/no-conditional-assertion
 											assert.equal(native.exitCode, 0, native.stderr);
-											assert.equal(JSON.parse(native.stdout).data.count, count);
+											// Exhaustive fixture variant ([ ["e999", 1], ["e998", 0], ] as const): this selected path must satisfy its own contract.
+											// oxlint-disable-next-line node-test/no-conditional-assertion
+											assert.equal(
+												readRecord(readRecord(JSON.parse(native.stdout)).data).count,
+												count,
+											);
 											const counted = await call(["get", "count", selector]);
+											const countedDetails = readRecord(counted.details);
+											// Exhaustive fixture variant ([ ["e999", 1], ["e998", 0], ] as const): this selected path must satisfy its own contract.
+											// oxlint-disable-next-line node-test/no-conditional-assertion
 											assert.equal(counted.isError, false, JSON.stringify(counted));
-											assert.equal((counted.details?.data as { count: number }).count, count);
+											// Exhaustive fixture variant ([ ["e999", 1], ["e998", 0], ] as const): this selected path must satisfy its own contract.
+											// oxlint-disable-next-line node-test/no-conditional-assertion
+											assert.equal(readRecord(countedDetails.data).count, count);
 										}
 									});
 									await css.test("diff snapshot treats bare eN as a CSS subtree", async () => {
 										const args = ["diff", "snapshot", "--selector", "e999"];
 										const native = await direct(args);
 										assert.equal(native.exitCode, 0, native.stderr);
-										assert.match(JSON.parse(native.stdout).data.diff, /Literal subtree/);
+										assert.match(
+											readString(readRecord(readRecord(JSON.parse(native.stdout)).data).diff),
+											/Literal subtree/,
+										);
 										const compared = await call(args);
+										const comparedDetails = readRecord(compared.details);
 										assert.equal(compared.isError, false, JSON.stringify(compared));
 										assert.match(
-											(compared.details?.data as { diff: string }).diff,
+											readString(readRecord(comparedDetails.data).diff),
 											/Literal subtree/,
 										);
 									});
@@ -1093,12 +1351,17 @@ test(
 												],
 											]) {
 												const stale = await call(args);
+												const staleDetails = readRecord(stale.details);
+												// Each noninteractive getter variant is asserted against the same native ref evidence.
+												// oxlint-disable-next-line node-test/no-conditional-assertion
 												assert.equal(
-													stale.details?.failureCategory,
+													staleDetails.failureCategory,
 													"stale-ref",
 													JSON.stringify(stale),
 												);
-												assert.equal(stale.details?.exitCode, undefined);
+												// Each noninteractive getter variant is asserted against the same native ref evidence.
+												// oxlint-disable-next-line node-test/no-conditional-assertion
+												assert.equal(staleDetails.exitCode, undefined);
 											}
 										},
 									);
@@ -1108,40 +1371,41 @@ test(
 								await t.test("pinned: same-URL tabs retain the known titled target", async () => {
 									await keepActiveTab();
 									await direct(["open", url]);
-									const originalTabs = JSON.parse((await direct(["tab", "list"])).stdout).data.tabs;
-									const originalTab = originalTabs.find((tab: { active: boolean }) => tab.active);
-									const original = originalTab.tabId;
+									const originalTabs = await nativeTabs();
+									const originalTab = readRecord(
+										originalTabs.find((tab) => readBoolean(tab.active)),
+									);
+									const original = readString(originalTab.tabId);
 									h = await makeHarness({ sessionTabTarget: { title: originalTab.title, url } });
 									await direct(["tab", "new", url]);
 									await direct(["eval", "document.title = 'Different tab'"]);
-									const duplicateTabs = JSON.parse((await direct(["tab", "list"])).stdout).data
-										.tabs;
-									const duplicate = duplicateTabs.find(
-										(tab: { active: boolean }) => tab.active,
-									).tabId;
+									const duplicateTabs = await nativeTabs();
+									const duplicate = readString(
+										readRecord(duplicateTabs.find((tab) => readBoolean(tab.active))).tabId,
+									);
 									await direct(["tab", duplicate]); // Native selection refreshes the cached tab title.
 									assert.equal(
-										JSON.parse((await direct(["tab", "list"])).stdout).data.tabs.find(
-											(tab: { tabId: string }) => tab.tabId === duplicate,
-										).title,
+										readRecord((await nativeTabs()).find((tab) => tab.tabId === duplicate)).title,
 										"Different tab",
 									);
 									const filled = await call(["fill", "#name-input", "intended"]);
+									const filledDetails = readRecord(filled.details);
 									assert.equal(filled.isError, false, JSON.stringify(filled));
 									assert.equal(
-										(filled.details?.sessionTabCorrection as { selectedTab: string } | undefined)
-											?.selectedTab,
+										readRecord(filledDetails.sessionTabCorrection ?? {}).selectedTab,
 										originalTab.targetId,
 										JSON.stringify({ original, duplicate, originalTabs, duplicateTabs, filled }),
 									);
 									assert.equal(
-										(filled.details?.sessionTabCorrection as { selectionKind: string } | undefined)
-											?.selectionKind,
+										readRecord(filledDetails.sessionTabCorrection ?? {}).selectionKind,
 										"targetId",
 									);
 									await direct(["tab", duplicate]);
 									assert.equal(
-										JSON.parse((await direct(["get", "value", "#name-input"])).stdout).data.value,
+										readRecord(
+											readRecord(JSON.parse((await direct(["get", "value", "#name-input"])).stdout))
+												.data,
+										).value,
 										"",
 									);
 									await direct(["tab", original]);
@@ -1152,17 +1416,25 @@ test(
 									"pinned: actual tab switch refreshes refs before same-page actions",
 									async () => {
 										const snapshot = await call(["snapshot", "-i"]);
-										const refs = (
-											snapshot.details?.refSnapshot as { refs: Record<string, { name: string }> }
-										).refs;
-										const id = Object.entries(refs).find(([, ref]) => ref.name === "Name")?.[0];
-										assert.ok(id);
+										const snapshotDetails = readRecord(snapshot.details);
+										const refs = readRecord(snapshotDetails.refSnapshot).refs;
+										const id = Object.entries(readRecord(refs)).find(
+											([, ref]) => readRecord(ref).name === "Name",
+										)?.[0];
+										assert.ok(id !== undefined && id.length > 0);
 										await direct(["tab", "new", `${fixture.baseUrl}/next`]);
 										const filled = await call(["fill", `ref=${id}`, "switched"]);
+										const filledDetails = readRecord(filled.details);
 										assert.equal(filled.isError, false, JSON.stringify(filled));
-										assert.ok(filled.details?.sessionTabCorrection);
+										assert.doesNotThrow(() => {
+											readRecord(filledDetails.sessionTabCorrection);
+										});
 										assert.equal(
-											JSON.parse((await direct(["get", "value", "#name-input"])).stdout).data.value,
+											readRecord(
+												readRecord(
+													JSON.parse((await direct(["get", "value", "#name-input"])).stdout),
+												).data,
+											).value,
 											"switched",
 										);
 									},
@@ -1197,23 +1469,37 @@ process.stdout.write(result.stdout || ''); process.stderr.write(result.stderr ||
 											h = await makeHarness();
 											await direct(["tab", "new", `${fixture.baseUrl}/next`]);
 											await writeFile(modeFile, fault);
-											await withPatchedEnv({ PATH: `${shimDir}:${process.env.PATH}` }, async () => {
-												const blocked = await call(
-													["batch"],
-													'[["eval","document.body.dataset.wrong=1"]]',
-												);
-												assert.equal(
-													blocked.details?.failureCategory,
-													"tab-drift",
-													JSON.stringify(blocked),
-												);
-												assert.equal(blocked.details?.exitCode, undefined);
-											});
+											await withPatchedEnv(
+												{ PATH: `${shimDir}:${process.env.PATH ?? ""}` },
+												async () => {
+													const blocked = await call(
+														["batch"],
+														'[["eval","document.body.dataset.wrong=1"]]',
+													);
+													const blockedDetails = readRecord(blocked.details);
+													// Exhaustive fixture variant (["mismatch", "gone"]): this selected path must satisfy its own contract.
+													// oxlint-disable-next-line node-test/no-conditional-assertion
+													assert.equal(
+														blockedDetails.failureCategory,
+														"tab-drift",
+														JSON.stringify(blocked),
+													);
+													// Exhaustive fixture variant (["mismatch", "gone"]): this selected path must satisfy its own contract.
+													// oxlint-disable-next-line node-test/no-conditional-assertion
+													assert.equal(blockedDetails.exitCode, undefined);
+												},
+											);
+											// Exhaustive fixture variant (["mismatch", "gone"]): this selected path must satisfy its own contract.
+											// oxlint-disable-next-line node-test/no-conditional-assertion
 											assert.equal(
-												JSON.parse(
-													(await direct(["eval", "document.body.dataset.wrong || 'untouched'"]))
-														.stdout,
-												).data.result,
+												readRecord(
+													readRecord(
+														JSON.parse(
+															(await direct(["eval", "document.body.dataset.wrong || 'untouched'"]))
+																.stdout,
+														),
+													).data,
+												).result,
 												"untouched",
 											);
 										}
@@ -1228,7 +1514,7 @@ process.stdout.write(result.stdout || ''); process.stderr.write(result.stderr ||
 										assert.equal((await direct(["close"])).exitCode, 0);
 										const sourceSession = `cdp-${randomUUID().slice(0, 8)}`;
 										extraSessions.push(sourceSession);
-										const source = (args: string[]) =>
+										const source = (args: readonly string[]) =>
 											runAgentBrowserProcess({
 												args: [
 													"--json",
@@ -1242,27 +1528,37 @@ process.stdout.write(result.stdout || ''); process.stderr.write(result.stderr ||
 											});
 										const openedSource = await source(["open", url]);
 										assert.equal(openedSource.exitCode, 0, JSON.stringify(openedSource));
-										const endpoint = JSON.parse((await source(["get", "cdp-url"])).stdout).data
-											.cdpUrl;
+										const endpoint = readRecord(
+											readRecord(JSON.parse((await source(["get", "cdp-url"])).stdout)).data,
+										).cdpUrl;
 										assert.equal(typeof endpoint, "string");
 										h = await makeHarness({
 											sessionTabTarget: { url: `${fixture.baseUrl}/missing-target` },
 										});
-										const connected = await call(["connect", endpoint]);
+										const connected = await call(["connect", readString(endpoint)]);
+										const connectedDetails = readRecord(connected.details);
 										assert.equal(connected.isError, false, JSON.stringify(connected));
-										assert.equal(connected.details?.refSnapshot, undefined);
+										assert.equal(connectedDetails.refSnapshot, undefined);
 										assert.equal((await call(["get", "url"])).isError, false);
 										const attachedTabs = await call(["tab", "list"]);
-										const attachedTab = (
-											attachedTabs.details?.data as { tabs: Array<{ tabId: string; url: string }> }
-										).tabs.find((tab) => tab.url === url);
+										const attachedTabsDetails = readRecord(attachedTabs.details);
+										const attachedTab = readArray(readRecord(attachedTabsDetails.data).tabs)
+											.map(readRecord)
+											.find((tab) => tab.url === url);
 										assert.ok(attachedTab, JSON.stringify(attachedTabs));
-										assert.equal((await call(["tab", attachedTab.tabId])).isError, false);
+										assert.equal(
+											(await call(["tab", readString(attachedTab.tabId)])).isError,
+											false,
+										);
 										assert.equal((await call(["snapshot", "-i"])).isError, false);
 										const filledConnected = await call(["fill", "#name-input", "connected"]);
 										assert.equal(filledConnected.isError, false, JSON.stringify(filledConnected));
 										assert.equal(
-											JSON.parse((await source(["get", "value", "#name-input"])).stdout).data.value,
+											readRecord(
+												readRecord(
+													JSON.parse((await source(["get", "value", "#name-input"])).stdout),
+												).data,
+											).value,
 											"connected",
 										);
 										const unsafe = await call(
@@ -1272,11 +1568,12 @@ process.stdout.write(result.stdout || ''); process.stderr.write(result.stderr ||
 												["fill", "#name-input", "must-not-run"],
 											]),
 										);
+										const unsafeDetails = readRecord(unsafe.details);
 										assert.match(
-											String(unsafe.details?.validationError),
+											readString(unsafeDetails.validationError),
 											/unverified|batch --bail/,
 										);
-										assert.equal(unsafe.details?.exitCode, undefined);
+										assert.equal(unsafeDetails.exitCode, undefined);
 										h = await makeHarness({
 											sessionTabTarget: { url: `${fixture.baseUrl}/missing-target` },
 										});
@@ -1287,11 +1584,12 @@ process.stdout.write(result.stdout || ''); process.stderr.write(result.stderr ||
 												["get", "url"],
 											]),
 										);
+										const failedDetails = readRecord(failed.details);
 										assert.equal(failed.isError, true);
 										assert.deepEqual(
-											(failed.details?.batchSteps as Array<{ success: boolean }>).map(
-												(row) => row.success,
-											),
+											readArray(failedDetails.batchSteps)
+												.map((value) => readRecord(value))
+												.map((row) => row.success),
 											[false, true],
 										);
 									},
@@ -1319,13 +1617,18 @@ process.stdout.write(result.stdout || ''); process.stderr.write(result.stderr ||
 											sessionTabTarget: { url: `${fixture.baseUrl}/missing-target` },
 										});
 										const loaded = await call(["state", "load", statePath]);
+										const loadedDetails = readRecord(loaded.details);
 										assert.equal(loaded.isError, false, JSON.stringify(loaded));
-										assert.equal(loaded.details?.refSnapshot, undefined);
+										assert.equal(loadedDetails.refSnapshot, undefined);
 										assert.equal((await call(["get", "url"])).isError, false);
 										assert.equal(
-											JSON.parse(
-												(await direct(["eval", "localStorage.getItem('fidelity')"])).stdout,
-											).data.result,
+											readRecord(
+												readRecord(
+													JSON.parse(
+														(await direct(["eval", "localStorage.getItem('fidelity')"])).stdout,
+													),
+												).data,
+											).result,
 											"loaded",
 										);
 										const unsafe = await call(
@@ -1335,11 +1638,12 @@ process.stdout.write(result.stdout || ''); process.stderr.write(result.stderr ||
 												["fill", "#name-input", "must-not-run"],
 											]),
 										);
+										const unsafeDetails = readRecord(unsafe.details);
 										assert.match(
-											String(unsafe.details?.validationError),
+											readString(unsafeDetails.validationError),
 											/unverified|batch --bail/,
 										);
-										assert.equal(unsafe.details?.exitCode, undefined);
+										assert.equal(unsafeDetails.exitCode, undefined);
 										h = await makeHarness({
 											sessionTabTarget: { url: `${fixture.baseUrl}/missing-target` },
 										});
@@ -1350,11 +1654,12 @@ process.stdout.write(result.stdout || ''); process.stderr.write(result.stderr ||
 												["get", "url"],
 											]),
 										);
+										const failedDetails = readRecord(failed.details);
 										assert.equal(failed.isError, true);
 										assert.deepEqual(
-											(failed.details?.batchSteps as Array<{ success: boolean }>).map(
-												(row) => row.success,
-											),
+											readArray(failedDetails.batchSteps)
+												.map((value) => readRecord(value))
+												.map((row) => row.success),
 											[false, true],
 										);
 										h = await makeHarness({
@@ -1368,8 +1673,11 @@ process.stdout.write(result.stdout || ''); process.stderr.write(result.stderr ||
 												["snapshot", "-i"],
 											]),
 										);
+										const replayDetails = readRecord(replay.details);
 										assert.equal(replay.isError, false, JSON.stringify(replay));
-										assert.ok(replay.details?.refSnapshot);
+										assert.doesNotThrow(() => {
+											readRecord(replayDetails.refSnapshot);
+										});
 									},
 								);
 							}
@@ -1381,8 +1689,9 @@ process.stdout.write(result.stdout || ''); process.stderr.write(result.stderr ||
 											sessionTabTarget: { url: `${fixture.baseUrl}/missing-target` },
 										});
 										const skills = await call(["skills", "list"]);
+										const skillsDetails = readRecord(skills.details);
 										assert.equal(skills.isError, false, JSON.stringify(skills));
-										assert.deepEqual(skills.details?.effectiveArgs, [
+										assert.deepEqual(skillsDetails.effectiveArgs, [
 											"--json",
 											...prefix,
 											"skills",
@@ -1394,16 +1703,18 @@ process.stdout.write(result.stdout || ''); process.stderr.write(result.stderr ||
 												async () => {
 													await keepActiveTab();
 													assert.equal((await direct(["open", url])).exitCode, 0);
-													const intended = JSON.parse(
-														(await direct(["tab", "list"])).stdout,
-													).data.tabs.find((tab: { active: boolean }) => tab.active).tabId;
+													const intended = readString(
+														readRecord((await nativeTabs()).find((tab) => readBoolean(tab.active)))
+															.tabId,
+													);
 													assert.equal(
 														(await direct(["tab", "new", `${url}?other-tab`])).exitCode,
 														0,
 													);
-													const other = JSON.parse(
-														(await direct(["tab", "list"])).stdout,
-													).data.tabs.find((tab: { active: boolean }) => tab.active).tabId;
+													const other = readString(
+														readRecord((await nativeTabs()).find((tab) => readBoolean(tab.active)))
+															.tabId,
+													);
 													assert.equal(
 														(await direct(["fill", "#name-input", "untouched"])).exitCode,
 														0,
@@ -1417,15 +1728,21 @@ process.stdout.write(result.stdout || ''); process.stderr.write(result.stderr ||
 													assert.equal(filled.isError, false, JSON.stringify(filled));
 													assert.equal((await direct(["tab", other])).exitCode, 0);
 													assert.equal(
-														JSON.parse((await direct(["get", "value", "#name-input"])).stdout).data
-															.value,
+														readRecord(
+															readRecord(
+																JSON.parse((await direct(["get", "value", "#name-input"])).stdout),
+															).data,
+														).value,
 														"untouched",
 														"local success must not let a later action mutate the other tab",
 													);
 													assert.equal((await direct(["tab", intended])).exitCode, 0);
 													assert.equal(
-														JSON.parse((await direct(["get", "value", "#name-input"])).stdout).data
-															.value,
+														readRecord(
+															readRecord(
+																JSON.parse((await direct(["get", "value", "#name-input"])).stdout),
+															).data,
+														).value,
 														"intended",
 													);
 												},
@@ -1436,16 +1753,18 @@ process.stdout.write(result.stdout || ''); process.stderr.write(result.stderr ||
 											async () => {
 												await keepActiveTab();
 												assert.equal((await direct(["open", url])).exitCode, 0);
-												const intended = JSON.parse(
-													(await direct(["tab", "list"])).stdout,
-												).data.tabs.find((tab: { active: boolean }) => tab.active).tabId;
+												const intended = readString(
+													readRecord((await nativeTabs()).find((tab) => readBoolean(tab.active)))
+														.tabId,
+												);
 												assert.equal(
 													(await direct(["tab", "new", `${url}?other-tab`])).exitCode,
 													0,
 												);
-												const other = JSON.parse(
-													(await direct(["tab", "list"])).stdout,
-												).data.tabs.find((tab: { active: boolean }) => tab.active).tabId;
+												const other = readString(
+													readRecord((await nativeTabs()).find((tab) => readBoolean(tab.active)))
+														.tabId,
+												);
 												assert.equal(
 													(await direct(["fill", "#name-input", "untouched"])).exitCode,
 													0,
@@ -1464,23 +1783,30 @@ process.stdout.write(result.stdout || ''); process.stderr.write(result.stderr ||
 													],
 													"synthetic-password",
 												);
+												const savedDetails = readRecord(saved.details);
 												assert.equal(saved.isError, false, JSON.stringify(saved));
 												const filled = await call(["fill", "#name-input", "intended"]);
 												assert.equal(filled.isError, false, JSON.stringify(filled));
 												assert.equal((await direct(["tab", other])).exitCode, 0);
 												assert.equal(
-													JSON.parse((await direct(["get", "value", "#name-input"])).stdout).data
-														.value,
+													readRecord(
+														readRecord(
+															JSON.parse((await direct(["get", "value", "#name-input"])).stdout),
+														).data,
+													).value,
 													"untouched",
 													"local auth metadata must not let a later action mutate the other tab",
 												);
 												assert.equal((await direct(["tab", intended])).exitCode, 0);
 												assert.equal(
-													JSON.parse((await direct(["get", "value", "#name-input"])).stdout).data
-														.value,
+													readRecord(
+														readRecord(
+															JSON.parse((await direct(["get", "value", "#name-input"])).stdout),
+														).data,
+													).value,
 													"intended",
 												);
-												assert.equal((saved.details?.sessionTabTarget as { url: string }).url, url);
+												assert.equal(readRecord(savedDetails.sessionTabTarget).url, url);
 											},
 										);
 										await local.test(
@@ -1491,9 +1817,10 @@ process.stdout.write(result.stdout || ''); process.stderr.write(result.stderr ||
 												h = await makeHarness();
 												assert.equal((await call(["skills", "list"])).isError, false);
 												const verified = await call(["get", "url"]);
+												const verifiedDetails = readRecord(verified.details);
 												assert.equal(verified.isError, false, JSON.stringify(verified));
 												assert.equal(
-													(verified.details?.sessionTabTarget as { url: string }).url,
+													readRecord(verifiedDetails.sessionTabTarget).url,
 													`${url}?chosen-page`,
 												);
 												assert.equal(
@@ -1501,8 +1828,11 @@ process.stdout.write(result.stdout || ''); process.stderr.write(result.stderr ||
 													false,
 												);
 												assert.equal(
-													JSON.parse((await direct(["get", "value", "#name-input"])).stdout).data
-														.value,
+													readRecord(
+														readRecord(
+															JSON.parse((await direct(["get", "value", "#name-input"])).stdout),
+														).data,
+													).value,
 													"chosen",
 												);
 											},
@@ -1520,13 +1850,19 @@ process.stdout.write(result.stdout || ''); process.stderr.write(result.stderr ||
 										["batch"],
 										'[["eval","document.body.dataset.wrong=1"]]',
 									);
+									const blockedDetails = readRecord(blocked.details);
 									assert.equal(blocked.isError, true, JSON.stringify(blocked));
-									assert.equal(blocked.details?.failureCategory, "tab-drift");
-									assert.equal(blocked.details?.exitCode, undefined);
+									assert.equal(blockedDetails.failureCategory, "tab-drift");
+									assert.equal(blockedDetails.exitCode, undefined);
 									assert.equal(
-										JSON.parse(
-											(await direct(["eval", "document.body.dataset.wrong || 'untouched'"])).stdout,
-										).data.result,
+										readRecord(
+											readRecord(
+												JSON.parse(
+													(await direct(["eval", "document.body.dataset.wrong || 'untouched'"]))
+														.stdout,
+												),
+											).data,
+										).result,
 										"untouched",
 									);
 									const recovered = await call(
@@ -1541,6 +1877,8 @@ process.stdout.write(result.stdout || ''); process.stderr.write(result.stderr ||
 								});
 							}
 						} finally {
+							// Exhaustive fixture variant ([false, true]): this selected path must satisfy its own contract.
+							// oxlint-disable-next-line node-test/no-conditional-assertion
 							assert.equal((await direct(["close"])).exitCode, 0);
 							for (const extraSession of extraSessions) {
 								await runAgentBrowserProcess({
@@ -1555,6 +1893,7 @@ process.stdout.write(result.stdout || ''); process.stderr.write(result.stderr ||
 			);
 		} finally {
 			await fixture.close();
+			await rm(socketDir, { force: true, recursive: true });
 			await rm(dir, { force: true, recursive: true });
 		}
 	},

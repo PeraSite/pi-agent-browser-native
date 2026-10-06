@@ -1,41 +1,29 @@
 import { isRecord } from "../parsing.js";
+import type { RecordingReceipt } from "./evidence-contracts.js";
 
 const RECORDING_QUALITY_WARNING =
 	"Capture quality warning: repaint-driven capture, held/repeated or static frames, and late/final-state-only frames cannot establish UI smoothness. Output FPS is not captured-frame rate; inspect the recording and capture window before judging motion.";
 
-export interface RecordingReceipt {
-	warning: string;
-	recordingId: string | null;
-	path: string;
-	success: boolean | null;
-	error: string | null;
-	frames: number | null;
-	capturedFrames: number | null;
-	fps: number | null;
-	capture: {
-		startedAt: string | null;
-		endedAt: string | null;
-		durationMs: number | null;
-		firstFrameAt: string | null;
-		lastFrameAt: string | null;
-		firstFrameAfterMs: number | null;
-		lastFrameAfterMs: number | null;
-		averageFps: number | null;
-		maxFrameGapMs: number | null;
-		timestampSource: string | null;
-	};
-	output: {
-		frames: number | null;
-		fps: number | null;
-		encodedFrames: number | null;
-		durationMs: number | null;
-		durationSource: string | null;
-		heldFrames: number | null;
-		droppedFrames: number | null;
-		skippedFrames: number | null;
-		encoderSucceeded: boolean | null;
-	};
-	file: { exists: boolean | null; sizeBytes: number | null };
+export type { RecordingReceipt } from "./evidence-contracts.js";
+
+function getRecordingOutcome(value: unknown, outcome: boolean | undefined): boolean | null {
+	if (typeof value === "boolean" || value === null) {
+		return value;
+	}
+	return outcome ?? null;
+}
+
+function formatRecordingOutcome(receipt: RecordingReceipt): string {
+	let outcome = "pending/unknown";
+	if (receipt.success !== null) {
+		outcome = receipt.success ? "succeeded" : "failed";
+	}
+	const error = receipt.error !== null && receipt.error.length > 0 ? ` — ${receipt.error}` : "";
+	return `Native recording outcome: ${outcome}${error}`;
+}
+
+function recordOrEmpty(value: unknown): Readonly<Record<string, unknown>> {
+	return isRecord(value) ? value : {};
 }
 
 function number(value: unknown): number | null {
@@ -50,22 +38,17 @@ export function getRecordingReceipt(
 	value: unknown,
 	outcome?: boolean,
 ): RecordingReceipt | undefined {
-	if (!isRecord(value) || typeof value.path !== "string" || !value.path) {
+	if (!isRecord(value) || typeof value.path !== "string" || value.path.length === 0) {
 		return undefined;
 	}
-	const capture = isRecord(value.capture) ? value.capture : {};
-	const output = isRecord(value.output) ? value.output : {};
-	const file = isRecord(value.file) ? value.file : {};
+	const capture = recordOrEmpty(value.capture);
+	const output = recordOrEmpty(value.output);
+	const file = recordOrEmpty(value.file);
 	return {
 		warning: RECORDING_QUALITY_WARNING,
 		recordingId: text(value.recordingId),
 		path: value.path,
-		success:
-			typeof value.success === "boolean"
-				? value.success
-				: value.success === null
-					? null
-					: (outcome ?? null),
+		success: getRecordingOutcome(value.success, outcome),
 		error: text(value.error),
 		frames: number(value.frames),
 		capturedFrames: number(value.capturedFrames),
@@ -106,7 +89,7 @@ export function formatRecordingReceipt(receipt: RecordingReceipt): string {
 		value === null ? "unknown" : `${value}${unit}`;
 	return [
 		`Recording ID: ${metric(receipt.recordingId)}`,
-		`Native recording outcome: ${receipt.success === true ? "succeeded" : receipt.success === false ? "failed" : "pending/unknown"}${receipt.error ? ` — ${receipt.error}` : ""}`,
+		formatRecordingOutcome(receipt),
 		`Capture started: ${metric(receipt.capture.startedAt)}; ended: ${metric(receipt.capture.endedAt)}`,
 		`Wall-clock capture duration: ${metric(receipt.capture.durationMs, " ms")}`,
 		`Captured frames (received, not pixel-unique): ${metric(receipt.capturedFrames)}`,

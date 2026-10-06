@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readRecord, readArray, readString } from "./helpers/assertions.js";
 import { execFileSync } from "node:child_process";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -17,17 +18,19 @@ import {
 } from "./helpers/agent-browser-harness.js";
 
 type ResumedPage = {
-	branch: unknown[];
-	harness: ReturnType<typeof createExtensionHarness>;
-	logPath: string;
-	statePath: string;
-	sessionName: string;
-	url: string;
+	readonly branch: readonly unknown[];
+	readonly harness: Readonly<
+		Pick<ReturnType<typeof createExtensionHarness>, "tool" | "ctx" | "setBranch">
+	> & { readonly handlers: Parameters<typeof runExtensionEvent>[0] };
+	readonly logPath: string;
+	readonly statePath: string;
+	readonly sessionName: string;
+	readonly url: string;
 };
 
 async function withResumedPage(
 	run: (page: ResumedPage) => Promise<void>,
-	options: { live?: boolean; confirmActions?: string } = {},
+	options: { readonly live?: boolean; readonly confirmActions?: string } = {},
 ): Promise<void> {
 	const root = await mkdtemp(join(tmpdir(), "cold-"));
 	const socketDir = createShortPrivateSocketDir(root);
@@ -94,6 +97,8 @@ process.stdout.write(JSON.stringify({ success: true, data }));`,
 					[...prefix, "open", url],
 					[...prefix, "snapshot", "-i"],
 				]) {
+					// The snapshot must observe the preceding open and its persisted session identity.
+					// oxlint-disable-next-line no-await-in-loop
 					const result = await executeRegisteredTool(first.tool, first.ctx, {
 						args:
 							args.includes("open") && options.confirmActions !== undefined
@@ -102,16 +107,18 @@ process.stdout.write(JSON.stringify({ success: true, data }));`,
 						...(args.includes("open") ? { sessionMode: "fresh" as const } : {}),
 					});
 					assert.equal(result.isError, false, result.content[0]?.text);
-					if (!sessionName) {
-						assert.equal(typeof result.details?.sessionName, "string");
-						sessionName = String(result.details?.sessionName);
+					if (sessionName.length === 0) {
+						assert.equal(typeof readRecord(result.details).sessionName, "string");
+						sessionName = readString(readRecord(result.details).sessionName);
 					}
-					branch.push(createToolBranchEntry({ details: result.details!, isError: result.isError }));
+					branch.push(
+						createToolBranchEntry({ details: readRecord(result.details), isError: result.isError }),
+					);
 				}
 				await runExtensionEvent(
 					first.handlers,
 					"session_shutdown",
-					{ reason: options.live ? "reload" : "quit" },
+					{ reason: options.live === true ? "reload" : "quit" },
 					first.ctx,
 				);
 				branch = structuredClone(first.ctx.sessionManager.getBranch());
@@ -162,12 +169,12 @@ for (const params of [
 					executeRegisteredTool(harness.tool, harness.ctx, params),
 				);
 				assert.equal(result.isError, false, result.content[0]?.text);
-				assert.equal(result.details?.sessionName, sessionName);
-				assert.equal(result.details?.namespace, "cold");
-				assert.equal((result.details?.sessionTabTarget as { url?: string }).url, url);
-				assert.equal(result.details?.refSnapshot, undefined);
+				assert.equal(readRecord(result.details).sessionName, sessionName);
+				assert.equal(readRecord(result.details).namespace, "cold");
+				assert.equal(readRecord(readRecord(result.details).sessionTabTarget).url, url);
+				assert.equal(readRecord(result.details).refSnapshot, undefined);
 				assert.equal(
-					(result.details?.refSnapshotInvalidation as { reason?: string } | undefined)?.reason,
+					readRecord(readRecord(result.details).refSnapshotInvalidation).reason,
 					"page-transition",
 				);
 				const stale = await executeRegisteredTool(harness.tool, harness.ctx, {
@@ -225,6 +232,8 @@ test(
 			{ args: ["session", "list"] },
 			{ args: ["--version"] },
 		]) {
+			// Each subtest owns a process-global environment and must complete cleanup before the next.
+			// oxlint-disable-next-line no-await-in-loop
 			await t.test(JSON.stringify(params), async () =>
 				withResumedPage(async ({ harness, logPath, statePath, url }) => {
 					const result = await executeRegisteredTool(harness.tool, harness.ctx, params);
@@ -237,8 +246,10 @@ test(
 						"the old URL must not be opened ahead of explicit intent",
 					);
 					if (["read", "session", "--version"].includes(params.args?.[0] ?? "")) {
+						// The explicitly sessionless fixture variants must stay closed; all variants assert success above.
+						// oxlint-disable-next-line node-test/no-conditional-assertion
 						assert.equal(
-							JSON.parse(await readFile(statePath, "utf8")).active,
+							readRecord(JSON.parse(await readFile(statePath, "utf8"))).active,
 							false,
 							"a sessionless or explicit HTTP read must not launch a browser",
 						);
@@ -254,7 +265,7 @@ test(
 	{ concurrency: false },
 	async () => {
 		await withResumedPage(async ({ harness, logPath, statePath }) => {
-			const state = JSON.parse(await readFile(statePath, "utf8"));
+			const state = readRecord(JSON.parse(await readFile(statePath, "utf8")));
 			await writeFile(
 				statePath,
 				JSON.stringify({ ...state, redirectUrl: "http://127.0.0.1:43210/unexpected" }),
@@ -263,11 +274,11 @@ test(
 				args: ["get", "title"],
 			});
 			assert.equal(result.isError, true);
-			assert.equal(result.details?.resultCategory, "failure");
-			assert.equal(result.details?.failureCategory, "tab-drift");
-			assert.equal(result.details?.data, undefined);
+			assert.equal(readRecord(result.details).resultCategory, "failure");
+			assert.equal(readRecord(result.details).failureCategory, "tab-drift");
+			assert.equal(readRecord(result.details).data, undefined);
 			assert.equal(
-				(result.details?.refSnapshotInvalidation as { reason?: string } | undefined)?.reason,
+				readRecord(readRecord(result.details).refSnapshotInvalidation).reason,
 				"page-transition",
 			);
 			harness.setBranch(harness.ctx.sessionManager.getBranch().slice());
@@ -303,7 +314,7 @@ test(
 				await writeFile(
 					statePath,
 					JSON.stringify({
-						...JSON.parse(await readFile(statePath, "utf8")),
+						...readRecord(JSON.parse(await readFile(statePath, "utf8"))),
 						requireConfirmation: true,
 					}),
 				);
@@ -311,25 +322,26 @@ test(
 					args: ["get", "title"],
 				});
 				assert.equal(
-					pending.details?.failureCategory,
+					readRecord(pending.details).failureCategory,
 					"confirmation-required",
 					pending.content[0]?.text,
 				);
 				assert.equal(
-					pending.details?.agentBrowserStarted,
+					readRecord(pending.details).agentBrowserStarted,
 					false,
 					"the requested getter did not dispatch",
 				);
-				assert.equal(pending.details?.sessionTabTargetUnknown, true);
+				assert.equal(readRecord(pending.details).sessionTabTargetUnknown, true);
 				assert.notEqual(
-					pending.details?.sessionTabReopenPending,
+					readRecord(pending.details).sessionTabReopenPending,
 					true,
 					"the started reopen is consumed, not silently replayed",
 				);
-				const approval = (
-					pending.details?.nextActions as Array<{ id: string; params: { args: string[] } }>
-				).find((action) => action.id === "approve-confirmation");
-				assert.deepEqual(approval?.params.args, [
+				const approval = readArray(readRecord(pending.details).nextActions)
+					.map(readRecord)
+					.find((action) => action.id === "approve-confirmation");
+				assert.ok(approval);
+				assert.deepEqual(readRecord(approval.params).args, [
 					"--namespace",
 					"cold",
 					"--session",
@@ -340,17 +352,19 @@ test(
 				harness.setBranch(harness.ctx.sessionManager.getBranch().slice());
 				await runExtensionEvent(harness.handlers, "session_tree", {}, harness.ctx);
 				await writeFile(logPath, "");
-				const confirmed = await executeRegisteredTool(harness.tool, harness.ctx, approval!.params);
+				const confirmed = await executeRegisteredTool(harness.tool, harness.ctx, {
+					args: readArray(readRecord(approval.params).args).map(readString),
+				});
 				assert.equal(confirmed.isError, false, confirmed.content[0]?.text);
 				const title = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: ["get", "title"],
 				});
 				assert.equal(title.isError, false, title.content[0]?.text);
-				assert.equal((title.details?.sessionTabTarget as { url: string }).url, url);
+				assert.equal(readRecord(title.details?.sessionTabTarget).url, url);
 				const calls = await readInvocationLog(logPath);
-				const browserCalls = calls.filter((call) => !call.args.includes("session"));
+				const firstBrowserCall = calls.find((call) => !call.args.includes("session"));
 				assert.equal(
-					browserCalls[0]?.args.at(-2),
+					firstBrowserCall?.args.at(-2),
 					"confirm",
 					"no pre-confirm page helper can overwrite the native slot",
 				);
@@ -367,14 +381,14 @@ test(
 test("a live missing tab is not permission to reopen", { concurrency: false }, async () => {
 	await withResumedPage(
 		async ({ harness, logPath, statePath }) => {
-			const state = JSON.parse(await readFile(statePath, "utf8"));
+			const state = readRecord(JSON.parse(await readFile(statePath, "utf8")));
 			assert.equal(state.active, true);
 			await writeFile(statePath, JSON.stringify({ ...state, url: "http://127.0.0.1:43210/other" }));
 			const result = await executeRegisteredTool(harness.tool, harness.ctx, {
 				args: ["snapshot", "-i"],
 			});
 			assert.equal(result.isError, true);
-			assert.equal(result.details?.failureCategory, "tab-drift");
+			assert.equal(readRecord(result.details).failureCategory, "tab-drift");
 			assert.equal(
 				(await readInvocationLog(logPath)).some(
 					(row) => row.args.includes("open") || row.args.includes("snapshot"),
@@ -395,8 +409,10 @@ test(
 				args: ["--namespace", "cold", "--session", sessionName, "close"],
 			});
 			assert.equal(closed.isError, false, closed.content[0]?.text);
-			branch.push(createToolBranchEntry({ details: closed.details!, isError: false }));
-			harness.setBranch(branch);
+			harness.setBranch([
+				...branch,
+				createToolBranchEntry({ details: readRecord(closed.details), isError: false }),
+			]);
 			await runExtensionEvent(harness.handlers, "session_tree", {}, harness.ctx);
 			const read = await executeRegisteredTool(harness.tool, harness.ctx, { args: ["get", "url"] });
 			assert.equal(read.isError, false, read.content[0]?.text);

@@ -52,6 +52,17 @@ Safety:
 `;
 }
 
+function parseSampleCount(value) {
+	if (!value || value.startsWith("-")) {
+		throw new UsageError("--samples requires a positive integer.");
+	}
+	const parsed = Number(value);
+	if (!Number.isInteger(parsed) || parsed <= 0) {
+		throw new UsageError("--samples requires a positive integer.");
+	}
+	return parsed;
+}
+
 function parseArgs(argv = process.argv.slice(2)) {
 	const options = { json: false, samples: DEFAULT_SAMPLES, showHelp: false };
 	for (let index = 0; index < argv.length; index += 1) {
@@ -64,15 +75,7 @@ function parseArgs(argv = process.argv.slice(2)) {
 			continue;
 		}
 		if (arg === "--samples") {
-			const value = argv[index + 1];
-			if (!value || value.startsWith("-")) {
-				throw new UsageError("--samples requires a positive integer.");
-			}
-			const parsed = Number(value);
-			if (!Number.isInteger(parsed) || parsed <= 0) {
-				throw new UsageError("--samples requires a positive integer.");
-			}
-			options.samples = parsed;
+			options.samples = parseSampleCount(argv[index + 1]);
 			index += 1;
 			continue;
 		}
@@ -106,8 +109,11 @@ async function readPackageEntrypoint() {
 async function measureDirectImportSamples(entrypoint, sampleCount) {
 	const samples = [];
 	for (let index = 0; index < sampleCount; index += 1) {
+		// Cold startup measurements must not compete for CPU with other samples.
+		// oxlint-disable-next-line no-await-in-loop
+		const sample = await measureColdStartup(entrypoint, repoRoot);
 		samples.push({
-			...(await measureColdStartup(entrypoint, repoRoot)),
+			...sample,
 			sampleIndex: index + 1,
 			ok: true,
 		});
@@ -195,15 +201,14 @@ async function main(argv = process.argv.slice(2)) {
 }
 
 if (import.meta.main) {
-	main().then(
-		(code) => {
+	main()
+		.then((code) => {
 			process.exitCode = code;
-		},
-		(error) => {
+		})
+		.catch((error) => {
 			console.error(error instanceof Error ? error.message : String(error));
 			process.exitCode = error instanceof UsageError ? 2 : 1;
-		},
-	);
+		});
 }
 
 export { parseArgs, summarize };

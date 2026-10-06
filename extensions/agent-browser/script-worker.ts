@@ -14,14 +14,15 @@ const maxCumulativeBytes = parseLimit(process.argv[3], "script IPC cumulative li
 let cumulativeBytes = 0;
 let inputBuffer = Buffer.alloc(0);
 let started = false;
-const sandbox: Record<string, unknown> = Object.create(null);
+const sandbox: Record<string, unknown> = {};
+Object.setPrototypeOf(sandbox, null);
 const context = createContext(sandbox, {
 	codeGeneration: { strings: false, wasm: false },
 	name: "agent-browser-script",
 });
 const bridgeKey = `__piab_send_${randomBytes(16).toString("hex")}`;
 const stateName = `__piab_state_${randomBytes(16).toString("hex")}`;
-const hostSend = (json: string): boolean => {
+const hostSend = (json: unknown): boolean => {
 	if (typeof json !== "string") {
 		return false;
 	}
@@ -59,7 +60,7 @@ runInContext(
 		"  let nextId = 0;\n" +
 		"  const encode = (value) => { const json = JSON.stringify(value); if (typeof json !== 'string') throw new TypeError('Value must be JSON-serializable.'); return json; };\n" +
 		"  const sendValue = (value) => { const json = encode(value); if (json.length + 1 > " +
-		maxMessageBytes +
+		String(maxMessageBytes) +
 		" || send(json) !== true) throw new RangeError('Script IPC limit exceeded.'); };\n" +
 		"  const browser = function browser(params) {\n" +
 		"    return new NativePromise((resolve, reject) => {\n" +
@@ -106,26 +107,74 @@ runInContext(
 	context,
 	{ timeout: 1_000 },
 );
-const deliver = runInContext(`${stateName}.deliver`, context, { timeout: 1_000 }) as (
-	json: string,
-) => void;
+const deliver: unknown = runInContext(`${stateName}.deliver`, context, { timeout: 1_000 });
+if (typeof deliver !== "function") {
+	throw new Error("Script response bridge was not initialized.");
+}
 
 function fail(name: string, message: string): void {
 	hostSend(JSON.stringify({ type: "complete", error: { name, message } }));
 }
 
 function describeError(error: unknown, fallback: string): { message: string; name: string } {
-	if (!error || typeof error !== "object") {
+	if (error === null || typeof error !== "object") {
 		return { message: fallback, name: "Error" };
 	}
-	const candidate = error as { message?: unknown; name?: unknown };
+	const message = "message" in error ? error.message : undefined;
+	const name = "name" in error ? error.name : undefined;
 	return {
 		message:
-			typeof candidate.message === "string"
-				? candidate.message.replace(/[\r\n]+/g, " ").slice(0, 400)
-				: fallback,
-		name: typeof candidate.name === "string" ? candidate.name.slice(0, 80) : "Error",
+			typeof message === "string" ? message.replace(/[\r\n]+/g, " ").slice(0, 400) : fallback,
+		name: typeof name === "string" ? name.slice(0, 80) : "Error",
 	};
+}
+
+function startScript(message: unknown): void {
+	if (
+		message === null ||
+		typeof message !== "object" ||
+		!("type" in message) ||
+		message.type !== "start" ||
+		!("code" in message) ||
+		typeof message.code !== "string"
+	) {
+		fail("Error", "Invalid script start message.");
+		return;
+	}
+	started = true;
+	try {
+		const source = `'use strict';\n${stateName}.run(async function () {\n'use strict';\n${message.code}\n});`;
+		const script = new Script(source, {
+			filename: "agent-browser-script.js",
+			importModuleDynamically() {
+				process.exit(70);
+			},
+		});
+		script.runInContext(context);
+	} catch (error) {
+		const described = describeError(error, "Script compilation failed.");
+		fail(described.name, described.message);
+	}
+}
+
+function deliverBrowserResponse(message: unknown, line: string): void {
+	if (
+		message === null ||
+		typeof message !== "object" ||
+		!("type" in message) ||
+		message.type !== "response"
+	) {
+		fail("Error", "Invalid parent IPC response.");
+		return;
+	}
+	try {
+		if (typeof deliver !== "function") {
+			throw new Error("Script response bridge is unavailable.");
+		}
+		Reflect.apply(deliver, undefined, [line]);
+	} catch {
+		fail("Error", "Invalid browser response envelope.");
+	}
 }
 
 function handleLine(line: string): void {
@@ -143,44 +192,10 @@ function handleLine(line: string): void {
 		return;
 	}
 	if (!started) {
-		if (
-			!message ||
-			typeof message !== "object" ||
-			(message as { type?: unknown }).type !== "start" ||
-			typeof (message as { code?: unknown }).code !== "string"
-		) {
-			fail("Error", "Invalid script start message.");
-			return;
-		}
-		started = true;
-		try {
-			const source = `'use strict';\n${stateName}.run(async function () {\n'use strict';\n${(message as { code: string }).code}\n});`;
-			const script = new Script(source, {
-				filename: "agent-browser-script.js",
-				importModuleDynamically() {
-					process.exit(70);
-				},
-			});
-			script.runInContext(context, { timeout: undefined });
-		} catch (error) {
-			const described = describeError(error, "Script compilation failed.");
-			fail(described.name, described.message);
-		}
+		startScript(message);
 		return;
 	}
-	if (
-		!message ||
-		typeof message !== "object" ||
-		(message as { type?: unknown }).type !== "response"
-	) {
-		fail("Error", "Invalid parent IPC response.");
-		return;
-	}
-	try {
-		deliver(line);
-	} catch {
-		fail("Error", "Invalid browser response envelope.");
-	}
+	deliverBrowserResponse(message, line);
 }
 
 process.stdin.on("data", (rawChunk) => {
@@ -201,5 +216,7 @@ process.stdin.on("data", (rawChunk) => {
 		handleLine(line);
 	}
 });
-process.stdin.on("error", () => undefined);
+process.stdin.on("error", () => {
+	// Parent transport teardown is handled by the parent's worker lifecycle owner.
+});
 hostSend(JSON.stringify({ type: "ready" }));

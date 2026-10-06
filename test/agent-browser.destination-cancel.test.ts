@@ -18,6 +18,13 @@ import {
 	withPatchedEnv,
 	writeFakeAgentBrowserBinary,
 } from "./helpers/agent-browser-harness.js";
+import {
+	readRecord,
+	readArray,
+	readString,
+	readBoolean,
+	hasErrorCode,
+} from "./helpers/assertions.js";
 
 const rememberedUrl = "http://127.0.0.1:43210/remembered/page#/report";
 const requestedUrl = "http://127.0.0.1:43210/redirect";
@@ -29,26 +36,30 @@ const destinations = [
 ];
 
 type BrowserState = {
-	active: boolean;
-	pages: Array<{ tabId: string; title: string; url: string }>;
-	selected: string;
+	readonly active: boolean;
+	readonly pages: readonly {
+		readonly tabId: string;
+		readonly title: string;
+		readonly url: string;
+	}[];
+	readonly selected: string;
 };
 type Page = {
-	call: (
+	readonly call: (
 		params: AgentBrowserToolParams,
 		signal?: AbortSignal,
 	) => ReturnType<typeof executeRegisteredTool>;
-	calls: () => ReturnType<typeof readInvocationLog>;
-	marker: string;
-	patch: (patch: Record<string, unknown>) => Promise<void>;
-	reload: () => Promise<void>;
-	sessionName: string;
-	state: () => Promise<BrowserState>;
+	readonly calls: () => ReturnType<typeof readInvocationLog>;
+	readonly marker: string;
+	readonly patch: (patch: Readonly<Record<string, unknown>>) => Promise<void>;
+	readonly reload: () => Promise<void>;
+	readonly sessionName: string;
+	readonly state: () => Promise<BrowserState>;
 };
 
 async function withPage(
 	run: (page: Page) => Promise<void>,
-	options: { cold?: boolean; callerOwned?: boolean } = {},
+	options: { readonly cold?: boolean; readonly callerOwned?: boolean } = {},
 ): Promise<void> {
 	const root = await mkdtemp(join(tmpdir(), "dc-"));
 	const socketDir = createShortPrivateSocketDir(root);
@@ -152,7 +163,7 @@ save(); process.stdout.write(JSON.stringify(output)); process.exitCode = failed 
 						result = await executeRegisteredTool(
 							harness.tool,
 							harness.ctx,
-							options.callerOwned
+							options.callerOwned === true
 								? {
 										...params,
 										args: ["--namespace", namespace, "--session", "caller", ...(params.args ?? [])],
@@ -163,7 +174,12 @@ save(); process.stdout.write(JSON.stringify(output)); process.exitCode = failed 
 					} catch (error) {
 						// Pi 0.84 persists empty details when execute throws; replay must see that same failure, not invented metadata.
 						result = {
-							content: [{ type: "text", text: String(error) }],
+							content: [
+								{
+									type: "text",
+									text: error instanceof Error ? error.toString() : readString(error),
+								},
+							],
 							details: {},
 							isError: true,
 						};
@@ -186,14 +202,18 @@ save(); process.stdout.write(JSON.stringify(output)); process.exitCode = failed 
 				};
 				await runExtensionEvent(harness.handlers, "session_start", { reason: "new" }, harness.ctx);
 				const opened = await call({
-					args: [...(options.callerOwned ? [] : ["--namespace", namespace]), "open", rememberedUrl],
+					args: [
+						...(options.callerOwned === true ? [] : ["--namespace", namespace]),
+						"open",
+						rememberedUrl,
+					],
 					sessionMode: "fresh",
 				});
-				assert.equal(opened.isError, false, opened.content[0]?.text);
+				assert.equal(opened.isError, false, opened.content[0].text);
 				assert.equal(typeof opened.details?.sessionName, "string");
 				const snapshot = await call({ args: ["snapshot", "-i"] });
-				assert.equal(snapshot.isError, false, snapshot.content[0]?.text);
-				await restore(options.cold ? "quit" : "reload");
+				assert.equal(snapshot.isError, false, snapshot.content[0].text);
+				await restore(options.cold === true ? "quit" : "reload");
 				await writeFile(logPath, "");
 				try {
 					await run({
@@ -203,11 +223,28 @@ save(); process.stdout.write(JSON.stringify(output)); process.exitCode = failed 
 						patch: async (patch) =>
 							writeFile(
 								statePath,
-								JSON.stringify({ ...JSON.parse(await readFile(statePath, "utf8")), ...patch }),
+								JSON.stringify({
+									...readRecord(JSON.parse(await readFile(statePath, "utf8"))),
+									...patch,
+								}),
 							),
 						reload: () => restore("reload"),
-						sessionName: opened.details!.sessionName as string,
-						state: async () => JSON.parse(await readFile(statePath, "utf8")),
+						sessionName: readString(readRecord(opened.details).sessionName),
+						state: async () => {
+							const state = readRecord(JSON.parse(await readFile(statePath, "utf8")));
+							return {
+								active: readBoolean(state.active),
+								selected: readString(state.selected),
+								pages: readArray(state.pages).map((value) => {
+									const page = readRecord(value);
+									return {
+										tabId: readString(page.tabId),
+										title: readString(page.title),
+										url: readString(page.url),
+									};
+								}),
+							};
+						},
 					});
 				} finally {
 					await runExtensionEvent(
@@ -235,25 +272,25 @@ for (const command of destinations) {
 					const args = batch ? ["batch"] : command;
 					const stdin = batch ? JSON.stringify([command]) : undefined;
 					const changed = await page.call({ args, stdin });
-					assert.equal(changed.isError, false, changed.content[0]?.text);
+					assert.equal(changed.isError, false, changed.content[0].text);
 					const stale = await page.call({ args: ["get", "value", "@e1"] });
 					await page.reload();
 					const snapshot = await page.call({ args: ["snapshot", "-i"] });
 					const expected = command[0] === "window" ? "about:blank" : redirectedUrl;
-					assert.equal(snapshot.isError, false, snapshot.content[0]?.text);
+					assert.equal(snapshot.isError, false, snapshot.content[0].text);
 					assert.equal(
-						(snapshot.details?.data as { origin: string }).origin,
+						readRecord(snapshot.details?.data).origin,
 						expected,
 						"follow-up must not reselect the remembered page",
 					);
-					assert.equal((changed.details?.sessionTabTarget as { url: string }).url, expected);
+					assert.equal(readRecord(changed.details?.sessionTabTarget).url, expected);
 					assert.equal(changed.details?.aboutBlankSessionMismatch, undefined);
 					assert.equal(
-						(changed.details?.refSnapshotInvalidation as { reason: string }).reason,
+						readRecord(changed.details?.refSnapshotInvalidation).reason,
 						"page-transition",
 					);
 					assert.equal(stale.details?.failureCategory, "stale-ref");
-					const refs = snapshot.details?.refSnapshot as { refIds: string[] };
+					const refs = readRecord(snapshot.details?.refSnapshot);
 					assert.deepEqual(refs.refIds, command[0] === "window" ? [] : ["e2"]);
 					assert.equal(
 						(await page.calls()).some((row) => row.args.includes("value")),
@@ -261,6 +298,8 @@ for (const command of destinations) {
 						"old refs must be rejected before dispatch",
 					);
 					if (command[0] === "diff") {
+						// This enumerated fixture branch (command[0] === "diff") has variant-specific assertions; common assertions cover every case.
+						// oxlint-disable-next-line node-test/no-conditional-assertion
 						assert.equal((await page.call({ args: ["get", "value", "@e2"] })).isError, false);
 					}
 					const calls = await page.calls();
@@ -280,9 +319,13 @@ for (const command of destinations) {
 					assert.equal(dispatched.length, 1);
 					assert.deepEqual(extractUpstreamCommandTokens(dispatched[0].args), args);
 					if (batch) {
+						// This enumerated fixture branch (batch) has variant-specific assertions; common assertions cover every case.
+						// oxlint-disable-next-line node-test/no-conditional-assertion
 						assert.equal(dispatched[0].stdin, stdin);
 					}
 					if (command[0] === "window") {
+						// This enumerated fixture branch (command[0] === "window") has variant-specific assertions; common assertions cover every case.
+						// oxlint-disable-next-line node-test/no-conditional-assertion
 						assert.equal(
 							(await page.state()).pages[0].url,
 							rememberedUrl,
@@ -313,14 +356,14 @@ for (const command of destinations) {
 					);
 					assert.equal(result.isError, true);
 					const expected = command[0] === "window" ? "about:blank" : firstUrl;
-					assert.equal((result.details?.sessionTabTarget as { url: string })?.url, expected);
+					assert.equal(readRecord(result.details?.sessionTabTarget).url, expected);
 					assert.equal(
-						(result.details?.refSnapshotInvalidation as { reason: string })?.reason,
+						readRecord(result.details?.refSnapshotInvalidation).reason,
 						"page-transition",
 					);
 					const snapshot = await page.call({ args: ["snapshot", "-i"] });
-					assert.equal(snapshot.isError, false, snapshot.content[0]?.text);
-					assert.equal((snapshot.details?.data as { origin: string }).origin, expected);
+					assert.equal(snapshot.isError, false, snapshot.content[0].text);
+					assert.equal(readRecord(snapshot.details?.data).origin, expected);
 					assert.equal(
 						(await page.calls()).some(
 							(row) => extractUpstreamCommandTokens(row.args)[0] === "open",
@@ -339,10 +382,11 @@ for (const command of destinations) {
 				await withPage(async (page) => {
 					const args = ["batch", ...(bail ? ["--bail"] : [])];
 					const planned = [["console", "--clear"], ["not-a-command"], command];
+					const destinationUrl = command[0] === "window" ? "about:blank" : redirectedUrl;
 					const stdin = JSON.stringify(planned);
 					const result = await page.call({ args, stdin });
 					assert.equal(result.isError, true);
-					const rows = result.details?.batchSteps as Array<{ command: string[]; success: boolean }>;
+					const rows = readArray(result.details?.batchSteps).map(readRecord);
 					assert.deepEqual(
 						rows.map((row) => row.command),
 						bail ? planned.slice(0, 2) : planned,
@@ -352,10 +396,10 @@ for (const command of destinations) {
 						bail ? [true, false] : [true, false, true],
 					);
 					const snapshot = await page.call({ args: ["snapshot", "-i"] });
-					assert.equal(snapshot.isError, false, snapshot.content[0]?.text);
+					assert.equal(snapshot.isError, false, snapshot.content[0].text);
 					assert.equal(
-						(snapshot.details?.data as { origin: string }).origin,
-						bail ? rememberedUrl : command[0] === "window" ? "about:blank" : redirectedUrl,
+						readRecord(snapshot.details?.data).origin,
+						bail ? rememberedUrl : destinationUrl,
 					);
 					const batches = (await page.calls()).filter(
 						(row) => extractUpstreamCommandTokens(row.args)[0] === "batch",
@@ -364,6 +408,8 @@ for (const command of destinations) {
 					assert.deepEqual(extractUpstreamCommandTokens(batches[0].args), args);
 					assert.equal(batches[0].stdin, stdin);
 					if (bail) {
+						// This enumerated fixture branch (bail) has variant-specific assertions; common assertions cover every case.
+						// oxlint-disable-next-line node-test/no-conditional-assertion
 						assert.equal(
 							result.details?.refSnapshotInvalidation,
 							undefined,
@@ -383,7 +429,9 @@ for (const command of destinations) {
 				const result = await page.call({ args: ["batch"], stdin });
 				assert.equal(result.isError, true, "the native trailing error must still fail the call");
 				assert.deepEqual(
-					(result.details?.batchSteps as Array<{ success: boolean }>).map((row) => row.success),
+					readArray(result.details?.batchSteps)
+						.map(readRecord)
+						.map((row) => row.success),
 					[true, true, false],
 				);
 				assert.equal(
@@ -392,7 +440,7 @@ for (const command of destinations) {
 					"the later fresh snapshot clears the transition invalidation",
 				);
 				assert.equal(
-					(result.details?.refSnapshot as { target: { url: string } }).target.url,
+					readRecord(readRecord(result.details?.refSnapshot).target).url,
 					command[0] === "window" ? "about:blank" : redirectedUrl,
 				);
 				const batches = (await page.calls()).filter(
@@ -414,10 +462,10 @@ for (const command of destinations) {
 					args: ["batch"],
 					stdin: JSON.stringify([["snapshot", "-i"], command]),
 				});
-				assert.equal(result.isError, false, result.content[0]?.text);
+				assert.equal(result.isError, false, result.content[0].text);
 				assert.equal(result.details?.sessionTabTarget, undefined);
 				assert.equal(result.details?.sessionTabTargetUnknown, true);
-				assert.equal(result.details?.refSnapshot, undefined);
+				assert.equal(result.details.refSnapshot, undefined);
 				await page.reload();
 				const guarded = await page.call({ args: ["snapshot", "-i"] });
 				assert.equal(
@@ -428,9 +476,9 @@ for (const command of destinations) {
 				await page.patch({ failUrlProbe: false });
 				assert.equal((await page.call({ args: ["get", "url"] })).isError, false);
 				const snapshot = await page.call({ args: ["snapshot", "-i"] });
-				assert.equal(snapshot.isError, false, snapshot.content[0]?.text);
+				assert.equal(snapshot.isError, false, snapshot.content[0].text);
 				assert.equal(
-					(snapshot.details?.data as { origin: string }).origin,
+					readRecord(snapshot.details?.data).origin,
 					command[0] === "window" ? "about:blank" : redirectedUrl,
 				);
 			});
@@ -474,11 +522,11 @@ for (const batch of [false, true]) {
 						? { args: ["batch"], stdin: JSON.stringify([destinations[1]]) }
 						: { args: destinations[1] },
 				);
-				assert.equal(result.isError, false, result.content[0]?.text);
+				assert.equal(result.isError, false, result.content[0].text);
 				const snapshot = await page.call({ args: ["snapshot", "-i"] });
-				assert.equal(snapshot.isError, false, snapshot.content[0]?.text);
-				assert.equal((snapshot.details?.data as { origin: string }).origin, "about:blank");
-				assert.equal((result.details?.sessionTabTarget as { url: string }).url, "about:blank");
+				assert.equal(snapshot.isError, false, snapshot.content[0].text);
+				assert.equal(readRecord(snapshot.details?.data).origin, "about:blank");
+				assert.equal(readRecord(result.details?.sessionTabTarget).url, "about:blank");
 				assert.equal(result.details?.aboutBlankSessionMismatch, undefined);
 				assert.equal((await page.state()).selected, "t2");
 				assert.equal(
@@ -501,15 +549,17 @@ test(
 				const args = ["batch", `diff url ${rememberedUrl} ${requestedUrl}`];
 				const stdin = JSON.stringify([["window", "new"]]);
 				const result = await page.call({ args, stdin });
-				assert.equal(result.isError, false, result.content[0]?.text);
-				assert.equal((result.details?.sessionTabTarget as { url: string }).url, redirectedUrl);
+				assert.equal(result.isError, false, result.content[0].text);
+				assert.equal(readRecord(result.details?.sessionTabTarget).url, redirectedUrl);
 				assert.equal((await page.state()).pages.length, 1);
 				const batch = (await page.calls()).find((row) => row.args.includes("batch"));
 				assert.ok(batch);
 				assert.deepEqual(batch.args.slice(-args.length), args);
 				assert.equal(batch.stdin, stdin);
 				assert.deepEqual(
-					(result.details?.batchSteps as Array<{ command: string[] }>).map((row) => row.command),
+					readArray(result.details?.batchSteps)
+						.map(readRecord)
+						.map((row) => row.command),
 					[destinations[1]],
 				);
 			},
@@ -537,8 +587,8 @@ test(
 					false,
 				);
 				const snapshot = await page.call({ args: ["snapshot", "-i"] });
-				assert.equal(snapshot.isError, false, snapshot.content[0]?.text);
-				assert.equal((snapshot.details?.data as { origin: string }).origin, rememberedUrl);
+				assert.equal(snapshot.isError, false, snapshot.content[0].text);
+				assert.equal(readRecord(snapshot.details?.data).origin, rememberedUrl);
 				await page.reload();
 				assert.equal((await page.call({ args: ["snapshot", "-i"] })).isError, false);
 				assert.deepEqual(
@@ -568,19 +618,25 @@ test(
 				let aborted: Awaited<ReturnType<Page["call"]>>;
 				try {
 					const deadline = Date.now() + 5000;
-					while (!pid) {
+					while (pid === 0 || Number.isNaN(pid)) {
 						try {
+							// Observe the current fixture receipt before deciding whether the next poll or state transition may proceed.
+							// oxlint-disable-next-line no-await-in-loop
 							pid = Number(await readFile(page.marker, "utf8"));
 						} catch (error) {
-							if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+							if (!hasErrorCode(error, "ENOENT")) {
 								throw error;
 							}
 						}
+						// The cancellation fixture starts with no PID; every receipt poll must meet the original deadline before abort.
+						// oxlint-disable-next-line node-test/no-conditional-assertion
 						assert.ok(
 							Date.now() < deadline,
 							"cold open must reach its native navigation before cancellation",
 						);
-						if (!pid) {
+						if (pid === 0 || Number.isNaN(pid)) {
+							// Wait between receipt polls so the fixture process can advance before the next observation.
+							// oxlint-disable-next-line no-await-in-loop
 							await delay(5);
 						}
 					}
@@ -588,6 +644,7 @@ test(
 					controller.abort(new Error("cancel after native cold navigation"));
 					aborted = await pending;
 				}
+				const abortedDetails = readRecord(aborted.details);
 				assert.throws(
 					() => process.kill(pid, 0),
 					{ code: "ESRCH" },
@@ -597,27 +654,27 @@ test(
 				assert.equal(state.active, true, "native navigation may finish while the CLI is aborted");
 				assert.equal(state.pages.find((tab) => tab.tabId === state.selected)?.url, rememberedUrl);
 				assert.deepEqual(
-					extractUpstreamCommandTokens((await page.calls()).at(-1)!.args),
+					extractUpstreamCommandTokens(
+						readArray(readRecord((await page.calls()).at(-1)).args).map(readString),
+					),
 					["open", rememberedUrl],
 					"no browser helper or main command may run after cancellation",
 				);
 				await page.reload();
 				const snapshot = await page.call({ args: ["snapshot", "-i"] });
-				assert.equal(snapshot.isError, false, snapshot.content[0]?.text);
-				assert.equal((snapshot.details?.data as { origin: string }).origin, rememberedUrl);
+				assert.equal(snapshot.isError, false, snapshot.content[0].text);
+				assert.equal(readRecord(snapshot.details?.data).origin, rememberedUrl);
 				assert.deepEqual(
 					{
 						isError: aborted.isError,
-						aborted: aborted.details?.aborted,
-						resultCategory: aborted.details?.resultCategory,
-						failureCategory: aborted.details?.failureCategory,
-						sessionName: aborted.details?.sessionName,
-						namespace: aborted.details?.namespace,
-						usedImplicitSession: aborted.details?.usedImplicitSession,
-						sessionTabReopenPending: aborted.details?.sessionTabReopenPending,
-						refInvalidation: (
-							aborted.details?.refSnapshotInvalidation as { reason?: string } | undefined
-						)?.reason,
+						aborted: abortedDetails.aborted,
+						resultCategory: abortedDetails.resultCategory,
+						failureCategory: abortedDetails.failureCategory,
+						sessionName: abortedDetails.sessionName,
+						namespace: abortedDetails.namespace,
+						usedImplicitSession: abortedDetails.usedImplicitSession,
+						sessionTabReopenPending: abortedDetails.sessionTabReopenPending,
+						refInvalidation: readRecord(abortedDetails.refSnapshotInvalidation).reason,
 						openAttempts: (await page.calls()).filter(
 							(row) => extractUpstreamCommandTokens(row.args)[0] === "open",
 						).length,

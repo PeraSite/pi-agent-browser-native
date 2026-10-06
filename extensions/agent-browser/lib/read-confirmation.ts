@@ -7,76 +7,20 @@ import {
 } from "./argv-grammar.js";
 import { getExplicitReadUrl } from "./command-policy.js";
 import { isCloseCommand } from "./command-taxonomy.js";
-import { getExplicitNavigationTarget } from "./page-target-validation.js";
-import { isRecord } from "./parsing.js";
 import { getUpstreamEffectiveBatchSteps } from "./orchestration/batch-stdin.js";
-import type { AgentBrowserNextAction } from "./results/contracts.js";
-
-// Extend the existing observation with compact native provenance, never original argv or command replay.
-export interface ReadConfirmation {
-	capabilities?: { readRequiresConfirmation: true };
-	id: string;
-	namespace?: string;
-	sessionName: string;
-	source: "native-explicit-url-read" | "native-guarded-action";
-	command?: string;
-	action?: string;
-	state: "pending" | "cleared";
-	refSnapshotFresh?: true;
-}
-
-export function parseReadConfirmation(value: unknown): ReadConfirmation | undefined {
-	if (
-		!isRecord(value) ||
-		(value.source !== "native-explicit-url-read" && value.source !== "native-guarded-action") ||
-		(value.state !== "pending" && value.state !== "cleared")
-	) {
-		return undefined;
-	}
-	if (
-		typeof value.id !== "string" ||
-		!value.id ||
-		typeof value.sessionName !== "string" ||
-		!value.sessionName ||
-		(value.namespace !== undefined && typeof value.namespace !== "string")
-	) {
-		return undefined;
-	}
-	if (
-		value.source === "native-guarded-action" &&
-		(typeof value.command !== "string" ||
-			!value.command ||
-			typeof value.action !== "string" ||
-			!value.action)
-	) {
-		return undefined;
-	}
-	return {
-		...(value.source === "native-explicit-url-read" &&
-		isRecord(value.capabilities) &&
-		value.capabilities.readRequiresConfirmation === true
-			? { capabilities: { readRequiresConfirmation: true as const } }
-			: {}),
-		id: value.id,
-		sessionName: value.sessionName,
-		namespace: value.namespace,
-		source: value.source,
-		state: value.state,
-		...(value.source === "native-guarded-action"
-			? {
-					command: typeof value.command === "string" ? value.command : undefined,
-					action: typeof value.action === "string" ? value.action : undefined,
-				}
-			: {}),
-		...(value.source === "native-guarded-action" &&
-		value.state === "cleared" &&
-		value.command === "snapshot" &&
-		value.action === "snapshot" &&
-		value.refSnapshotFresh === true
-			? { refSnapshotFresh: true as const }
-			: {}),
-	};
-}
+import {
+	getConfirmedNativeResult,
+	getNativePendingControl,
+	type NativePendingConfirmation,
+} from "./native-confirmation.js";
+import type { ReadConfirmation } from "./results/evidence-contracts.js";
+import type { AgentBrowserNextAction } from "./results/next-actions.js";
+export type { ReadConfirmation } from "./results/evidence-contracts.js";
+export {
+	parseReadConfirmation,
+	getNativeTabContinuationGuidance,
+	isSuccessfulNativeConfirmedClose,
+} from "./native-confirmation.js";
 
 export function isBrowserIndependentConfirmation(value?: ReadConfirmation): boolean {
 	return (
@@ -92,22 +36,10 @@ export function suppressConfirmationPageHelpers(value?: ReadConfirmation): boole
 	);
 }
 
-export function isSuccessfulNativeConfirmedClose(commandTokens: string[], data: unknown): boolean {
-	return (
-		commandTokens[0] === "confirm" &&
-		commandTokens.length === 2 &&
-		isRecord(data) &&
-		data.confirmed === true &&
-		data.action === "close" &&
-		isRecord(data.result) &&
-		data.result.success === true &&
-		isRecord(data.result.data) &&
-		data.result.data.closed === true
-	);
-}
-
 export function findReadConfirmation(
-	args: string[],
+	args: readonly string[],
+	// lib.es2015.iterable.d.ts exposes a mutable iterator cursor; only deeply readonly confirmation values are consumed.
+	// oxlint-disable-next-line typescript/prefer-readonly-parameter-types
 	confirmations: Iterable<ReadConfirmation>,
 	namespace?: string,
 	stdin?: string,
@@ -136,7 +68,7 @@ export function findReadConfirmation(
 }
 
 export function scopeReadConfirmationArgs(
-	args: string[],
+	args: readonly string[],
 	confirmation: ReadConfirmation,
 ): string[] {
 	return [
@@ -150,121 +82,134 @@ export function scopeReadConfirmationArgs(
 	];
 }
 
-export function getNativeTabContinuationGuidance(
-	commandTokens: string[],
-	data: unknown,
-): string | undefined {
-	if (
-		commandTokens[0] !== "tab" ||
-		commandTokens[1] !== "new" ||
-		!isRecord(data) ||
-		data.confirmation_required !== true ||
-		typeof data.confirmation_id !== "string" ||
-		!data.confirmation_id ||
-		data.action !== "tab_new" ||
-		!Object.keys(data).every((key) =>
-			[
-				"confirmation_required",
-				"confirmation_id",
-				"action",
-				"capabilities",
-				"after_confirmation",
-				"guidance",
-			].includes(key),
-		) ||
-		!Array.isArray(data.after_confirmation) ||
-		data.after_confirmation.length !== 2 ||
-		data.after_confirmation[0] !== "open" ||
-		typeof data.after_confirmation[1] !== "string" ||
-		!data.after_confirmation[1] ||
-		data.after_confirmation[1] !== getExplicitNavigationTarget(commandTokens) ||
-		typeof data.guidance !== "string" ||
-		!data.guidance.trim()
-	) {
-		return undefined;
-	}
-	// Transport prose only: approval creates the tab; the continuation is never stored or executed.
-	return data.guidance;
+function isExplicitReadProvenance(
+	pending: NativePendingConfirmation,
+	tokens: readonly string[],
+	confirmed?: ReadConfirmation,
+): boolean {
+	return (
+		pending.action === "read" &&
+		(typeof getExplicitReadUrl(tokens) === "string" ||
+			confirmed?.source === "native-explicit-url-read")
+	);
 }
 
-export function nextReadConfirmation(options: {
-	commandTokens: string[];
-	current?: ReadConfirmation;
-	data: unknown;
-	namespace?: string;
-	sessionName: string;
-	succeeded: boolean;
-}): ReadConfirmation | undefined {
-	const { commandTokens: tokens, current } = options;
-	const settles =
+function isOriginalGuardedAction(command: string | undefined): boolean {
+	return command !== undefined && command.length > 0 && !["confirm", "deny"].includes(command);
+}
+
+function pendingConfirmation(
+	pending: NativePendingConfirmation,
+	tokens: readonly string[],
+	identity: {
+		readonly namespace?: string;
+		readonly sessionName: string;
+		readonly confirmed?: ReadConfirmation;
+	},
+): ReadConfirmation | undefined {
+	if (isExplicitReadProvenance(pending, tokens, identity.confirmed)) {
+		return {
+			...(pending.capabilities !== undefined ? { capabilities: pending.capabilities } : {}),
+			id: pending.id,
+			namespace: identity.namespace,
+			sessionName: identity.sessionName,
+			source: "native-explicit-url-read",
+			state: "pending",
+		};
+	}
+	const command = tokens.at(0);
+	if (isOriginalGuardedAction(command) || identity.confirmed?.source === "native-guarded-action") {
+		return {
+			id: pending.id,
+			namespace: identity.namespace,
+			sessionName: identity.sessionName,
+			source: "native-guarded-action",
+			command: identity.confirmed !== undefined ? identity.confirmed.command : command,
+			action: pending.action,
+			state: "pending",
+		};
+	}
+	return undefined;
+}
+
+function settlesPendingConfirmation(
+	tokens: readonly string[],
+	current?: ReadConfirmation,
+): boolean {
+	return (
 		current?.state === "pending" &&
 		tokens.length === 2 &&
 		["confirm", "deny"].includes(tokens[0]) &&
-		tokens[1] === current.id;
-	const confirmed =
-		settles &&
-		tokens[0] === "confirm" &&
-		isRecord(options.data) &&
-		options.data.confirmed === true &&
-		options.data.action ===
-			(current.source === "native-explicit-url-read" ? "read" : current.action) &&
-		isRecord(options.data.result);
-	const control =
-		confirmed && isRecord(options.data) && isRecord(options.data.result)
-			? options.data.result.data
-			: options.data;
-	// Only native control fields and a validated tab transport continuation. Page output is never provenance.
+		tokens[1] === current.id
+	);
+}
+
+function confirmedDecisionResult(
+	tokens: readonly string[],
+	current: ReadConfirmation | undefined,
+	data: unknown,
+): Readonly<Record<string, unknown>> | undefined {
 	if (
-		options.succeeded &&
-		isRecord(control) &&
-		!Array.isArray(control) &&
-		control.confirmation_required === true &&
-		typeof control.confirmation_id === "string" &&
-		control.confirmation_id &&
-		typeof control.action === "string" &&
-		control.action &&
-		(Object.keys(control).every((key) =>
-			["confirmation_required", "confirmation_id", "action", "capabilities"].includes(key),
-		) ||
-			getNativeTabContinuationGuidance(tokens, control) !== undefined)
+		tokens[0] !== "confirm" ||
+		current === undefined ||
+		!settlesPendingConfirmation(tokens, current)
 	) {
-		const explicitRead =
-			control.action === "read" &&
-			(typeof getExplicitReadUrl(tokens) === "string" ||
-				(confirmed && current.source === "native-explicit-url-read"));
-		if (explicitRead) {
-			return {
-				...(isRecord(control.capabilities) && control.capabilities.readRequiresConfirmation === true
-					? { capabilities: { readRequiresConfirmation: true as const } }
-					: {}),
-				id: control.confirmation_id,
-				namespace: options.namespace,
-				sessionName: options.sessionName,
-				source: "native-explicit-url-read",
-				state: "pending",
-			};
-		}
-		if (
-			(tokens[0] && !["confirm", "deny"].includes(tokens[0])) ||
-			(confirmed && current.source === "native-guarded-action")
-		) {
-			return {
-				id: control.confirmation_id,
-				namespace: options.namespace,
-				sessionName: options.sessionName,
-				source: "native-guarded-action",
-				command: confirmed ? current.command : tokens[0],
-				action: control.action,
-				state: "pending",
-			};
+		return undefined;
+	}
+	return getConfirmedNativeResult(data, current);
+}
+
+function clearedConfirmation(
+	current: ReadConfirmation | undefined,
+	command: string | undefined,
+	succeeded: boolean,
+	settles: boolean,
+): ReadConfirmation | undefined {
+	return succeeded && current?.state === "pending" && (settles || isCloseCommand(command))
+		? { ...current, state: "cleared" }
+		: undefined;
+}
+
+export function nextReadConfirmation(options: {
+	readonly commandTokens: readonly string[];
+	readonly current?: ReadConfirmation;
+	readonly data: unknown;
+	readonly namespace?: string;
+	readonly sessionName: string;
+	readonly succeeded: boolean;
+}): ReadConfirmation | undefined {
+	const { commandTokens: tokens, current } = options;
+	const settles = settlesPendingConfirmation(tokens, current);
+	const confirmedResult = confirmedDecisionResult(tokens, current, options.data);
+	const pending = options.succeeded
+		? getNativePendingControl(
+				tokens,
+				confirmedResult !== undefined ? confirmedResult.data : options.data,
+			)
+		: undefined;
+	if (pending !== undefined) {
+		const next = pendingConfirmation(pending, tokens, {
+			namespace: options.namespace,
+			sessionName: options.sessionName,
+			confirmed: confirmedResult !== undefined ? current : undefined,
+		});
+		if (next !== undefined) {
+			return next;
 		}
 		if (current?.state === "pending") {
 			return { ...current, state: "cleared" };
 		}
 	}
-	return options.succeeded && current?.state === "pending" && (settles || isCloseCommand(tokens[0]))
-		? { ...current, state: "cleared" }
-		: undefined;
+	return clearedConfirmation(current, tokens[0], options.succeeded, settles);
+}
+
+function confirmationSafety(confirmation: ReadConfirmation): string {
+	if (isBrowserIndependentConfirmation(confirmation)) {
+		return "Review the requested read first. The native capability proves ID matching; no DOM confirmation is implied.";
+	}
+	return confirmation.source === "native-guarded-action"
+		? "Review the original guarded action. Exact wrapper observation preserves its session and avoids overwriting helpers; native ID validation is not implied."
+		: "Native ID matching/browser independence is unproven. The exact native session is preserved, but this confirmation retains normal page checks.";
 }
 
 export function buildReadConfirmationNextActions(
@@ -293,15 +238,15 @@ export function buildReadConfirmationNextActions(
 			},
 		];
 	}
+	const subject =
+		confirmation.source === "native-explicit-url-read"
+			? "this explicit URL read"
+			: `${confirmation.command ?? ""} (${confirmation.action ?? ""})`;
 	return ["confirm", "deny"].map((command) => ({
 		id: command === "confirm" ? "approve-confirmation" : "deny-confirmation",
 		tool: "agent_browser",
 		params: { args: [...prefix, command, confirmation.id] },
-		reason: `${command === "confirm" ? "Approve" : "Deny"} the native confirmation for ${confirmation.source === "native-explicit-url-read" ? "this explicit URL read" : `${confirmation.command} (${confirmation.action})`}.`,
-		safety: isBrowserIndependentConfirmation(confirmation)
-			? "Review the requested read first. The native capability proves ID matching; no DOM confirmation is implied."
-			: confirmation.source === "native-guarded-action"
-				? "Review the original guarded action. Exact wrapper observation preserves its session and avoids overwriting helpers; native ID validation is not implied."
-				: "Native ID matching/browser independence is unproven. The exact native session is preserved, but this confirmation retains normal page checks.",
+		reason: `${command === "confirm" ? "Approve" : "Deny"} the native confirmation for ${subject}.`,
+		safety: confirmationSafety(confirmation),
 	}));
 }

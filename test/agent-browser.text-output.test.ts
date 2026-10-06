@@ -11,6 +11,84 @@ import {
 	withPatchedEnv,
 	writeFakeAgentBrowserBinary,
 } from "./helpers/agent-browser-harness.js";
+import { readRecord, readArray, readString } from "./helpers/assertions.js";
+
+function redactionText(
+	mode: string,
+	cookieText: string,
+	storageText: string,
+	ordinary: string,
+): string {
+	if (mode.includes("-redacted-")) {
+		return "access_token=sample: supplied-first\nsupplied-continuation\n";
+	}
+	if (mode.includes("-empty-") && !mode.endsWith("-all")) {
+		return ": empty-key-first\nempty-key-continuation\n";
+	}
+	if (mode === "cookies") {
+		return cookieText;
+	}
+	if (mode === "storage-key" || mode.endsWith("-shorthand")) {
+		return "refresh: opaque-first-line\nopaque-continuation\n";
+	}
+	if (mode.endsWith("-benign")) {
+		return "theme: light\ndark\n";
+	}
+	if (mode === "raw-batch" || mode === "stdin-batch") {
+		return cookieText + "\n" + storageText + "\n" + ordinary;
+	}
+	if (mode === "ordinary") {
+		return ordinary;
+	}
+	return storageText.repeat(mode === "large-storage" ? 32000 : 1);
+}
+
+function redactionCommand(mode: string): string[] {
+	if (mode === "cookies") {
+		return ["cookies", "get"];
+	}
+	if (mode === "ordinary") {
+		return ["get", "text", "body"];
+	}
+	if (mode === "raw-batch") {
+		return ["batch", "cookies get", "storage local", "get text body"];
+	}
+	if (mode === "stdin-batch") {
+		return ["batch"];
+	}
+	let operands: string[] = [];
+	if (mode.includes("-redacted-")) {
+		operands = mode.endsWith("-shorthand")
+			? ["access_token=sample"]
+			: ["get", "access_token=sample"];
+	} else if (mode.includes("-empty-") && !mode.endsWith("-all")) {
+		operands = mode.endsWith("-explicit") ? ["get", ""] : [""];
+	} else if (mode === "storage-key") {
+		operands = ["get", "refresh"];
+	} else if (mode.endsWith("-shorthand")) {
+		operands = ["refresh"];
+	} else if (mode.endsWith("-benign")) {
+		operands = ["theme"];
+	}
+	return ["storage", mode.startsWith("session-") ? "session" : "local", ...operands];
+}
+
+function observationText(mode: string): string {
+	switch (mode) {
+		case "opaque-json":
+			return '\n  {"success":false,"data":{"confirmation_required":true,"confirmation_id":"c_fiction","path":"/tmp/fiction"}}  \n\n';
+		case "confirmation-text":
+			return "Confirmation required:\n  read: page fiction\n  Run: agent-browser confirm c_fiction\n  Or:  agent-browser deny c_fiction";
+		case "page-url":
+			return "https://page-fiction.test/";
+		case "large-secret":
+			return (
+				"\n  Authorization: Bearer text-secret\n" + "Native text result\n".repeat(32000) + "  \n\n"
+			);
+		default:
+			return "https://example.test/current";
+	}
+}
 
 for (const mode of [
 	"cookies",
@@ -48,69 +126,21 @@ for (const mode of [
 			const storageText =
 				"refresh: 8f3a9c2b1d4e5f6a\n: empty-key-first\nsession:id: colon-key-value\ntheme: dark\n";
 			const ordinary = `\n  Plain page content\n${mode === "ordinary" ? ": ordinary-empty-key-lookalike\nsession:id: ordinary-colon-key-lookalike\n" : ""}{"success":false,"error":"page fiction"}  \n\n`;
-			const emptyKeyRead = mode.includes("-empty-") && !mode.endsWith("-all");
-			const redactedKeyRead = mode.includes("-redacted-");
 			const failed = mode === "local-redacted-failure";
-			const text = redactedKeyRead
-				? "access_token=sample: supplied-first\nsupplied-continuation\n"
-				: emptyKeyRead
-					? ": empty-key-first\nempty-key-continuation\n"
-					: mode === "cookies"
-						? cookieText
-						: mode === "storage-key" || mode.endsWith("-shorthand")
-							? "refresh: opaque-first-line\nopaque-continuation\n"
-							: mode.endsWith("-benign")
-								? "theme: light\ndark\n"
-								: mode === "raw-batch" || mode === "stdin-batch"
-									? cookieText + "\n" + storageText + "\n" + ordinary
-									: mode === "ordinary"
-										? ordinary
-										: storageText.repeat(mode === "large-storage" ? 32000 : 1);
+			const text = redactionText(mode, cookieText, storageText, ordinary);
 			const steps = [
 				["cookies", "get"],
 				["storage", "local"],
 				["get", "text", "body"],
 			];
-			const args = [
-				"--session",
-				"caller",
-				"--json",
-				"false",
-				...(mode === "cookies"
-					? ["cookies", "get"]
-					: mode === "ordinary"
-						? ["get", "text", "body"]
-						: mode === "raw-batch"
-							? ["batch", "cookies get", "storage local", "get text body"]
-							: mode === "stdin-batch"
-								? ["batch"]
-								: [
-										"storage",
-										mode.startsWith("session-") ? "session" : "local",
-										...(redactedKeyRead
-											? mode.endsWith("-shorthand")
-												? ["access_token=sample"]
-												: ["get", "access_token=sample"]
-											: emptyKeyRead
-												? mode.endsWith("-explicit")
-													? ["get", ""]
-													: [""]
-												: mode === "storage-key"
-													? ["get", "refresh"]
-													: mode.endsWith("-shorthand")
-														? ["refresh"]
-														: mode.endsWith("-benign")
-															? ["theme"]
-															: []),
-									]),
-			];
+			const args = ["--session", "caller", "--json", "false", ...redactionCommand(mode)];
 			// Displaced stdin must not contribute redaction commands to a raw batch.
-			const stdin =
-				mode === "stdin-batch"
-					? JSON.stringify(steps)
-					: mode === "raw-batch"
-						? '[["storage","session","get","ignored"]]'
-						: undefined;
+			let stdin: string | undefined;
+			if (mode === "stdin-batch") {
+				stdin = JSON.stringify(steps);
+			} else if (mode === "raw-batch") {
+				stdin = '[["storage","session","get","ignored"]]';
+			}
 			await writeFakeAgentBrowserBinary(
 				root,
 				`const fs=require('node:fs');const args=process.argv.slice(2);const stdin=fs.readFileSync(0,'utf8');fs.appendFileSync(${JSON.stringify(log)},JSON.stringify({args,stdin})+'\\n');process.stdout.write(args.includes('false')?${JSON.stringify(text)}:JSON.stringify({success:true,data:{url:'https://fixture.test/current',title:'Current'}}));${failed ? "if(args.includes('false')){process.stderr.write('Native storage failure. access_token=sample');process.exitCode=7;}" : ""}`,
@@ -120,19 +150,29 @@ for (const mode of [
 					const harness = createExtensionHarness({ cwd: root });
 					const outputPath = join(root, "out.txt");
 					const updates: unknown[] = [];
-					const result = (await harness.tool!.execute(
-						"text-output",
-						{ args, stdin, outputPath },
-						new AbortController().signal,
-						(update) => updates.push(update),
-						harness.ctx,
-					)) as Awaited<ReturnType<typeof executeRegisteredTool>>;
-					assert.equal(result.isError, failed, result.content[0]?.text);
+					const result = readRecord(
+						await harness.tool.execute(
+							"text-output",
+							{ args, stdin, outputPath },
+							new AbortController().signal,
+							(update) => {
+								updates.push(update);
+							},
+							harness.ctx,
+						),
+					);
+					assert.equal(
+						result.isError,
+						failed,
+						readString(readRecord(readArray(result.content)[0]).text),
+					);
 					assert.doesNotMatch(
 						JSON.stringify({ result, updates }),
 						/Q2x9Lm3Np4Rs|8f3a9c2b1d4e5f6a|opaque-first-line|opaque-continuation|nameless-value|empty-key-first|empty-key-continuation|supplied-first|supplied-continuation|access_token=sample|colon-key-value/,
 					);
-					const saved = failed ? String(result.details?.data) : await readFile(outputPath, "utf8");
+					const saved = failed
+						? readString(readRecord(result.details).data)
+						: await readFile(outputPath, "utf8");
 					assert.doesNotMatch(
 						saved,
 						/Q2x9Lm3Np4Rs|8f3a9c2b1d4e5f6a|opaque-first-line|opaque-continuation|nameless-value|empty-key-first|empty-key-continuation|supplied-first|supplied-continuation|access_token=sample|colon-key-value/,
@@ -153,19 +193,37 @@ for (const mode of [
 						"names, benign values and ordinary opaque whitespace survive redaction",
 					);
 					if (mode === "large-storage") {
-						assert.equal(await readFile(String(result.details?.fullOutputPath), "utf8"), expected);
+						// This enumerated fixture branch (mode === "large-storage") has variant-specific assertions; common assertions cover every case.
+						// oxlint-disable-next-line node-test/no-conditional-assertion
+						assert.equal(
+							await readFile(readString(readRecord(result.details).fullOutputPath), "utf8"),
+							expected,
+						);
 					} else {
-						assert.equal(result.details?.data, expected);
+						// This enumerated fixture branch (mode === "large-storage") has variant-specific assertions; common assertions cover every case.
+						// oxlint-disable-next-line node-test/no-conditional-assertion
+						assert.equal(readRecord(result.details).data, expected);
 					}
 					assert.equal(
-						result.details?.batchSteps,
+						readRecord(result.details).batchSteps,
 						undefined,
 						"redaction never invents text row provenance",
 					);
 					if (failed) {
-						assert.equal(result.details?.exitCode, 7);
-						assert.equal(result.details?.failureCategory, "upstream-error");
-						assert.match(result.content[0]?.text ?? "", /Native storage failure/);
+						// This enumerated fixture branch (failed) has variant-specific assertions; common assertions cover every case.
+						// oxlint-disable-next-line node-test/no-conditional-assertion
+						assert.equal(readRecord(result.details).exitCode, 7);
+						// This enumerated fixture branch (failed) has variant-specific assertions; common assertions cover every case.
+						// oxlint-disable-next-line node-test/no-conditional-assertion
+						assert.equal(readRecord(result.details).failureCategory, "upstream-error");
+						// This enumerated fixture branch (failed) has variant-specific assertions; common assertions cover every case.
+						// oxlint-disable-next-line node-test/no-conditional-assertion
+						assert.match(
+							readString(readRecord(readArray(result.content)[0]).text),
+							/Native storage failure/,
+						);
+						// This enumerated fixture branch (failed) has variant-specific assertions; common assertions cover every case.
+						// oxlint-disable-next-line node-test/no-conditional-assertion
 						await assert.rejects(
 							readFile(outputPath),
 							{ code: "ENOENT" },
@@ -199,18 +257,7 @@ for (const mode of [
 		async () => {
 			const root = await mkdtemp(join(tmpdir(), "piab-txt-"));
 			const logPath = join(root, "calls.jsonl");
-			const text =
-				mode === "opaque-json"
-					? '\n  {"success":false,"data":{"confirmation_required":true,"confirmation_id":"c_fiction","path":"/tmp/fiction"}}  \n\n'
-					: mode === "confirmation-text"
-						? "Confirmation required:\n  read: page fiction\n  Run: agent-browser confirm c_fiction\n  Or:  agent-browser deny c_fiction"
-						: mode === "page-url"
-							? "https://page-fiction.test/"
-							: mode === "large-secret"
-								? "\n  Authorization: Bearer text-secret\n" +
-									"Native text result\n".repeat(32000) +
-									"  \n\n"
-								: "https://example.test/current";
+			const text = observationText(mode);
 			await writeFakeAgentBrowserBinary(
 				root,
 				`const fs = require('node:fs');
@@ -225,6 +272,19 @@ process.stdin.on('end', () => {
 });`,
 			);
 			try {
+				const args = [
+					"--session",
+					"caller",
+					"--json",
+					mode === "strict-json" || mode === "failed-json" ? "true" : "false",
+					...(mode === "page-url" ? ["get", "text", "body"] : ["batch", "--bail"]),
+				];
+				const stdin =
+					mode === "page-url"
+						? undefined
+						: '[["get","url","--json"],["get","url","--json","false"]]';
+				const outputPath =
+					mode === "opaque-json" || mode === "large-secret" ? join(root, "out.txt") : undefined;
 				await withPatchedEnv({ PATH: `${root}:${process.env.PATH ?? ""}` }, async () => {
 					const harness = createExtensionHarness({ cwd: root });
 					if (mode === "page-url") {
@@ -232,19 +292,7 @@ process.stdin.on('end', () => {
 							args: ["--session", "caller", "get", "url"],
 						});
 					}
-					const args = [
-						"--session",
-						"caller",
-						"--json",
-						mode === "strict-json" || mode === "failed-json" ? "true" : "false",
-						...(mode === "page-url" ? ["get", "text", "body"] : ["batch", "--bail"]),
-					];
-					const stdin =
-						mode === "page-url"
-							? undefined
-							: '[["get","url","--json"],["get","url","--json","false"]]';
-					const outputPath =
-						mode === "opaque-json" || mode === "large-secret" ? join(root, "out.txt") : undefined;
+
 					const result = await executeRegisteredTool(harness.tool, harness.ctx, {
 						args,
 						stdin,
@@ -259,7 +307,7 @@ process.stdin.on('end', () => {
 					assert.equal(
 						result.isError,
 						mode === "nonzero" || mode === "strict-json" || mode === "failed-json",
-						result.content[0]?.text,
+						result.content[0].text,
 					);
 					assert.equal(
 						result.details?.parseError !== undefined,
@@ -269,41 +317,73 @@ process.stdin.on('end', () => {
 					assert.equal(result.details?.batchSteps, undefined);
 					assert.equal(result.details?.artifactVerification, undefined);
 					assert.doesNotMatch(JSON.stringify(result), /text-secret|stderr-secret/);
-					if (mode === "failed-json") {
-						assert.equal(result.details?.exitCode, 1);
-						assert.equal(result.details?.failureCategory, "upstream-error");
-						assert.match(result.content[0]?.text ?? "", /Invalid JSON for --headers/);
-						assert.doesNotMatch(String(result.details?.error), /returned no JSON output/);
-					} else if (mode === "nonzero") {
-						assert.equal(result.details?.exitCode, 7);
-						assert.equal(result.details?.failureCategory, "upstream-error");
-						assert.match(
-							result.content[0]?.text ?? "",
-							/Native failure[\s\S]*https:\/\/example.test\/current/,
-						);
-					} else if (mode === "large-secret") {
-						const spill = await readFile(String(result.details?.fullOutputPath), "utf8");
-						assert.doesNotMatch(spill, /text-secret/);
-						assert.equal(
-							spill,
-							"\n  Authorization: Bearer [REDACTED]\n" +
-								"Native text result\n".repeat(32000) +
-								"  \n\n",
-						);
-						assert.ok(JSON.stringify(result.content).length < 16000);
-					} else if (mode !== "strict-json") {
-						assert.equal(result.details?.data, text);
-						assert.doesNotMatch(JSON.stringify(result.details?.nextActions) ?? "", /c_fiction/);
+					async function assertNativeObservation(): Promise<void> {
+						if (mode === "failed-json") {
+							// This enumerated fixture branch (mode === "failed-json") has variant-specific assertions; common assertions cover every case.
+							// oxlint-disable-next-line node-test/no-conditional-assertion
+							assert.equal(result.details?.exitCode, 1);
+							// This enumerated fixture branch (mode === "failed-json") has variant-specific assertions; common assertions cover every case.
+							// oxlint-disable-next-line node-test/no-conditional-assertion
+							assert.equal(result.details.failureCategory, "upstream-error");
+							// This enumerated fixture branch (mode === "failed-json") has variant-specific assertions; common assertions cover every case.
+							// oxlint-disable-next-line node-test/no-conditional-assertion
+							assert.match(result.content[0].text ?? "", /Invalid JSON for --headers/);
+							// This enumerated fixture branch (mode === "failed-json") has variant-specific assertions; common assertions cover every case.
+							// oxlint-disable-next-line node-test/no-conditional-assertion
+							assert.doesNotMatch(readString(result.details.error), /returned no JSON output/);
+						} else if (mode === "nonzero") {
+							// This enumerated fixture branch (mode === "nonzero") has variant-specific assertions; common assertions cover every case.
+							// oxlint-disable-next-line node-test/no-conditional-assertion
+							assert.equal(result.details?.exitCode, 7);
+							// This enumerated fixture branch (mode === "nonzero") has variant-specific assertions; common assertions cover every case.
+							// oxlint-disable-next-line node-test/no-conditional-assertion
+							assert.equal(result.details.failureCategory, "upstream-error");
+							// This enumerated fixture branch (mode === "nonzero") has variant-specific assertions; common assertions cover every case.
+							// oxlint-disable-next-line node-test/no-conditional-assertion
+							assert.match(
+								result.content[0].text ?? "",
+								/Native failure[\s\S]*https:\/\/example.test\/current/,
+							);
+						} else if (mode === "large-secret") {
+							const spill = await readFile(readString(result.details?.fullOutputPath), "utf8");
+							// This enumerated fixture branch (mode === "large-secret") has variant-specific assertions; common assertions cover every case.
+							// oxlint-disable-next-line node-test/no-conditional-assertion
+							assert.doesNotMatch(spill, /text-secret/);
+							// This enumerated fixture branch (mode === "large-secret") has variant-specific assertions; common assertions cover every case.
+							// oxlint-disable-next-line node-test/no-conditional-assertion
+							assert.equal(
+								spill,
+								"\n  Authorization: Bearer [REDACTED]\n" +
+									"Native text result\n".repeat(32000) +
+									"  \n\n",
+							);
+							// This enumerated fixture branch (mode === "large-secret") has variant-specific assertions; common assertions cover every case.
+							// oxlint-disable-next-line node-test/no-conditional-assertion
+							assert.ok(JSON.stringify(result.content).length < 16000);
+						} else if (mode !== "strict-json") {
+							// This enumerated fixture branch (mode !== "strict-json") has variant-specific assertions; common assertions cover every case.
+							// oxlint-disable-next-line node-test/no-conditional-assertion
+							assert.equal(result.details?.data, text);
+							// JSON.stringify(undefined) returns undefined, despite its standard-library string return type.
+							// oxlint-disable-next-line typescript/no-unnecessary-condition
+							const actionsJson = JSON.stringify(result.details.nextActions) ?? "";
+							// This enumerated fixture branch (mode !== "strict-json") has variant-specific assertions; common assertions cover every case.
+							// oxlint-disable-next-line node-test/no-conditional-assertion
+							assert.doesNotMatch(actionsJson, /c_fiction/);
+						}
 					}
-					if (outputPath) {
+					await assertNativeObservation();
+					async function assertTextExport(exportPath: string): Promise<void> {
 						const expected =
 							mode === "large-secret"
-								? await readFile(String(result.details?.fullOutputPath), "utf8")
+								? await readFile(readString(result.details?.fullOutputPath), "utf8")
 								: text;
-						assert.equal(await readFile(outputPath, "utf8"), expected);
-						assert.match(result.content[0]?.text ?? "", /Output file:/);
+						assert.equal(await readFile(exportPath, "utf8"), expected);
+						assert.match(result.content[0].text ?? "", /Output file:/);
 						if (mode === "opaque-json") {
-							assert.ok(result.content[0]?.text?.startsWith(`${text}\n\nOutput file:`));
+							// This enumerated fixture branch (mode === "opaque-json") has variant-specific assertions; common assertions cover every case.
+							// oxlint-disable-next-line node-test/no-conditional-assertion
+							assert.ok(readString(result.content[0].text).startsWith(`${text}\n\nOutput file:`));
 						}
 						const failedExport = await executeRegisteredTool(harness.tool, harness.ctx, {
 							args,
@@ -311,35 +391,51 @@ process.stdin.on('end', () => {
 							outputPath: root,
 						});
 						assert.equal(failedExport.isError, true);
-						assert.equal(
-							(failedExport.details?.outputFile as { status: string })?.status,
-							"failed",
-						);
+						assert.equal(readRecord(failedExport.details?.outputFile).status, "failed");
 						if (mode === "opaque-json") {
+							// This enumerated fixture branch (mode === "opaque-json") has variant-specific assertions; common assertions cover every case.
+							// oxlint-disable-next-line node-test/no-conditional-assertion
 							assert.equal(failedExport.details?.data, text);
+							// This enumerated fixture branch (mode === "opaque-json") has variant-specific assertions; common assertions cover every case.
+							// oxlint-disable-next-line node-test/no-conditional-assertion
 							assert.ok(
-								failedExport.content[0]?.text?.startsWith(`${text}\n\nOutput file failed:`),
+								readString(failedExport.content[0].text).startsWith(
+									`${text}\n\nOutput file failed:`,
+								),
 							);
 						} else {
+							// This enumerated fixture branch (mode === "opaque-json") has variant-specific assertions; common assertions cover every case.
+							// oxlint-disable-next-line node-test/no-conditional-assertion
 							assert.equal(
-								await readFile(String(failedExport.details?.fullOutputPath), "utf8"),
+								await readFile(readString(failedExport.details?.fullOutputPath), "utf8"),
 								expected,
 							);
-							assert.match(failedExport.content[0]?.text ?? "", /Output file failed:/);
+							// This enumerated fixture branch (mode === "opaque-json") has variant-specific assertions; common assertions cover every case.
+							// oxlint-disable-next-line node-test/no-conditional-assertion
+							assert.match(failedExport.content[0].text ?? "", /Output file failed:/);
 						}
 					}
+					if (outputPath !== undefined) {
+						await assertTextExport(outputPath);
+					}
 					if (mode === "page-url") {
+						// This enumerated fixture branch (mode === "page-url") has variant-specific assertions; common assertions cover every case.
+						// oxlint-disable-next-line node-test/no-conditional-assertion
 						assert.equal(
-							(result.details?.sessionTabTarget as { url: string })?.url,
+							readRecord(result.details?.sessionTabTarget).url,
 							"https://example.test/current",
 						);
 						await runExtensionEvent(harness.handlers, "session_tree", {}, harness.ctx);
 						const replayed = await executeRegisteredTool(harness.tool, harness.ctx, { args });
+						// This enumerated fixture branch (mode === "page-url") has variant-specific assertions; common assertions cover every case.
+						// oxlint-disable-next-line node-test/no-conditional-assertion
 						assert.equal(
-							(replayed.details?.sessionTabTarget as { url: string })?.url,
+							readRecord(replayed.details?.sessionTabTarget).url,
 							"https://example.test/current",
 							JSON.stringify(replayed.details),
 						);
+						// This enumerated fixture branch (mode === "page-url") has variant-specific assertions; common assertions cover every case.
+						// oxlint-disable-next-line node-test/no-conditional-assertion
 						assert.equal(replayed.details?.data, text);
 					}
 				});

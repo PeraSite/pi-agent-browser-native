@@ -25,6 +25,7 @@ import {
 	withPatchedEnv,
 	writeFakeAgentBrowserBinary,
 } from "./helpers/agent-browser-harness.js";
+import { readRecord, readArray, readString, readBoolean } from "./helpers/assertions.js";
 
 // Full-suite runs spawn many fake upstream processes in parallel; keep this as a deadlock watchdog,
 // not a scheduler-load race. The gated calls normally finish sub-second when run in isolation.
@@ -35,7 +36,9 @@ function assertIsString(value: unknown): asserts value is string {
 }
 
 function delay(ms: number): Promise<void> {
-	return new Promise((resolve) => setTimeout(resolve, ms));
+	return new Promise((resolve) => {
+		setTimeout(resolve, ms);
+	});
 }
 
 async function waitForCloseArgs(
@@ -46,12 +49,16 @@ async function waitForCloseArgs(
 	const deadline = Date.now() + timeoutMs;
 	let closeArgs: string[][] = [];
 	while (Date.now() <= deadline) {
+		// Observe the current fixture receipt before deciding whether the next poll or state transition may proceed.
+		// oxlint-disable-next-line no-await-in-loop
 		closeArgs = (await readInvocationLog(logPath))
 			.map((entry) => entry.args)
 			.filter((args) => args.includes("close"));
 		if (closeArgs.length >= expectedCount) {
 			return closeArgs;
 		}
+		// Wait between receipt polls so the fixture process can advance before the next observation.
+		// oxlint-disable-next-line no-await-in-loop
 		await delay(25);
 	}
 	return closeArgs;
@@ -156,10 +163,10 @@ process.stdout.write(JSON.stringify(envelope));`,
 					});
 					assert.equal(firstOpen.isError, false);
 					assert.equal(
-						(firstOpen.details?.compatibilityWorkaround as { id?: string } | undefined)?.id,
+						readRecord(firstOpen.details?.compatibilityWorkaround).id,
 						"cloudflare-headless-user-agent",
 					);
-					const sessionName = String(firstOpen.details?.sessionName ?? "");
+					const sessionName = readString(firstOpen.details?.sessionName ?? "");
 					assert.match(sessionName, /^piab-/);
 					await runExtensionEvent(firstHarness.handlers, "session_shutdown", { reason: "resume" });
 					assert.equal((await readInvocationLog(logPath)).length, 2);
@@ -171,7 +178,7 @@ process.stdout.write(JSON.stringify(envelope));`,
 								...firstOpen.details,
 								exitCode: 1,
 								managedSessionOutcome: {
-									...(firstOpen.details?.managedSessionOutcome as Record<string, unknown>),
+									...readRecord(firstOpen.details?.managedSessionOutcome),
 									activeAfter: true,
 									status: "created",
 									succeeded: true,
@@ -202,14 +209,18 @@ process.stdout.write(JSON.stringify(envelope));`,
 					});
 					assert.equal(snapshot.isError, false, JSON.stringify(snapshot));
 					assert.equal(
-						(snapshot.details?.compatibilityWorkaround as { id?: string } | undefined)?.id,
+						readRecord(snapshot.details?.compatibilityWorkaround).id,
 						"cloudflare-headless-user-agent",
 					);
 					const snapshotInvocation = (await readInvocationLog(logPath))
-						.filter((row) => row.args.includes("snapshot"))
-						.at(-1) as { args: string[]; userAgent?: string };
+						.reverse()
+						.find((row) => row.args.includes("snapshot"));
+					assert.ok(snapshotInvocation);
 					assert.ok(snapshotInvocation.args.includes("--user-agent"));
-					assert.match(snapshotInvocation.userAgent ?? "", /Chrome\/\d+\.0\.0\.0/);
+					assert.match(
+						readString(readRecord(snapshotInvocation).userAgent ?? ""),
+						/Chrome\/\d+\.0\.0\.0/,
+					);
 
 					const explicitOptOut = await executeRegisteredTool(
 						resumedHarness.tool,
@@ -220,7 +231,7 @@ process.stdout.write(JSON.stringify(envelope));`,
 					);
 					assert.equal(explicitOptOut.isError, true, JSON.stringify(explicitOptOut));
 					assert.match(
-						String(explicitOptOut.details?.validationError ?? ""),
+						readString(explicitOptOut.details?.validationError ?? ""),
 						/launch-scoped flags.*--user-agent/i,
 					);
 					const afterOptOut = await executeRegisteredTool(resumedHarness.tool, resumedHarness.ctx, {
@@ -228,21 +239,25 @@ process.stdout.write(JSON.stringify(envelope));`,
 					});
 					assert.equal(afterOptOut.isError, false, JSON.stringify(afterOptOut));
 					assert.equal(
-						(afterOptOut.details?.compatibilityWorkaround as { id?: string } | undefined)?.id,
+						readRecord(afterOptOut.details?.compatibilityWorkaround).id,
 						"cloudflare-headless-user-agent",
 					);
 					const afterOptOutInvocation = (await readInvocationLog(logPath))
-						.filter((entry) => entry.args.includes("snapshot"))
-						.at(-1) as { args: string[]; userAgent?: string };
+						.reverse()
+						.find((entry) => entry.args.includes("snapshot"));
+					assert.ok(afterOptOutInvocation);
 					assert.ok(afterOptOutInvocation.args.includes("--user-agent"));
-					assert.match(afterOptOutInvocation.userAgent ?? "", /Chrome\/\d+\.0\.0\.0/);
+					assert.match(
+						readString(readRecord(afterOptOutInvocation).userAgent ?? ""),
+						/Chrome\/\d+\.0\.0\.0/,
+					);
 
 					const invocationCount = (await readInvocationLog(logPath)).length;
 					const blocked = await executeRegisteredTool(resumedHarness.tool, resumedHarness.ctx, {
 						args: ["--profile", "Default", "open", "https://example.com/profiled"],
 					});
 					assert.equal(blocked.isError, true);
-					assert.match(String(blocked.details?.validationError ?? ""), /launch-scoped flags/i);
+					assert.match(readString(blocked.details?.validationError ?? ""), /launch-scoped flags/i);
 					assert.equal((await readInvocationLog(logPath)).length, invocationCount);
 				},
 			);
@@ -292,12 +307,12 @@ process.stdout.write(JSON.stringify(envelope));`,
 						[
 							"--json",
 							"--session",
-							String(sessionName),
+							readString(sessionName),
 							"open",
 							"https://example.com/quit-cleanup",
 						],
-						["--json", "--session", String(sessionName), "tab", "list"],
-						["--session", String(sessionName), "close"],
+						["--json", "--session", readString(sessionName), "tab", "list"],
+						["--session", readString(sessionName), "close"],
 					],
 				);
 			});
@@ -356,7 +371,7 @@ process.stdout.write(JSON.stringify(envelope));`,
 				assert.ok(
 					invocations.some(
 						(entry) =>
-							entry.args.join("\0") === ["--session", String(sessionName), "close"].join("\0"),
+							entry.args.join("\0") === ["--session", readString(sessionName), "close"].join("\0"),
 					),
 				);
 			});
@@ -420,7 +435,7 @@ process.stdout.write(JSON.stringify({ success: true, data: { closed: args.includ
 				);
 
 				const closeArgs = await waitForCloseArgs(logPath, 2);
-				const sortCloseArgs = (rows: string[][]) =>
+				const sortCloseArgs = (rows: readonly (readonly string[])[]) =>
 					[...rows].sort((left, right) => left[1].localeCompare(right[1]));
 				assert.deepEqual(
 					sortCloseArgs(closeArgs),
@@ -832,17 +847,14 @@ process.stdout.write(JSON.stringify({ success: true, data }));`,
 					args: ["--session", firstSessionName, "close"],
 				});
 				assert.equal(close.isError, false, JSON.stringify(close));
-				assert.equal(
-					(close.details?.managedSessionOutcome as { status?: string } | undefined)?.status,
-					"closed",
-				);
+				assert.equal(readRecord(close.details?.managedSessionOutcome).status, "closed");
 				assert.match(
-					close.content[0]?.text ?? "",
+					close.content[0].text ?? "",
 					/Managed session outcome: The current wrapper-managed browser session was closed\./,
 				);
-				const rotatedSessionName = (
-					close.details?.managedSessionOutcome as { currentSessionName?: string } | undefined
-				)?.currentSessionName;
+				const rotatedSessionName = readRecord(
+					close.details?.managedSessionOutcome,
+				).currentSessionName;
 				assertIsString(rotatedSessionName);
 				assert.notEqual(rotatedSessionName, firstSessionName);
 				assert.match(
@@ -890,30 +902,30 @@ process.stdout.write(JSON.stringify({ success: true, data }));`,
 				assert.notEqual(finalFreshSessionName, firstFreshSessionName);
 
 				const invocations = await readInvocationLog(logPath);
-				assert.deepEqual(invocations[1]?.args, [
+				assert.deepEqual(invocations[1].args, [
 					"--json",
 					"--session",
 					firstSessionName,
 					"tab",
 					"list",
 				]);
-				assert.deepEqual(invocations[2]?.args, ["--json", "--session", firstSessionName, "close"]);
-				assert.equal(invocations[3]?.sessionName, firstFreshSessionName);
-				assert.deepEqual(invocations[4]?.args, [
+				assert.deepEqual(invocations[2].args, ["--json", "--session", firstSessionName, "close"]);
+				assert.equal(invocations[3].sessionName, firstFreshSessionName);
+				assert.deepEqual(invocations[4].args, [
 					"--json",
 					"--session",
 					firstFreshSessionName,
 					"tab",
 					"list",
 				]);
-				assert.deepEqual(invocations[5]?.args, [
+				assert.deepEqual(invocations[5].args, [
 					"--json",
 					"--session",
 					firstFreshSessionName,
 					"close",
 				]);
-				assert.equal(invocations[6]?.sessionName, finalFreshSessionName);
-				assert.deepEqual(invocations[7]?.args, [
+				assert.equal(invocations[6].sessionName, finalFreshSessionName);
+				assert.deepEqual(invocations[7].args, [
 					"--json",
 					"--session",
 					finalFreshSessionName,
@@ -962,9 +974,9 @@ process.stdout.write(JSON.stringify({ success: true, data }));`,
 					args: ["--session", baseSessionName, "close"],
 				});
 				assert.equal(closeBase.isError, false, JSON.stringify(closeBase));
-				const rotatedSessionName = (
-					closeBase.details?.managedSessionOutcome as { currentSessionName?: string } | undefined
-				)?.currentSessionName;
+				const rotatedSessionName = readRecord(
+					closeBase.details?.managedSessionOutcome,
+				).currentSessionName;
 				assertIsString(rotatedSessionName);
 				assert.notEqual(rotatedSessionName, baseSessionName);
 
@@ -1042,9 +1054,9 @@ process.stdout.write(JSON.stringify({ success: true, data }));`,
 					args: ["--session", baseSessionName, "close"],
 				});
 				assert.equal(closeBase.isError, false, JSON.stringify(closeBase));
-				const reservedSessionName = (
-					closeBase.details?.managedSessionOutcome as { currentSessionName?: string } | undefined
-				)?.currentSessionName;
+				const reservedSessionName = readRecord(
+					closeBase.details?.managedSessionOutcome,
+				).currentSessionName;
 				assertIsString(reservedSessionName);
 				assert.match(
 					reservedSessionName,
@@ -1141,7 +1153,7 @@ process.stdout.write(JSON.stringify({ success: true, data: { title: "Example Dom
 				assert.equal(followUp.isError, false, JSON.stringify(followUp));
 				assert.notEqual(followUp.details?.sessionName, ownedName);
 				const invocations = await readInvocationLog(logPath);
-				assert.notEqual(invocations[0]?.sessionName, ownedName);
+				assert.notEqual(invocations[0].sessionName, ownedName);
 			});
 		} finally {
 			await rm(tempDir, { force: true, recursive: true });
@@ -1322,8 +1334,12 @@ if (args.includes("snapshot")) {
 					args: ["snapshot", "-i"],
 				});
 				while (
+					// Observe the current fixture receipt before deciding whether the next poll or state transition may proceed.
+					// oxlint-disable-next-line no-await-in-loop
 					!(await readInvocationLog(logPath)).some((entry) => entry.event === "snapshot-start")
 				) {
+					// Wait between receipt polls so the fixture process can advance before the next observation.
+					// oxlint-disable-next-line no-await-in-loop
 					await delay(10);
 				}
 
@@ -1418,10 +1434,14 @@ if (args.includes("snapshot") && sessionName === "named-user-session") {
 					args: ["--session", "named-user-session", "snapshot", "-i"],
 				});
 				while (
+					// Observe the current fixture receipt before deciding whether the next poll or state transition may proceed.
+					// oxlint-disable-next-line no-await-in-loop
 					!(await readInvocationLog(logPath)).some(
 						(entry) => entry.event === "explicit-snapshot-start",
 					)
 				) {
+					// Wait between receipt polls so the fixture process can advance before the next observation.
+					// oxlint-disable-next-line no-await-in-loop
 					await delay(10);
 				}
 
@@ -1504,8 +1524,12 @@ if (args.includes("snapshot")) {
 					args: ["snapshot", "-i"],
 				});
 				while (
+					// Observe the current fixture receipt before deciding whether the next poll or state transition may proceed.
+					// oxlint-disable-next-line no-await-in-loop
 					!(await readInvocationLog(logPath)).some((entry) => entry.event === "snapshot-start")
 				) {
+					// Wait between receipt polls so the fixture process can advance before the next observation.
+					// oxlint-disable-next-line no-await-in-loop
 					await delay(10);
 				}
 
@@ -1621,21 +1645,21 @@ process.stdout.write(JSON.stringify({ success: true, data }));`,
 					});
 					assert.equal(open.isError, false, JSON.stringify(open));
 					assert.equal(open.details?.managedSessionHeadedAutosaveDisabled, true);
-					assert.deepEqual(open.details?.browserWindow, {
+					assert.deepEqual(open.details.browserWindow, {
 						mode: "headed",
 						ownership: "wrapper-managed",
-						sessionName: open.details?.sessionName,
+						sessionName: open.details.sessionName,
 						visibility: "unverified",
 					});
-					assert.deepEqual(open.details?.lifecycle, { effectiveLaunch: { browserLaunched: true } });
+					assert.deepEqual(open.details.lifecycle, { effectiveLaunch: { browserLaunched: true } });
 					assert.match(
-						open.content[0]?.text ?? "",
+						open.content[0].text ?? "",
 						/Headed browser handoff:.*desktop visibility unverified/,
 					);
 					assert.ok(
-						!(open.content[0]?.text ?? "")
+						!(open.content[0].text ?? "")
 							.split("\n\nObservation:")[0]
-							.includes(String(open.details?.sessionName)),
+							.includes(readString(open.details.sessionName)),
 					);
 
 					const followUp = await executeRegisteredTool(harness.tool, harness.ctx, {
@@ -1643,8 +1667,8 @@ process.stdout.write(JSON.stringify({ success: true, data }));`,
 					});
 					assert.equal(followUp.isError, false, JSON.stringify(followUp));
 					assert.equal(followUp.details?.managedSessionHeadedAutosaveDisabled, true);
-					assert.equal(followUp.details?.browserWindow, undefined);
-					assert.doesNotMatch(followUp.content[0]?.text ?? "", /Headed browser handoff/);
+					assert.equal(followUp.details.browserWindow, undefined);
+					assert.doesNotMatch(followUp.content[0].text ?? "", /Headed browser handoff/);
 
 					harness.setBranch(harness.ctx.sessionManager.getBranch().slice());
 					await runExtensionEvent(
@@ -1733,14 +1757,14 @@ else process.stdout.write(JSON.stringify({ success: true, data: { result: "https
 					assert.deepEqual(batch.details?.lifecycle, {
 						effectiveLaunch: { browserLaunched: true },
 					});
-					assert.deepEqual(batch.details?.browserWindow, {
+					assert.deepEqual(batch.details.browserWindow, {
 						mode: "headed",
 						ownership: "wrapper-managed",
-						sessionName: batch.details?.sessionName,
+						sessionName: batch.details.sessionName,
 						visibility: "unverified",
 					});
 					assert.match(
-						batch.content[0]?.text ?? "",
+						batch.content[0].text ?? "",
 						/Headed browser handoff:.*desktop visibility unverified/,
 					);
 					assert.equal(
@@ -1760,8 +1784,8 @@ else process.stdout.write(JSON.stringify({ success: true, data: { result: "https
 					});
 					assert.equal(attached.isError, false, JSON.stringify(attached));
 					assert.equal(attached.details?.attachedBrowserSession, true);
-					assert.equal(attached.details?.browserWindow, undefined);
-					assert.doesNotMatch(attached.content[0]?.text ?? "", /Headed browser handoff/);
+					assert.equal(attached.details.browserWindow, undefined);
+					assert.doesNotMatch(attached.content[0].text ?? "", /Headed browser handoff/);
 					assert.equal(
 						(
 							await executeRegisteredTool(attachedHarness.tool, attachedHarness.ctx, {
@@ -1788,6 +1812,8 @@ else process.stdout.write(JSON.stringify({ success: true, data: { result: "https
 						},
 						{ args: ["--headed", "open", "https://example.com/headed-batch"], env: "browserbase" },
 					]) {
+						// Restore scenarios share environment and browser ownership; complete each transition and cleanup in order.
+						// oxlint-disable-next-line no-await-in-loop
 						await withPatchedEnv({ AGENT_BROWSER_PROVIDER: provider.env }, async () => {
 							const providerHarness = createExtensionHarness({ cwd: tempDir });
 							await runExtensionEvent(
@@ -1801,12 +1827,22 @@ else process.stdout.write(JSON.stringify({ success: true, data: { result: "https
 								providerHarness.ctx,
 								{ args: provider.args },
 							);
+							// The nonempty provider fixture matrix exhaustively verifies each case; any failed assertion fails the test.
+							// oxlint-disable-next-line node-test/no-conditional-assertion
 							assert.equal(launched.isError, false, JSON.stringify(launched));
+							// The nonempty provider fixture matrix exhaustively verifies each case; any failed assertion fails the test.
+							// oxlint-disable-next-line node-test/no-conditional-assertion
 							assert.deepEqual(launched.details?.lifecycle, {
 								effectiveLaunch: { browserLaunched: true },
 							});
-							assert.equal(launched.details?.browserWindow, undefined);
-							assert.doesNotMatch(launched.content[0]?.text ?? "", /Headed browser handoff/);
+							// The nonempty provider fixture matrix exhaustively verifies each case; any failed assertion fails the test.
+							// oxlint-disable-next-line node-test/no-conditional-assertion
+							assert.equal(launched.details.browserWindow, undefined);
+							// The nonempty provider fixture matrix exhaustively verifies each case; any failed assertion fails the test.
+							// oxlint-disable-next-line node-test/no-conditional-assertion
+							assert.doesNotMatch(launched.content[0].text ?? "", /Headed browser handoff/);
+							// The nonempty provider fixture matrix exhaustively verifies each case; any failed assertion fails the test.
+							// oxlint-disable-next-line node-test/no-conditional-assertion
 							assert.equal(
 								(
 									await executeRegisteredTool(providerHarness.tool, providerHarness.ctx, {
@@ -1869,7 +1905,7 @@ if (args.includes("session") && args.includes("info")) {
 					});
 					assert.equal(open.isError, false, JSON.stringify(open));
 					assert.equal(open.details?.managedSessionHeadedAutosaveDisabled, true);
-					assert.equal(open.details?.managedSessionHeadedAutosaveInterval, "0");
+					assert.equal(open.details.managedSessionHeadedAutosaveInterval, "0");
 					branch = harness.ctx.sessionManager.getBranch().slice();
 					await runExtensionEvent(
 						harness.handlers,
@@ -1895,7 +1931,7 @@ if (args.includes("session") && args.includes("info")) {
 					});
 					assert.equal(followUp.isError, true, JSON.stringify(followUp));
 					assert.match(
-						String(followUp.details?.validationError),
+						readString(followUp.details?.validationError),
 						/cannot change a running wrapper-owned headed session/,
 					);
 
@@ -1933,7 +1969,7 @@ if (args.includes("session") && args.includes("info")) {
 					});
 					assert.equal(followUp.isError, true, JSON.stringify(followUp));
 					assert.match(
-						String(followUp.details?.validationError),
+						readString(followUp.details?.validationError),
 						/cannot change a running wrapper-owned headed session/,
 					);
 					const close = await executeRegisteredTool(harness.tool, harness.ctx, { args: ["close"] });
@@ -1953,15 +1989,15 @@ if (args.includes("session") && args.includes("info")) {
 				false,
 				JSON.stringify(invocations),
 			);
-			const closeIntervals = invocations
-				.filter((entry) => entry.args.at(-1) === "close")
-				.map((entry) => entry.autosave);
+			const closeIntervals = new Set(
+				invocations.filter((entry) => entry.args.at(-1) === "close").map((entry) => entry.autosave),
+			);
 			const freshOpen = invocations.find(
 				(entry) =>
 					entry.args.includes("open") && entry.args.includes("https://example.com/headed-fresh"),
 			);
-			assert.ok(closeIntervals.includes("0"), JSON.stringify(invocations));
-			assert.ok(closeIntervals.includes("1000"), JSON.stringify(invocations));
+			assert.ok(closeIntervals.has("0"), JSON.stringify(invocations));
+			assert.ok(closeIntervals.has("1000"), JSON.stringify(invocations));
 			assert.equal(freshOpen?.autosave, "1000", JSON.stringify(invocations));
 		} finally {
 			await rm(tempDir, { force: true, recursive: true });
@@ -2005,18 +2041,8 @@ if (args.includes("session") && args.includes("info")) {
 						sessionMode: "fresh",
 					});
 					assert.equal(failedOpen.isError, true, JSON.stringify(failedOpen));
-					assert.equal(
-						(
-							failedOpen.details?.managedSessionOutcome as
-								| { activeAfter?: boolean; status?: string }
-								| undefined
-						)?.activeAfter,
-						false,
-					);
-					assert.equal(
-						(failedOpen.details?.managedSessionOutcome as { status?: string } | undefined)?.status,
-						"abandoned",
-					);
+					assert.equal(readRecord(failedOpen.details?.managedSessionOutcome).activeAfter, false);
+					assert.equal(readRecord(failedOpen.details?.managedSessionOutcome).status, "abandoned");
 					assert.equal(failedOpen.details?.managedSessionHeadedAutosaveDisabled, undefined);
 				},
 			);
@@ -2081,7 +2107,7 @@ if (command === "session") {
 					});
 					assert.equal(headedOpen.isError, false, JSON.stringify(headedOpen));
 					assert.equal(headedOpen.details?.managedSessionHeadedAutosaveDisabled, true);
-					const headedSessionName = headedOpen.details?.sessionName;
+					const headedSessionName = headedOpen.details.sessionName;
 					assertIsString(headedSessionName);
 
 					const replacement = await executeRegisteredTool(harness.tool, harness.ctx, {
@@ -2092,15 +2118,11 @@ if (command === "session") {
 					assert.notEqual(replacement.details?.sessionName, headedSessionName);
 					assert.equal(replacement.details?.managedSessionHeadedAutosaveDisabled, undefined);
 					assert.equal(
-						(
-							replacement.details?.managedSessionOutcome as
-								| { replacedSessionClosed?: boolean }
-								| undefined
-						)?.replacedSessionClosed,
+						readRecord(replacement.details?.managedSessionOutcome).replacedSessionClosed,
 						false,
 					);
 					assert.match(
-						(replacement.content[0] as { text: string }).text,
+						readString(readRecord(replacement.content[0]).text),
 						/Automatic close of the previous wrapper-managed session failed/,
 					);
 
@@ -2116,7 +2138,7 @@ if (command === "session") {
 					});
 					assert.equal(blockedProfileChange.isError, true, JSON.stringify(blockedProfileChange));
 					assert.match(
-						String(blockedProfileChange.details?.validationError),
+						readString(blockedProfileChange.details?.validationError),
 						/launch-scoped flags --profile/i,
 					);
 					await rm(join(tempDir, `${headedSessionName}.active`), { force: true });
@@ -2238,17 +2260,7 @@ if (command === "session") {
   process.stdout.write(JSON.stringify({ success: true, data }));
 }`,
 		);
-		const readEvents = async () =>
-			(await readInvocationLog(logPath)) as Array<{
-				args: string[];
-				event: string;
-				namespace: string;
-				namespaceEnv: string | null;
-				sessionName: string;
-				restoreKey: string | null;
-				observedRestoreKey?: string | null;
-				active: boolean;
-			}>;
+		const readEvents = async () => await readInvocationLog(logPath);
 		try {
 			await withPatchedEnv(
 				{
@@ -2277,15 +2289,15 @@ if (command === "session") {
 						});
 						assert.equal(open.isError, false, JSON.stringify(open));
 						assert.equal(open.details?.namespace, "review-space");
-						assert.notEqual(open.details?.managedSessionRestoreDisabled, true);
-						const oldSession = open.details?.sessionName;
+						assert.notEqual(open.details.managedSessionRestoreDisabled, true);
+						const oldSession = open.details.sessionName;
 						assertIsString(oldSession);
 						const launched = (await readEvents()).find(
 							(entry) => entry.args.includes("open") && entry.sessionName === oldSession,
 						);
 						assert.ok(launched);
-						assert.equal(launched.namespace, "review-space");
-						assert.match(launched.restoreKey ?? "", /^piab-r2-/);
+						assert.equal(readRecord(launched).namespace, "review-space");
+						assert.match(readString(readRecord(launched).restoreKey ?? ""), /^piab-r2-/);
 
 						const replacement = await executeRegisteredTool(harness.tool, harness.ctx, {
 							args: ["open", "https://shop.example.test/replacement"],
@@ -2293,11 +2305,7 @@ if (command === "session") {
 						});
 						assert.equal(replacement.isError, false, JSON.stringify(replacement));
 						assert.equal(
-							(
-								replacement.details?.managedSessionOutcome as
-									| { replacedSessionClosed?: boolean }
-									| undefined
-							)?.replacedSessionClosed,
+							readRecord(replacement.details?.managedSessionOutcome).replacedSessionClosed,
 							false,
 						);
 						const currentSession = replacement.details?.sessionName;
@@ -2306,28 +2314,28 @@ if (command === "session") {
 						const replacementLaunch = (await readEvents()).find(
 							(entry) => entry.args.includes("open") && entry.sessionName === currentSession,
 						);
-						assert.equal(replacementLaunch?.namespace, "");
-						assert.match(replacementLaunch?.restoreKey ?? "", /^piab-r2-/);
+						assert.equal(readRecord(replacementLaunch).namespace, "");
+						assert.match(readString(readRecord(replacementLaunch).restoreKey ?? ""), /^piab-r2-/);
 
 						await withPatchedEnv({ AGENT_BROWSER_NAMESPACE: "Review Space" }, async () => {
 							const beforeRead = (await readEvents()).length;
 							const read = await executeRegisteredTool(harness.tool, harness.ctx, {
 								args: ["--session", oldSession, "read", "https://public.test/"],
 							});
-							assert.equal(read.isError, false, read.content[0]?.text);
+							assert.equal(read.isError, false, read.content[0].text);
 							assert.equal(read.details?.managedSessionOutcome, undefined);
 							const readCalls = (await readEvents()).slice(beforeRead);
 							assert.equal(readCalls.length, 1);
-							assert.equal(readCalls[0].namespaceEnv, "review-space");
-							assert.equal(readCalls[0].restoreKey, launched.restoreKey);
+							assert.equal(readRecord(readCalls[0]).namespaceEnv, "review-space");
+							assert.equal(readRecord(readCalls[0]).restoreKey, readRecord(launched).restoreKey);
 							const before = (await readEvents()).length;
 							const snapshot = await executeRegisteredTool(harness.tool, harness.ctx, {
 								args: ["--session", oldSession, "snapshot", "-i"],
 							});
 							assert.equal(snapshot.isError, false, JSON.stringify(snapshot));
 							assert.equal(snapshot.details?.namespace, "review-space");
-							assert.notEqual(snapshot.details?.managedSessionRestoreDisabled, true);
-							assert.deepEqual(snapshot.details?.effectiveArgs, [
+							assert.notEqual(snapshot.details.managedSessionRestoreDisabled, true);
+							assert.deepEqual(snapshot.details.effectiveArgs, [
 								"--json",
 								"--session",
 								oldSession,
@@ -2346,7 +2354,7 @@ if (command === "session") {
 							});
 							assert.equal(selected.isError, false, JSON.stringify(selected));
 							assert.equal(selected.details?.namespace, "review-space");
-							assert.deepEqual(selected.details?.effectiveArgs, [
+							assert.deepEqual(selected.details.effectiveArgs, [
 								"--json",
 								"--session",
 								oldSession,
@@ -2365,14 +2373,18 @@ if (command === "session") {
 							);
 							assert.equal(
 								inspections.every(
-									(entry) => entry.active && entry.observedRestoreKey === launched.restoreKey,
+									(entry) =>
+										readBoolean(readRecord(entry).active) &&
+										readRecord(entry).observedRestoreKey === readRecord(launched).restoreKey,
 								),
 								true,
 								JSON.stringify(inspections),
 							);
 							assert.equal(
 								dispatched.every(
-									(entry) => entry.sessionName === oldSession && entry.namespace === "review-space",
+									(entry) =>
+										entry.sessionName === oldSession &&
+										readRecord(entry).namespace === "review-space",
 								),
 								true,
 								JSON.stringify(dispatched),
@@ -2389,8 +2401,8 @@ if (command === "session") {
 							assert.equal(
 								content.every(
 									(entry) =>
-										entry.namespaceEnv === "review-space" &&
-										entry.restoreKey === launched.restoreKey,
+										readRecord(entry).namespaceEnv === "review-space" &&
+										readRecord(entry).restoreKey === readRecord(launched).restoreKey,
 								),
 								true,
 								JSON.stringify(content),
@@ -2404,8 +2416,12 @@ if (command === "session") {
 							const waitDeadline = Date.now() + CONCURRENCY_TEST_TIMEOUT_MS;
 							while (
 								Date.now() <= waitDeadline &&
+								// Observe the current fixture receipt before deciding whether the next poll or state transition may proceed.
+								// oxlint-disable-next-line no-await-in-loop
 								!(await readEvents()).some((entry) => entry.event === "wait-start")
 							) {
+								// Wait between receipt polls so the fixture process can advance before the next observation.
+								// oxlint-disable-next-line no-await-in-loop
 								await delay(10);
 							}
 							assert.ok(
@@ -2450,7 +2466,7 @@ if (command === "session") {
 								(entry) => entry.sessionName === currentSession && entry.args.includes("snapshot"),
 							);
 							assert.ok(waitEnd >= 0 && currentStart > waitEnd, JSON.stringify(events));
-							assert.equal(events[currentStart]?.namespace, "");
+							assert.equal(readRecord(events[currentStart]).namespace, "");
 
 							await runExtensionEvent(
 								harness.handlers,
@@ -2473,17 +2489,20 @@ if (command === "session") {
 							const resumedRead = await executeRegisteredTool(resumed.tool, resumed.ctx, {
 								args: ["--session", oldSession, "read", "https://public.test/"],
 							});
-							assert.equal(resumedRead.isError, false, resumedRead.content[0]?.text);
+							assert.equal(resumedRead.isError, false, resumedRead.content[0].text);
 							const resumedReadCalls = (await readEvents()).slice(beforeResumedRead);
 							assert.equal(resumedReadCalls.length, 1);
-							assert.equal(resumedReadCalls[0].namespaceEnv, "review-space");
-							assert.equal(resumedReadCalls[0].restoreKey, launched.restoreKey);
+							assert.equal(readRecord(resumedReadCalls[0]).namespaceEnv, "review-space");
+							assert.equal(
+								readRecord(resumedReadCalls[0]).restoreKey,
+								readRecord(launched).restoreKey,
+							);
 							const resumedOld = await executeRegisteredTool(resumed.tool, resumed.ctx, {
 								args: ["--session", oldSession, "snapshot", "-i"],
 							});
 							assert.equal(resumedOld.isError, false, JSON.stringify(resumedOld));
 							assert.equal(resumedOld.details?.namespace, "review-space");
-							assert.notEqual(resumedOld.details?.managedSessionRestoreDisabled, true);
+							assert.notEqual(resumedOld.details.managedSessionRestoreDisabled, true);
 							const resumedCurrent = await executeRegisteredTool(resumed.tool, resumed.ctx, {
 								args: ["snapshot", "-i"],
 							});
@@ -2497,8 +2516,8 @@ if (command === "session") {
 									)
 									.every(
 										(entry) =>
-											entry.namespace === "review-space" &&
-											entry.restoreKey === launched.restoreKey,
+											readRecord(entry).namespace === "review-space" &&
+											readRecord(entry).restoreKey === readRecord(launched).restoreKey,
 									),
 								true,
 								JSON.stringify(resumedEvents),
@@ -2508,7 +2527,11 @@ if (command === "session") {
 								["--namespace", "review-space", "--session", oldSession, "close"],
 								["close"],
 							]) {
+								// Restore scenarios share environment and browser ownership; complete each transition and cleanup in order.
+								// oxlint-disable-next-line no-await-in-loop
 								const closed = await executeRegisteredTool(resumed.tool, resumed.ctx, { args });
+								// The nonempty args fixture matrix exhaustively verifies each case; any failed assertion fails the test.
+								// oxlint-disable-next-line node-test/no-conditional-assertion
 								assert.equal(closed.isError, false, JSON.stringify(closed));
 							}
 						});
@@ -2572,10 +2595,10 @@ if (args.includes("session") && args.includes("info")) {
 					});
 					assert.equal(compatOpen.isError, false, JSON.stringify(compatOpen));
 					assert.equal(
-						(compatOpen.details?.compatibilityWorkaround as { id?: string } | undefined)?.id,
+						readRecord(compatOpen.details?.compatibilityWorkaround).id,
 						"cloudflare-headless-user-agent",
 					);
-					const compatSessionName = String(compatOpen.details?.sessionName ?? "");
+					const compatSessionName = readString(compatOpen.details?.sessionName ?? "");
 
 					const replacement = await executeRegisteredTool(harness.tool, harness.ctx, {
 						args: ["open", "https://example.com/replacement"],
@@ -2583,11 +2606,7 @@ if (args.includes("session") && args.includes("info")) {
 					});
 					assert.equal(replacement.isError, false, JSON.stringify(replacement));
 					assert.equal(
-						(
-							replacement.details?.managedSessionOutcome as
-								| { replacedSessionClosed?: boolean }
-								| undefined
-						)?.replacedSessionClosed,
+						readRecord(replacement.details?.managedSessionOutcome).replacedSessionClosed,
 						false,
 					);
 
@@ -2596,7 +2615,7 @@ if (args.includes("session") && args.includes("info")) {
 					});
 					assert.equal(oldFollowUp.isError, false, JSON.stringify(oldFollowUp));
 					assert.equal(
-						(oldFollowUp.details?.compatibilityWorkaround as { id?: string } | undefined)?.id,
+						readRecord(oldFollowUp.details?.compatibilityWorkaround).id,
 						"cloudflare-headless-user-agent",
 					);
 
@@ -2617,8 +2636,7 @@ if (args.includes("session") && args.includes("info")) {
 					);
 					assert.equal(resumedOldFollowUp.isError, false, JSON.stringify(resumedOldFollowUp));
 					assert.equal(
-						(resumedOldFollowUp.details?.compatibilityWorkaround as { id?: string } | undefined)
-							?.id,
+						readRecord(resumedOldFollowUp.details?.compatibilityWorkaround).id,
 						"cloudflare-headless-user-agent",
 					);
 
@@ -2631,7 +2649,7 @@ if (args.includes("session") && args.includes("info")) {
 					assert.equal(oldFollowUps.length, 2);
 					assert.equal(
 						oldFollowUps.every((entry) => {
-							const userAgent = (entry as { userAgent?: unknown }).userAgent;
+							const userAgent = readRecord(entry).userAgent;
 							return (
 								entry.args.includes("--user-agent") &&
 								typeof userAgent === "string" &&
@@ -2697,20 +2715,9 @@ if (args.includes("session") && args.includes("info")) {
 					sessionMode: "fresh",
 				});
 				assert.equal(freshFailure.isError, true, JSON.stringify(freshFailure));
+				assert.equal(readRecord(freshFailure.details?.managedSessionOutcome).status, "replaced");
 				assert.equal(
-					(
-						freshFailure.details?.managedSessionOutcome as
-							| { replacedSessionClosed?: boolean; status?: string }
-							| undefined
-					)?.status,
-					"replaced",
-				);
-				assert.equal(
-					(
-						freshFailure.details?.managedSessionOutcome as
-							| { replacedSessionClosed?: boolean }
-							| undefined
-					)?.replacedSessionClosed,
+					readRecord(freshFailure.details?.managedSessionOutcome).replacedSessionClosed,
 					true,
 				);
 
@@ -2797,32 +2804,32 @@ process.stdout.write(JSON.stringify({ success: true, data: { url: args[args.leng
 				});
 				assert.equal(profiledOpen.isError, false);
 				assert.equal(
-					(profiledOpen.details?.effectiveArgs as string[] | undefined)?.includes("--profile"),
+					readArray(profiledOpen.details?.effectiveArgs).map(readString).includes("--profile"),
 					true,
 				);
 				assert.notEqual(profiledOpen.details?.sessionName, firstSessionName);
 				const invocations = await readInvocationLog(logPath);
 				assert.equal(invocations.length, 5);
-				assert.deepEqual(invocations[1]?.args, [
+				assert.deepEqual(invocations[1].args, [
 					"--json",
 					"--session",
-					String(firstSessionName),
+					readString(firstSessionName),
 					"tab",
 					"list",
 				]);
-				assert.equal(invocations[2]?.args.includes("--profile"), true);
-				assert.equal(invocations[2]?.args.includes(String(firstSessionName)), false);
-				assert.deepEqual(invocations[3]?.args, [
+				assert.equal(invocations[2].args.includes("--profile"), true);
+				assert.equal(invocations[2].args.includes(readString(firstSessionName)), false);
+				assert.deepEqual(invocations[3].args, [
 					"--json",
 					"--session",
-					String(profiledOpen.details?.sessionName),
+					readString(profiledOpen.details?.sessionName),
 					"tab",
 					"list",
 				]);
-				assert.deepEqual(invocations[4]?.args, [
+				assert.deepEqual(invocations[4].args, [
 					"--json",
 					"--session",
-					String(profiledOpen.details?.sessionName),
+					readString(profiledOpen.details?.sessionName),
 					"tab",
 					"list",
 				]);
@@ -2873,28 +2880,21 @@ process.stdout.write(JSON.stringify(envelope));`,
 						args: ["open", "https://example.com"],
 					});
 					assert.equal(firstOpen.isError, false);
-					assert.equal(
-						(firstOpen.details?.data as { idleTimeout?: string } | undefined)?.idleTimeout,
-						"1234",
-					);
+					assert.equal(readRecord(firstOpen.details?.data).idleTimeout, "1234");
 
 					const afterFirstOpen = await readInvocationLog(logPath);
 					assert.equal(afterFirstOpen.length, 2);
-					assert.equal(afterFirstOpen[0]?.args.includes("--session"), true);
-					assert.equal(afterFirstOpen[0]?.idleTimeout, "1234");
+					assert.equal(afterFirstOpen[0].args.includes("--session"), true);
+					assert.equal(afterFirstOpen[0].idleTimeout, "1234");
 
 					const blocked = await executeRegisteredTool(harness.tool, harness.ctx, {
 						args: ["--profile", "Default", "open", "https://example.com/profile"],
 					});
 					assert.equal(blocked.isError, true);
-					assert.match(String(blocked.details?.validationError ?? ""), /launch-scoped flags/i);
+					assert.match(readString(blocked.details?.validationError ?? ""), /launch-scoped flags/i);
 					assert.equal(blocked.details?.sessionMode, "auto");
 					assert.equal(
-						(
-							blocked.details?.sessionRecoveryHint as
-								| { recommendedSessionMode?: string }
-								| undefined
-						)?.recommendedSessionMode,
+						readRecord(blocked.details.sessionRecoveryHint).recommendedSessionMode,
 						"fresh",
 					);
 					assert.equal((await readInvocationLog(logPath)).length, 2);
@@ -2912,18 +2912,18 @@ process.stdout.write(JSON.stringify(envelope));`,
 
 					const finalInvocations = await readInvocationLog(logPath);
 					assert.equal(finalInvocations.length, 6);
-					assert.equal(finalInvocations[3]?.args.includes("--profile"), true);
-					assert.deepEqual(finalInvocations[4]?.args, [
+					assert.equal(finalInvocations[3].args.includes("--profile"), true);
+					assert.deepEqual(finalInvocations[4].args, [
 						"--json",
 						"--session",
-						String(reopened.details?.sessionName),
+						readString(reopened.details?.sessionName),
 						"tab",
 						"list",
 					]);
-					assert.deepEqual(finalInvocations[5]?.args, [
+					assert.deepEqual(finalInvocations[5].args, [
 						"--json",
 						"--session",
-						String(reopened.details?.sessionName),
+						readString(reopened.details?.sessionName),
 						"tab",
 						"list",
 					]);
@@ -2984,14 +2984,14 @@ process.stdout.write(JSON.stringify(envelope));`,
 					});
 					assert.equal(profiledOpen.isError, false);
 					assert.equal(profiledOpen.details?.sessionMode, "fresh");
-					assert.equal(profiledOpen.details?.usedImplicitSession, false);
-					const freshSessionName = profiledOpen.details?.sessionName;
+					assert.equal(profiledOpen.details.usedImplicitSession, false);
+					const freshSessionName = profiledOpen.details.sessionName;
 					assert.equal(typeof freshSessionName, "string");
 					assert.notEqual(freshSessionName, firstSessionName);
 					assert.equal(
-						((profiledOpen.details?.effectiveArgs as string[] | undefined) ?? []).includes(
-							String(freshSessionName),
-						),
+						readArray(profiledOpen.details.effectiveArgs)
+							.map(readString)
+							.includes(readString(freshSessionName)),
 						true,
 					);
 					await runExtensionEvent(firstHarness.handlers, "session_shutdown");
@@ -3020,61 +3020,65 @@ process.stdout.write(JSON.stringify(envelope));`,
 
 					const invocations = await readInvocationLog(logPath);
 					assert.equal(invocations.length, 10);
-					assert.deepEqual(invocations[0]?.args, [
+					assert.deepEqual(invocations[0].args, [
 						"--json",
 						"--session",
-						String(firstSessionName),
+						readString(firstSessionName),
 						"open",
 						"https://example.com",
 					]);
-					assert.equal(invocations[0]?.idleTimeout, "1234");
-					assert.deepEqual(invocations[1]?.args, [
+					assert.equal(invocations[0].idleTimeout, "1234");
+					assert.deepEqual(invocations[1].args, [
 						"--json",
 						"--session",
-						String(firstSessionName),
+						readString(firstSessionName),
 						"tab",
 						"list",
 					]);
-					assert.deepEqual(invocations[2]?.args, [
+					assert.deepEqual(invocations[2].args, [
 						"--json",
 						"--session",
-						String(freshSessionName),
+						readString(freshSessionName),
 						"--profile",
 						"Default",
 						"open",
 						"https://example.com/profile",
 					]);
-					assert.equal(invocations[2]?.idleTimeout, "1234");
-					assert.deepEqual(invocations[3]?.args, [
+					assert.equal(invocations[2].idleTimeout, "1234");
+					assert.deepEqual(invocations[3].args, [
 						"--json",
 						"--session",
-						String(freshSessionName),
+						readString(freshSessionName),
 						"tab",
 						"list",
 					]);
-					assert.deepEqual(invocations[4]?.args, [
+					assert.deepEqual(invocations[4].args, [
 						"--json",
 						"--session",
-						String(freshSessionName),
+						readString(freshSessionName),
 						"tab",
 						"list",
 					]);
-					assert.deepEqual(invocations[5]?.args, ["--session", String(firstSessionName), "close"]);
-					assert.deepEqual(invocations[6]?.args, [
+					assert.deepEqual(invocations[5].args, [
+						"--session",
+						readString(firstSessionName),
+						"close",
+					]);
+					assert.deepEqual(invocations[6].args, [
 						"--json",
 						"--session",
-						String(freshSessionName),
+						readString(freshSessionName),
 						"tab",
 						"list",
 					]);
-					assert.deepEqual(invocations[7]?.args, [
+					assert.deepEqual(invocations[7].args, [
 						"--json",
 						"--session",
-						String(freshSessionName),
+						readString(freshSessionName),
 						"snapshot",
 						"-i",
 					]);
-					assert.equal(invocations[7]?.idleTimeout, "1234");
+					assert.equal(invocations[7].idleTimeout, "1234");
 					assert.deepEqual(
 						invocations.slice(8).map((row) => row.args.slice(-2)),
 						[
@@ -3154,14 +3158,14 @@ process.stdout.write(JSON.stringify(envelope));`,
 				assert.ok(
 					invocations.some(
 						(entry) =>
-							entry.args.includes(String(secondFreshSessionName)) &&
+							entry.args.includes(readString(secondFreshSessionName)) &&
 							entry.args.includes("https://example.com/fresh-2"),
 					),
 				);
 				assert.ok(
 					invocations.some(
 						(entry) =>
-							entry.args.includes(String(thirdFreshSessionName)) &&
+							entry.args.includes(readString(thirdFreshSessionName)) &&
 							entry.args.includes("https://example.com/fresh-3"),
 					),
 				);
@@ -3240,7 +3244,7 @@ process.stdout.write(JSON.stringify(envelope));`,
 					invocations.some(
 						(entry) =>
 							entry.args[0] === "--session" &&
-							entry.args[1] === String(freshSessionName) &&
+							entry.args[1] === readString(freshSessionName) &&
 							entry.args[2] === "close",
 					),
 					false,
@@ -3248,13 +3252,15 @@ process.stdout.write(JSON.stringify(envelope));`,
 				assert.deepEqual(invocations.at(-1)?.args, [
 					"--json",
 					"--session",
-					String(freshSessionName),
+					readString(freshSessionName),
 					"snapshot",
 					"-i",
 				]);
 			});
 		} finally {
-			await writeFile(gatePath, "go", "utf8").catch(() => undefined);
+			await writeFile(gatePath, "go", "utf8").catch(() => {
+				// Teardown may already have removed this gate; the pending calls retain their own failure assertions.
+			});
 			await rm(tempDir, { force: true, recursive: true });
 		}
 	},
@@ -3356,7 +3362,9 @@ process.stdout.write(JSON.stringify(envelope));`,
 				);
 			});
 		} finally {
-			await writeFile(snapshotGatePath, "go", "utf8").catch(() => undefined);
+			await writeFile(snapshotGatePath, "go", "utf8").catch(() => {
+				// Teardown may already have removed this gate; the pending snapshot retains its own failure assertions.
+			});
 			await rm(tempDir, { force: true, recursive: true });
 		}
 	},
@@ -3420,8 +3428,8 @@ process.stdout.write(JSON.stringify(envelope));`,
 				assert.equal(typeof secondFresh.details?.sessionName, "string");
 				assert.notEqual(firstFresh.details?.sessionName, secondFresh.details?.sessionName);
 
-				const firstSessionName = String(firstFresh.details?.sessionName);
-				const secondSessionName = String(secondFresh.details?.sessionName);
+				const firstSessionName = readString(firstFresh.details?.sessionName);
+				const secondSessionName = readString(secondFresh.details?.sessionName);
 				const invocations = await readInvocationLog(logPath);
 				assert.ok(
 					invocations.some(
@@ -3439,7 +3447,9 @@ process.stdout.write(JSON.stringify(envelope));`,
 				);
 			});
 		} finally {
-			await writeFile(firstGatePath, "go", "utf8").catch(() => undefined);
+			await writeFile(firstGatePath, "go", "utf8").catch(() => {
+				// Teardown may already have removed this gate; the pending fresh launches retain their own failure assertions.
+			});
 			await rm(tempDir, { force: true, recursive: true });
 		}
 	},
@@ -3450,10 +3460,14 @@ test(
 	{ concurrency: false },
 	async () => {
 		for (const wrongUrl of ["https://other.example/", "about:blank"]) {
+			// Restore scenarios share environment and browser ownership; complete each transition and cleanup in order.
+			// oxlint-disable-next-line no-await-in-loop
 			const tempDir = await mkdtemp(join(tmpdir(), "pi-agent-browser-resume-pin-"));
 			const logPath = join(tempDir, "invocations.log");
 			const selectedPath = join(tempDir, "selected");
 			const basePath = process.env.PATH ?? "";
+			// Restore scenarios share environment and browser ownership; complete each transition and cleanup in order.
+			// oxlint-disable-next-line no-await-in-loop
 			await writeFakeAgentBrowserBinary(
 				tempDir,
 				`const fs = require("node:fs");
@@ -3471,6 +3485,8 @@ if (args.includes("snapshot")) data = { origin: url, refs: { e1: { name: selecte
 process.stdout.write(JSON.stringify({ success: true, data }));`,
 			);
 			try {
+				// Restore scenarios share environment and browser ownership; complete each transition and cleanup in order.
+				// oxlint-disable-next-line no-await-in-loop
 				await withPatchedEnv({ PATH: `${tempDir}:${basePath}` }, async () => {
 					const harness = createExtensionHarness({
 						cwd: tempDir,
@@ -3495,14 +3511,21 @@ process.stdout.write(JSON.stringify({ success: true, data }));`,
 					const snapshot = await executeRegisteredTool(harness.tool, harness.ctx, {
 						args: ["--session", "named", "snapshot", "-i"],
 					});
+					// The nonempty wrongUrl fixture matrix exhaustively verifies each case; any failed assertion fails the test.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
 					assert.equal(snapshot.isError, false, JSON.stringify(snapshot));
-					assert.equal(
-						(snapshot.details?.sessionTabCorrection as { selectedTab: string }).selectedTab,
-						"t1",
-					);
-					assert.match(snapshot.content[0]?.text ?? "", /Example Domain/);
-					assert.doesNotMatch(snapshot.content[0]?.text ?? "", /Wrong page|Origin: about:blank/);
+					// The nonempty wrongUrl fixture matrix exhaustively verifies each case; any failed assertion fails the test.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
+					assert.equal(readRecord(snapshot.details?.sessionTabCorrection).selectedTab, "t1");
+					// The nonempty wrongUrl fixture matrix exhaustively verifies each case; any failed assertion fails the test.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
+					assert.match(snapshot.content[0].text ?? "", /Example Domain/);
+					// The nonempty wrongUrl fixture matrix exhaustively verifies each case; any failed assertion fails the test.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
+					assert.doesNotMatch(snapshot.content[0].text ?? "", /Wrong page|Origin: about:blank/);
 					const invocations = await readInvocationLog(logPath);
+					// The nonempty wrongUrl fixture matrix exhaustively verifies each case; any failed assertion fails the test.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
 					assert.deepEqual(
 						invocations.slice(0, 3).map((entry) => entry.args.slice(3)),
 						[
@@ -3511,13 +3534,19 @@ process.stdout.write(JSON.stringify({ success: true, data }));`,
 							["tab", "list"],
 						],
 					);
+					// The nonempty wrongUrl fixture matrix exhaustively verifies each case; any failed assertion fails the test.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
 					assert.equal(invocations.filter((entry) => entry.args.includes("snapshot")).length, 1);
+					// The nonempty wrongUrl fixture matrix exhaustively verifies each case; any failed assertion fails the test.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
 					assert.equal(
 						invocations.some((entry) => entry.args.includes("batch")),
 						false,
 					);
 				});
 			} finally {
+				// Restore scenarios share environment and browser ownership; complete each transition and cleanup in order.
+				// oxlint-disable-next-line no-await-in-loop
 				await rm(tempDir, { force: true, recursive: true });
 			}
 		}
@@ -3555,17 +3584,11 @@ process.stdout.write(JSON.stringify({ success: true, data }));`,
 				const opened = await executeRegisteredTool(initial.tool, initial.ctx, {
 					args: ["--session", "named", "open", "https://example.com/"],
 				});
-				assert.equal(
-					(opened.details?.sessionTabTarget as { targetId?: string })?.targetId,
-					"FIRST",
-				);
+				assert.equal(readRecord(opened.details?.sessionTabTarget).targetId, "FIRST");
 				const snapshot = await executeRegisteredTool(initial.tool, initial.ctx, {
 					args: ["--session", "named", "snapshot", "-i"],
 				});
-				assert.equal(
-					(snapshot.details?.sessionTabTarget as { targetId?: string })?.targetId,
-					"FIRST",
-				);
+				assert.equal(readRecord(snapshot.details?.sessionTabTarget).targetId, "FIRST");
 				await writeFile(statePath, "SECOND");
 				const branch = initial.ctx.sessionManager.getBranch().slice();
 				const resumed = createExtensionHarness({ cwd: tempDir, branch: branch.slice() });
@@ -3579,43 +3602,28 @@ process.stdout.write(JSON.stringify({ success: true, data }));`,
 					args: ["--session", "named", "click", "#save"],
 				});
 				assert.equal(clicked.isError, false, JSON.stringify(clicked));
-				assert.equal((clicked.details?.data as { clicked?: string })?.clicked, "FIRST");
-				assert.equal(
-					(clicked.details?.sessionTabTarget as { targetId?: string })?.targetId,
-					"FIRST",
-				);
+				assert.equal(readRecord(clicked.details?.data).clicked, "FIRST");
+				assert.equal(readRecord(clicked.details?.sessionTabTarget).targetId, "FIRST");
 				const newTab = await executeRegisteredTool(resumed.tool, resumed.ctx, {
 					args: ["--session", "named", "click", "#save", "--new-tab"],
 				});
-				assert.equal(
-					(newTab.details?.sessionTabTarget as { targetId?: string })?.targetId,
-					"SECOND",
-				);
+				assert.equal(readRecord(newTab.details?.sessionTabTarget).targetId, "SECOND");
 				await writeFile(statePath, "FIRST");
 				const observed = await executeRegisteredTool(resumed.tool, resumed.ctx, {
 					args: ["--session", "named", "get", "url"],
 				});
-				assert.equal(
-					(observed.details?.sessionTabTarget as { targetId?: string })?.targetId,
-					"FIRST",
-				);
+				assert.equal(readRecord(observed.details?.sessionTabTarget).targetId, "FIRST");
 				await writeFile(statePath, "SECOND");
 				const batchObserved = await executeRegisteredTool(resumed.tool, resumed.ctx, {
 					args: ["--session", "named", "batch", "--bail"],
 					stdin: JSON.stringify([["get", "url"]]),
 				});
-				assert.equal(
-					(batchObserved.details?.sessionTabTarget as { targetId?: string })?.targetId,
-					"SECOND",
-				);
+				assert.equal(readRecord(batchObserved.details?.sessionTabTarget).targetId, "SECOND");
 				await writeFile(statePath, "FIRST");
 				const popup = await executeRegisteredTool(initial.tool, initial.ctx, {
 					args: ["--session", "named", "click", "#popup"],
 				});
-				assert.equal(
-					(popup.details?.sessionTabTarget as { targetId?: string })?.targetId,
-					"SECOND",
-				);
+				assert.equal(readRecord(popup.details?.sessionTabTarget).targetId, "SECOND");
 				await writeFile(statePath, "GONE");
 				const closedTarget = createExtensionHarness({ cwd: tempDir, branch: branch.slice() });
 				await runExtensionEvent(
@@ -3628,13 +3636,13 @@ process.stdout.write(JSON.stringify({ success: true, data }));`,
 					args: ["--session", "named", "click", "#save"],
 				});
 				assert.equal(rejected.isError, true);
-				assert.match(rejected.content[0]?.text ?? "", /could not re-select/);
+				assert.match(rejected.content[0].text ?? "", /could not re-select/);
 				await writeFile(statePath, "DRIFTED");
 				const drifted = await executeRegisteredTool(closedTarget.tool, closedTarget.ctx, {
 					args: ["--session", "named", "click", "#save"],
 				});
 				assert.equal(drifted.isError, true);
-				assert.match(drifted.content[0]?.text ?? "", /could not re-select/);
+				assert.match(drifted.content[0].text ?? "", /could not re-select/);
 			});
 		} finally {
 			await rm(tempDir, { force: true, recursive: true });
@@ -3680,6 +3688,8 @@ if (!success) process.exitCode = 1;`,
 		try {
 			await withPatchedEnv({ PATH: `${tempDir}:${process.env.PATH ?? ""}` }, async () => {
 				for (const raw of [false, true]) {
+					// Restore scenarios share environment and browser ownership; complete each transition and cleanup in order.
+					// oxlint-disable-next-line no-await-in-loop
 					await rm(statePath, { force: true });
 					const branch = [
 						createToolBranchEntry({
@@ -3697,7 +3707,11 @@ if (!success) process.exitCode = 1;`,
 						}),
 					];
 					const live = createExtensionHarness({ cwd: tempDir, branch });
+					// Restore scenarios share environment and browser ownership; complete each transition and cleanup in order.
+					// oxlint-disable-next-line no-await-in-loop
 					await runExtensionEvent(live.handlers, "session_start", { reason: "resume" }, live.ctx);
+					// Restore scenarios share environment and browser ownership; complete each transition and cleanup in order.
+					// oxlint-disable-next-line no-await-in-loop
 					const failed = await executeRegisteredTool(live.tool, live.ctx, {
 						args: [
 							"--session",
@@ -3715,7 +3729,11 @@ if (!success) process.exitCode = 1;`,
 									],
 						),
 					});
+					// The nonempty raw fixture matrix exhaustively verifies each case; any failed assertion fails the test.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
 					assert.equal(failed.isError, true);
+					// The nonempty raw fixture matrix exhaustively verifies each case; any failed assertion fails the test.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
 					assert.deepEqual(failed.details?.sessionTabTarget, {
 						title: "Error",
 						url: "chrome-error://chromewebdata/",
@@ -3725,6 +3743,8 @@ if (!success) process.exitCode = 1;`,
 						cwd: tempDir,
 						branch: live.ctx.sessionManager.getBranch().slice(),
 					});
+					// Restore scenarios share environment and browser ownership; complete each transition and cleanup in order.
+					// oxlint-disable-next-line no-await-in-loop
 					await runExtensionEvent(
 						replay.handlers,
 						"session_start",
@@ -3732,11 +3752,17 @@ if (!success) process.exitCode = 1;`,
 						replay.ctx,
 					);
 					for (const harness of [live, replay]) {
+						// Restore scenarios share environment and browser ownership; complete each transition and cleanup in order.
+						// oxlint-disable-next-line no-await-in-loop
 						const snapshot = await executeRegisteredTool(harness.tool, harness.ctx, {
 							args: ["--session", "named", "snapshot", "-i"],
 						});
+						// The nonempty harness fixture matrix exhaustively verifies each case; any failed assertion fails the test.
+						// oxlint-disable-next-line node-test/no-conditional-assertion
 						assert.equal(snapshot.isError, false, JSON.stringify(snapshot));
-						assert.match(snapshot.content[0]?.text ?? "", /Error page/);
+						// The nonempty harness fixture matrix exhaustively verifies each case; any failed assertion fails the test.
+						// oxlint-disable-next-line node-test/no-conditional-assertion
+						assert.match(snapshot.content[0].text ?? "", /Error page/);
 					}
 				}
 			});
@@ -3810,7 +3836,7 @@ if (args.includes("tab") && args.includes("list")) {
 					stdin: "document.title",
 				});
 				assert.equal(evalResult.isError, false, JSON.stringify(evalResult));
-				assert.match((evalResult.content[0] as { text: string }).text, /Example Domain/);
+				assert.match(readString(readRecord(evalResult.content[0]).text), /Example Domain/);
 				assert.deepEqual(evalResult.details?.sessionTabTarget, {
 					title: "Example Domain",
 					url: "https://example.com/",
@@ -3818,14 +3844,14 @@ if (args.includes("tab") && args.includes("list")) {
 
 				const invocations = await readInvocationLog(logPath);
 				assert.equal(invocations.length, 7);
-				assert.deepEqual(invocations[0]?.args, ["--json", "--session", "named", "tab", "list"]);
-				assert.deepEqual(invocations[1]?.args, ["--json", "--session", "named", "tab", "t1"]);
-				assert.deepEqual(invocations[2]?.args, ["--json", "--session", "named", "tab", "list"]);
-				assert.deepEqual(invocations[3]?.args, ["--json", "--session", "named", "get", "url"]);
-				assert.deepEqual(invocations[4]?.args, ["--json", "--session", "named", "eval", "--stdin"]);
-				assert.equal(invocations[4]?.stdin, "document.title");
-				assert.deepEqual(invocations[5]?.args, ["--json", "--session", "named", "get", "url"]);
-				assert.deepEqual(invocations[6]?.args, ["--json", "--session", "named", "tab", "list"]);
+				assert.deepEqual(invocations[0].args, ["--json", "--session", "named", "tab", "list"]);
+				assert.deepEqual(invocations[1].args, ["--json", "--session", "named", "tab", "t1"]);
+				assert.deepEqual(invocations[2].args, ["--json", "--session", "named", "tab", "list"]);
+				assert.deepEqual(invocations[3].args, ["--json", "--session", "named", "get", "url"]);
+				assert.deepEqual(invocations[4].args, ["--json", "--session", "named", "eval", "--stdin"]);
+				assert.equal(invocations[4].stdin, "document.title");
+				assert.deepEqual(invocations[5].args, ["--json", "--session", "named", "get", "url"]);
+				assert.deepEqual(invocations[6].args, ["--json", "--session", "named", "tab", "list"]);
 			});
 		} finally {
 			await rm(tempDir, { force: true, recursive: true });
@@ -3878,11 +3904,14 @@ process.stdout.write(JSON.stringify({ success: true, data: { title: "Wrong", url
 				});
 
 				assert.equal(result.isError, true, JSON.stringify(result));
-				assert.match(String(result.details?.validationError ?? ""), /stdin/i);
-				assert.match(String(result.details?.validationError ?? ""), /batch/i);
-				assert.match(String(result.details?.validationError ?? ""), /eval --stdin/i);
-				assert.match(String(result.details?.validationError ?? ""), /auth save --password-stdin/i);
-				assert.match(String((result.content[0] as { text: string }).text ?? ""), /stdin/i);
+				assert.match(readString(result.details?.validationError ?? ""), /stdin/i);
+				assert.match(readString(result.details?.validationError ?? ""), /batch/i);
+				assert.match(readString(result.details?.validationError ?? ""), /eval --stdin/i);
+				assert.match(
+					readString(result.details?.validationError ?? ""),
+					/auth save --password-stdin/i,
+				);
+				assert.match(readString(readRecord(result.content[0]).text ?? ""), /stdin/i);
 				assert.equal(result.details?.sessionName, "named");
 
 				const invocations = await readInvocationLog(logPath);
@@ -3976,16 +4005,14 @@ if (args.includes("batch")) {
 					]),
 				});
 				assert.equal(batchResult.isError, false, JSON.stringify(batchResult));
-				assert.match((batchResult.content[0] as { text: string }).text, /Example Org/);
+				assert.match(readString(readRecord(batchResult.content[0]).text), /Example Org/);
 				assert.deepEqual(batchResult.details?.sessionTabTarget, {
 					title: "Example Org",
 					url: "https://example.org/",
 				});
-				const batchSteps = batchResult.details?.batchSteps as
-					| Array<{ command?: string[] }>
-					| undefined;
+				const batchSteps = readArray(batchResult.details.batchSteps).map(readRecord);
 				assert.deepEqual(
-					batchSteps?.map((step) => step.command),
+					batchSteps.map((step) => step.command),
 					[
 						["open", "https://example.org"],
 						["get", "title"],
@@ -3995,10 +4022,10 @@ if (args.includes("batch")) {
 
 				const invocations = await readInvocationLog(logPath);
 				assert.equal(invocations.length, 3);
-				assert.deepEqual(invocations[2]?.args, ["--json", "--session", "named", "tab", "list"]);
-				assert.deepEqual(invocations[0]?.args, ["--json", "--session", "named", "get", "url"]);
-				assert.deepEqual(invocations[1]?.args, ["--json", "--session", "named", "batch"]);
-				assert.deepEqual(JSON.parse(String(invocations[1]?.stdin ?? "[]")), [
+				assert.deepEqual(invocations[2].args, ["--json", "--session", "named", "tab", "list"]);
+				assert.deepEqual(invocations[0].args, ["--json", "--session", "named", "get", "url"]);
+				assert.deepEqual(invocations[1].args, ["--json", "--session", "named", "batch"]);
+				assert.deepEqual(JSON.parse(readString(invocations[1].stdin ?? "[]")), [
 					["open", "https://example.org"],
 					["get", "title"],
 					["get", "url"],
@@ -4033,9 +4060,13 @@ test(
 		] as const;
 
 		for (const scenario of scenarios) {
+			// Restore scenarios share environment and browser ownership; complete each transition and cleanup in order.
+			// oxlint-disable-next-line no-await-in-loop
 			const tempDir = await mkdtemp(join(tmpdir(), "pi-agent-browser-test-"));
 			const logPath = join(tempDir, "invocations.log");
 			const basePath = process.env.PATH ?? "";
+			// Restore scenarios share environment and browser ownership; complete each transition and cleanup in order.
+			// oxlint-disable-next-line no-await-in-loop
 			await writeFakeAgentBrowserBinary(
 				tempDir,
 				`const fs = require("node:fs");
@@ -4055,6 +4086,8 @@ if (args.includes("batch")) {
 			);
 
 			try {
+				// Restore scenarios share environment and browser ownership; complete each transition and cleanup in order.
+				// oxlint-disable-next-line no-await-in-loop
 				await withPatchedEnv({ PATH: `${tempDir}:${basePath}` }, async () => {
 					const resumedHarness = createExtensionHarness({
 						branch: [
@@ -4081,21 +4114,29 @@ if (args.includes("batch")) {
 						args: ["--session", "named", "batch"],
 						stdin: scenario.stdin,
 					});
+					// The nonempty scenario fixture matrix exhaustively verifies each case; any failed assertion fails the test.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
 					assert.equal(
 						batchResult.isError,
 						true,
 						`${scenario.name}: ${JSON.stringify(batchResult)}`,
 					);
+					// The nonempty scenario fixture matrix exhaustively verifies each case; any failed assertion fails the test.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
 					assert.match(
-						String(batchResult.details?.validationError ?? ""),
+						readString(batchResult.details?.validationError ?? ""),
 						scenario.errorPattern,
 						scenario.name,
 					);
 
 					const invocations = await readInvocationLog(logPath);
+					// The nonempty scenario fixture matrix exhaustively verifies each case; any failed assertion fails the test.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
 					assert.equal(invocations.length, 0, scenario.name);
 				});
 			} finally {
+				// Restore scenarios share environment and browser ownership; complete each transition and cleanup in order.
+				// oxlint-disable-next-line no-await-in-loop
 				await rm(tempDir, { force: true, recursive: true });
 			}
 		}
@@ -4188,9 +4229,9 @@ if (args.includes("batch")) {
 
 				const invocations = await readInvocationLog(logPath);
 				assert.equal(invocations.length, 4);
-				assert.deepEqual(invocations[3]?.args, ["--json", "--session", "named", "tab", "list"]);
-				assert.deepEqual(invocations[0]?.args, ["--json", "--session", "named", "tab", "list"]);
-				assert.deepEqual(JSON.parse(String(invocations[2]?.stdin ?? "[]")), [
+				assert.deepEqual(invocations[3].args, ["--json", "--session", "named", "tab", "list"]);
+				assert.deepEqual(invocations[0].args, ["--json", "--session", "named", "tab", "list"]);
+				assert.deepEqual(JSON.parse(readString(invocations[2].stdin ?? "[]")), [
 					["get", "title"],
 					["open", "https://example.org"],
 					["get", "url"],
@@ -4236,17 +4277,17 @@ process.exit(shouldFail ? 1 : 0);`,
 				assert.equal(followUp.isError, false);
 				assert.equal(followUp.details?.validationError, undefined);
 				assert.equal(
-					(followUp.details?.effectiveArgs as string[] | undefined)?.includes("--profile"),
+					readArray(followUp.details?.effectiveArgs).map(readString).includes("--profile"),
 					true,
 				);
 
 				const invocations = await readInvocationLog(logPath);
 				assert.equal(invocations.length, 3);
-				assert.equal(invocations[1]?.args.includes("--profile"), true);
-				assert.deepEqual(invocations[2]?.args, [
+				assert.equal(invocations[1].args.includes("--profile"), true);
+				assert.deepEqual(invocations[2].args, [
 					"--json",
 					"--session",
-					String(followUp.details?.sessionName),
+					readString(followUp.details?.sessionName),
 					"tab",
 					"list",
 				]);
@@ -4287,18 +4328,24 @@ process.stdout.write(JSON.stringify({ success: true, data: { title: "Example Dom
 					["--state", "/tmp/auth.json", "open", "https://example.com/state"],
 					["--auto-connect", "open", "https://example.com/auto"],
 				] as const) {
+					// Restore scenarios share environment and browser ownership; complete each transition and cleanup in order.
+					// oxlint-disable-next-line no-await-in-loop
 					const blocked = await executeRegisteredTool(harness.tool, harness.ctx, {
 						args: [...args],
 					});
+					// The nonempty args fixture matrix exhaustively verifies each case; any failed assertion fails the test.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
 					assert.equal(blocked.isError, true, `expected ${args[0]} to be blocked`);
-					assert.match(String(blocked.details?.validationError ?? ""), /launch-scoped flags/i);
+					// The nonempty args fixture matrix exhaustively verifies each case; any failed assertion fails the test.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
+					assert.match(readString(blocked.details?.validationError ?? ""), /launch-scoped flags/i);
+					// The nonempty args fixture matrix exhaustively verifies each case; any failed assertion fails the test.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
 					assert.equal(blocked.details?.sessionMode, "auto");
+					// The nonempty args fixture matrix exhaustively verifies each case; any failed assertion fails the test.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
 					assert.equal(
-						(
-							blocked.details?.sessionRecoveryHint as
-								| { recommendedSessionMode?: string }
-								| undefined
-						)?.recommendedSessionMode,
+						readRecord(blocked.details.sessionRecoveryHint).recommendedSessionMode,
 						"fresh",
 					);
 				}
@@ -4354,10 +4401,10 @@ if (args.includes("tab") && args.includes("list")) {
 
 				const invocations = await readInvocationLog(logPath);
 				assert.equal(invocations.length, 4);
-				assert.deepEqual(invocations[3]?.args?.slice(-2), ["tab", "list"]);
-				assert.equal(invocations[0]?.args.includes("--session-name"), true);
-				assert.deepEqual(invocations[1]?.args?.slice(-2), ["tab", "list"]);
-				assert.deepEqual(invocations[2]?.args?.slice(-2), ["tab", "t1"]);
+				assert.deepEqual(invocations[3].args.slice(-2), ["tab", "list"]);
+				assert.equal(invocations[0].args.includes("--session-name"), true);
+				assert.deepEqual(invocations[1].args.slice(-2), ["tab", "list"]);
+				assert.deepEqual(invocations[2].args.slice(-2), ["tab", "t1"]);
 			});
 		} finally {
 			await rm(tempDir, { force: true, recursive: true });

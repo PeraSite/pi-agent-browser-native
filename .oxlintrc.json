@@ -1,6 +1,12 @@
 {
 	"$schema": "./node_modules/oxlint/configuration_schema.json",
 	"plugins": ["eslint", "typescript", "unicorn", "oxc", "import", "promise", "node"],
+	"jsPlugins": [
+		{
+			"name": "node-test",
+			"specifier": "eslint-node-test"
+		}
+	],
 	"categories": {
 		"correctness": "error",
 		"suspicious": "error",
@@ -18,6 +24,12 @@
 		"respectEslintDisableDirectives": false
 	},
 	"rules": {
+		"node-test/require-assertion": "error",
+		"node-test/no-conditional-assertion": "error",
+		"node-test/no-nested-tests": "error",
+		"node-test/no-unawaited-subtest": "error",
+		"node-test/no-unawaited-rejects": "error",
+		"node-test/no-only-test": "error",
 		"typescript/no-explicit-any": [
 			"error",
 			{
@@ -134,7 +146,13 @@
 				"checkThenables": true,
 				"ignoreIIFE": false,
 				"ignoreVoid": false,
-				"allowForKnownSafeCalls": [],
+				"allowForKnownSafeCalls": [
+					{
+						"from": "package",
+						"package": "node:test",
+						"name": ["test", "it", "describe", "suite"]
+					}
+				],
 				"allowForKnownSafePromises": []
 			}
 		],
@@ -198,8 +216,81 @@
 				"treatMethodsAsReadonly": false,
 				"allow": [
 					{
+						"from": "package",
+						"package": "@earendil-works/pi-ai",
+						"name": ["Model", "Context", "SimpleStreamOptions", "JsonObject", "ToolCall"]
+					},
+					{
+						"from": "package",
+						"package": "@earendil-works/pi-coding-agent",
+						"name": [
+							"ExtensionAPI",
+							"ExtensionContext",
+							"ToolDefinition",
+							"SourceInfo",
+							"Theme",
+							"ToolNamespace",
+							"SessionManager",
+							"AgentSession",
+							"ModelRuntime",
+							"ExtensionToolContext"
+						]
+					},
+					{
+						"from": "package",
+						"package": "@earendil-works/pi-agent-core",
+						"name": ["AgentToolResult"]
+					},
+					{
+						"from": "package",
+						"package": "@earendil-works/pi-tui",
+						"name": ["Component"]
+					},
+					{
+						"from": "package",
+						"package": "node",
+						"name": [
+							"ChildProcess",
+							"ChildProcessWithoutNullStreams",
+							"SpawnOptions",
+							"ExecFileOptions",
+							"URL",
+							"StatOptions",
+							"ReadFileOptions",
+							"Dirent",
+							"Stats",
+							"FileHandle",
+							"Server",
+							"IncomingMessage",
+							"ServerResponse",
+							"AddressInfo",
+							"Buffer",
+							"Timeout",
+							"ProcessEnv",
+							"EventEmitter"
+						]
+					},
+					{
+						"from": "package",
+						"package": "typebox",
+						"name": ["TSchemaOptions"]
+					},
+					{
+						"from": "package",
+						"package": "stream-json",
+						"name": ["Token"]
+					},
+					{
+						"from": "package",
+						"package": "node:test",
+						"name": ["TestContext"]
+					},
+					{
 						"from": "lib",
 						"name": [
+							"Error",
+							"RegExp",
+							"Uint8Array",
 							"Promise",
 							"PromiseLike",
 							"Request",
@@ -371,7 +462,13 @@
 				],
 				"max-statements": "off",
 				"max-lines-per-function": "off",
-				"max-lines": "off"
+				"max-lines": "off",
+				"unicorn/no-useless-undefined": [
+					"error",
+					{
+						"checkArguments": false
+					}
+				]
 			}
 		},
 		{
@@ -401,7 +498,4603 @@
 			}
 		},
 		{
-			"files": ["scripts/**/*.mjs", "test/**/*.mjs", "test/**/*.cjs", "platform-smoke.config.mjs"],
+			"files": ["scripts/verify-recording-native.mjs", "scripts/verify-agent-browser-dogfood.ts"],
+			"rules": {
+				"typescript/no-unnecessary-condition": [
+					"error",
+					{
+						"checkTypePredicates": false,
+						"allowConstantLoopConditions": "only-allowed-literals"
+					}
+				],
+				"complexity": [
+					"error",
+					{
+						"max": 15,
+						"variant": "modified"
+					}
+				],
+				"max-depth": [
+					"error",
+					{
+						"max": 4
+					}
+				],
+				"max-params": [
+					"error",
+					{
+						"max": 6
+					}
+				],
+				"max-statements": "off",
+				"max-lines-per-function": "off",
+				"max-lines": "off"
+			}
+		},
+		{
+			"files": [
+				"test/agent-browser.tool-surface.test.ts",
+				"test/verify-package.test.ts",
+				"test/doctor.test.ts"
+			],
+			"rules": {
+				"unicorn/no-useless-undefined": [
+					"error",
+					{
+						"checkArguments": false,
+						"checkArrowFunctionBody": false
+					}
+				]
+			}
+		},
+		{
+			"files": [
+				"test/agent-browser.batch-fidelity.test.ts",
+				"test/agent-browser.native-lifecycle.test.mjs"
+			],
+			"rules": {
+				"no-await-in-loop": "off"
+			}
+		},
+		{
+			"files": [
+				"extensions/agent-browser/lib/managed-session-policy-lock.ts",
+				"extensions/agent-browser/lib/browser-execution-claims.ts",
+				"extensions/agent-browser/lib/browser-execution-claim-storage.ts",
+				"extensions/agent-browser/lib/temp-mutation-queue.ts",
+				"extensions/agent-browser/lib/temp-artifact-budget.ts",
+				"extensions/agent-browser/lib/temp-root-ownership.ts",
+				"extensions/agent-browser/lib/temp-root.ts"
+			],
+			"rules": {
+				"unicorn/no-useless-undefined": [
+					"error",
+					{
+						"checkArrowFunctionBody": false
+					}
+				]
+			}
+		},
+		{
+			"files": ["extensions/agent-browser/lib/electron/launch.ts"],
+			"rules": {
+				"unicorn/no-useless-undefined": [
+					"error",
+					{
+						"checkArguments": false
+					}
+				]
+			}
+		},
+		{
+			"files": [
+				"extensions/agent-browser/lib/config-validation.js",
+				"extensions/agent-browser/lib/redaction-fields.ts",
+				"extensions/agent-browser/lib/tool-surface.ts",
+				"extensions/agent-browser/lib/web-search.ts",
+				"extensions/agent-browser/lib/orchestration/extension-tool-boundary.ts"
+			],
+			"rules": {
+				"max-params": [
+					"error",
+					{
+						"max": 5
+					}
+				]
+			}
+		},
+		{
+			"files": ["extensions/agent-browser/lib/orchestration/browser-run/prepare-artifacts.ts"],
+			"rules": {
+				"unicorn/no-useless-undefined": [
+					"error",
+					{
+						"checkArguments": false
+					}
+				]
+			}
+		},
+		{
+			"files": ["extensions/agent-browser/lib/orchestration/extension-branch-restore.ts"],
+			"rules": {
+				"typescript/prefer-readonly-parameter-types": [
+					"error",
+					{
+						"checkParameterProperties": true,
+						"ignoreInferredTypes": true,
+						"treatMethodsAsReadonly": false,
+						"allow": [
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-ai",
+								"name": ["Model", "Context", "SimpleStreamOptions", "JsonObject", "ToolCall"]
+							},
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-coding-agent",
+								"name": [
+									"ExtensionAPI",
+									"ExtensionContext",
+									"ToolDefinition",
+									"SourceInfo",
+									"Theme",
+									"ToolNamespace",
+									"SessionManager",
+									"AgentSession",
+									"ModelRuntime",
+									"ExtensionToolContext"
+								]
+							},
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-agent-core",
+								"name": ["AgentToolResult"]
+							},
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-tui",
+								"name": ["Component"]
+							},
+							{
+								"from": "package",
+								"package": "node",
+								"name": [
+									"ChildProcess",
+									"ChildProcessWithoutNullStreams",
+									"SpawnOptions",
+									"ExecFileOptions",
+									"URL",
+									"StatOptions",
+									"ReadFileOptions",
+									"Dirent",
+									"Stats",
+									"FileHandle",
+									"Server",
+									"IncomingMessage",
+									"ServerResponse",
+									"AddressInfo",
+									"Buffer",
+									"Timeout",
+									"ProcessEnv",
+									"EventEmitter"
+								]
+							},
+							{
+								"from": "package",
+								"package": "typebox",
+								"name": ["TSchemaOptions"]
+							},
+							{
+								"from": "package",
+								"package": "stream-json",
+								"name": ["Token"]
+							},
+							{
+								"from": "package",
+								"package": "node:test",
+								"name": ["TestContext"]
+							},
+							{
+								"from": "lib",
+								"name": [
+									"Error",
+									"RegExp",
+									"Uint8Array",
+									"Promise",
+									"PromiseLike",
+									"Request",
+									"RequestInit",
+									"RequestInfo",
+									"Response",
+									"ResponseInit",
+									"Headers",
+									"HeadersInit",
+									"URL",
+									"URLSearchParams",
+									"AbortController",
+									"AbortSignal",
+									"Blob",
+									"File",
+									"FormData",
+									"ReadableStream",
+									"ReadableStreamDefaultReader",
+									"ReadableStreamBYOBReader",
+									"ReadableStreamDefaultController",
+									"ReadableByteStreamController",
+									"ReadableStreamBYOBRequest",
+									"WritableStream",
+									"WritableStreamDefaultWriter",
+									"WritableStreamDefaultController",
+									"TransformStream",
+									"TransformStreamDefaultController"
+								]
+							},
+							{
+								"from": "file",
+								"path": "./extensions/agent-browser/lib/orchestration/extension-prompt.ts",
+								"name": ["BrowserPrompt"]
+							},
+							{
+								"from": "file",
+								"path": "./extensions/agent-browser/lib/orchestration/extension-artifacts.ts",
+								"name": ["BrowserArtifacts"]
+							},
+							{
+								"from": "file",
+								"path": "./extensions/agent-browser/lib/orchestration/extension-recording.ts",
+								"name": ["BrowserRecordingRegistry"]
+							},
+							{
+								"from": "file",
+								"path": "./extensions/agent-browser/lib/orchestration/extension-electron-ownership.ts",
+								"name": ["BrowserElectronResources"]
+							},
+							{
+								"from": "file",
+								"path": "./extensions/agent-browser/lib/orchestration/extension-runtime.ts",
+								"name": [
+									"BrowserManagedSessions",
+									"BrowserSessionResources",
+									"BrowserBranchState",
+									"BrowserCodeActivity"
+								]
+							},
+							{
+								"from": "file",
+								"path": "./extensions/agent-browser/lib/orchestration/execution-queue.ts",
+								"name": ["AsyncExecutionQueue"]
+							},
+							{
+								"from": "file",
+								"path": "./extensions/agent-browser/lib/orchestration/execution-queue.ts",
+								"name": ["KeyedAsyncExecutionQueue"]
+							},
+							{
+								"from": "file",
+								"path": "./extensions/agent-browser/lib/session-page-state.ts",
+								"name": ["SessionPageState"]
+							},
+							{
+								"from": "file",
+								"path": "./extensions/agent-browser/lib/orchestration/extension-resource-contracts.ts",
+								"name": ["ValidatedUpstreamPaths"]
+							}
+						]
+					}
+				]
+			}
+		},
+		{
+			"files": [
+				"extensions/agent-browser/lib/orchestration/extension-execution-locks.ts",
+				"extensions/agent-browser/lib/orchestration/extension-code.ts",
+				"extensions/agent-browser/lib/orchestration/extension-execution-queue.ts",
+				"extensions/agent-browser/lib/orchestration/extension-host-coordination.ts",
+				"extensions/agent-browser/lib/orchestration/extension-tool-boundary.ts",
+				"extensions/agent-browser/lib/orchestration/extension-command-admission.ts",
+				"extensions/agent-browser/lib/orchestration/extension-lifecycle.ts"
+			],
+			"rules": {
+				"typescript/prefer-readonly-parameter-types": [
+					"error",
+					{
+						"checkParameterProperties": true,
+						"ignoreInferredTypes": true,
+						"treatMethodsAsReadonly": false,
+						"allow": [
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-ai",
+								"name": ["Model", "Context", "SimpleStreamOptions", "JsonObject", "ToolCall"]
+							},
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-coding-agent",
+								"name": [
+									"ExtensionAPI",
+									"ExtensionContext",
+									"ToolDefinition",
+									"SourceInfo",
+									"Theme",
+									"ToolNamespace",
+									"SessionManager",
+									"AgentSession",
+									"ModelRuntime",
+									"ExtensionToolContext"
+								]
+							},
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-agent-core",
+								"name": ["AgentToolResult"]
+							},
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-tui",
+								"name": ["Component"]
+							},
+							{
+								"from": "package",
+								"package": "node",
+								"name": [
+									"ChildProcess",
+									"ChildProcessWithoutNullStreams",
+									"SpawnOptions",
+									"ExecFileOptions",
+									"URL",
+									"StatOptions",
+									"ReadFileOptions",
+									"Dirent",
+									"Stats",
+									"FileHandle",
+									"Server",
+									"IncomingMessage",
+									"ServerResponse",
+									"AddressInfo",
+									"Buffer",
+									"Timeout",
+									"ProcessEnv",
+									"EventEmitter"
+								]
+							},
+							{
+								"from": "package",
+								"package": "typebox",
+								"name": ["TSchemaOptions"]
+							},
+							{
+								"from": "package",
+								"package": "stream-json",
+								"name": ["Token"]
+							},
+							{
+								"from": "package",
+								"package": "node:test",
+								"name": ["TestContext"]
+							},
+							{
+								"from": "lib",
+								"name": [
+									"Error",
+									"RegExp",
+									"Uint8Array",
+									"Promise",
+									"PromiseLike",
+									"Request",
+									"RequestInit",
+									"RequestInfo",
+									"Response",
+									"ResponseInit",
+									"Headers",
+									"HeadersInit",
+									"URL",
+									"URLSearchParams",
+									"AbortController",
+									"AbortSignal",
+									"Blob",
+									"File",
+									"FormData",
+									"ReadableStream",
+									"ReadableStreamDefaultReader",
+									"ReadableStreamBYOBReader",
+									"ReadableStreamDefaultController",
+									"ReadableByteStreamController",
+									"ReadableStreamBYOBRequest",
+									"WritableStream",
+									"WritableStreamDefaultWriter",
+									"WritableStreamDefaultController",
+									"TransformStream",
+									"TransformStreamDefaultController"
+								]
+							},
+							{
+								"from": "file",
+								"path": "./extensions/agent-browser/lib/orchestration/extension-prompt.ts",
+								"name": ["BrowserPrompt"]
+							},
+							{
+								"from": "file",
+								"path": "./extensions/agent-browser/lib/orchestration/extension-artifacts.ts",
+								"name": ["BrowserArtifacts"]
+							},
+							{
+								"from": "file",
+								"path": "./extensions/agent-browser/lib/orchestration/extension-recording.ts",
+								"name": ["BrowserRecordingRegistry"]
+							},
+							{
+								"from": "file",
+								"path": "./extensions/agent-browser/lib/orchestration/extension-electron-ownership.ts",
+								"name": ["BrowserElectronResources"]
+							},
+							{
+								"from": "file",
+								"path": "./extensions/agent-browser/lib/orchestration/extension-runtime.ts",
+								"name": [
+									"BrowserManagedSessions",
+									"BrowserSessionResources",
+									"BrowserBranchState",
+									"BrowserCodeActivity"
+								]
+							},
+							{
+								"from": "file",
+								"path": "./extensions/agent-browser/lib/orchestration/execution-queue.ts",
+								"name": ["AsyncExecutionQueue"]
+							},
+							{
+								"from": "file",
+								"path": "./extensions/agent-browser/lib/orchestration/execution-queue.ts",
+								"name": ["KeyedAsyncExecutionQueue"]
+							},
+							{
+								"from": "file",
+								"path": "./extensions/agent-browser/lib/orchestration/extension-resource-contracts.ts",
+								"name": ["ValidatedUpstreamPaths"]
+							}
+						]
+					}
+				]
+			}
+		},
+		{
+			"files": [
+				"extensions/agent-browser/lib/orchestration/extension-command-run.ts",
+				"extensions/agent-browser/lib/orchestration/extension-command-result.ts"
+			],
+			"rules": {
+				"typescript/prefer-readonly-parameter-types": [
+					"error",
+					{
+						"checkParameterProperties": true,
+						"ignoreInferredTypes": true,
+						"treatMethodsAsReadonly": false,
+						"allow": [
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-ai",
+								"name": ["Model", "Context", "SimpleStreamOptions", "JsonObject", "ToolCall"]
+							},
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-coding-agent",
+								"name": [
+									"ExtensionAPI",
+									"ExtensionContext",
+									"ToolDefinition",
+									"SourceInfo",
+									"Theme",
+									"ToolNamespace",
+									"SessionManager",
+									"AgentSession",
+									"ModelRuntime",
+									"ExtensionToolContext"
+								]
+							},
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-agent-core",
+								"name": ["AgentToolResult"]
+							},
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-tui",
+								"name": ["Component"]
+							},
+							{
+								"from": "package",
+								"package": "node",
+								"name": [
+									"ChildProcess",
+									"ChildProcessWithoutNullStreams",
+									"SpawnOptions",
+									"ExecFileOptions",
+									"URL",
+									"StatOptions",
+									"ReadFileOptions",
+									"Dirent",
+									"Stats",
+									"FileHandle",
+									"Server",
+									"IncomingMessage",
+									"ServerResponse",
+									"AddressInfo",
+									"Buffer",
+									"Timeout",
+									"ProcessEnv",
+									"EventEmitter"
+								]
+							},
+							{
+								"from": "package",
+								"package": "typebox",
+								"name": ["TSchemaOptions"]
+							},
+							{
+								"from": "package",
+								"package": "stream-json",
+								"name": ["Token"]
+							},
+							{
+								"from": "package",
+								"package": "node:test",
+								"name": ["TestContext"]
+							},
+							{
+								"from": "lib",
+								"name": [
+									"Error",
+									"RegExp",
+									"Uint8Array",
+									"Promise",
+									"PromiseLike",
+									"Request",
+									"RequestInit",
+									"RequestInfo",
+									"Response",
+									"ResponseInit",
+									"Headers",
+									"HeadersInit",
+									"URL",
+									"URLSearchParams",
+									"AbortController",
+									"AbortSignal",
+									"Blob",
+									"File",
+									"FormData",
+									"ReadableStream",
+									"ReadableStreamDefaultReader",
+									"ReadableStreamBYOBReader",
+									"ReadableStreamDefaultController",
+									"ReadableByteStreamController",
+									"ReadableStreamBYOBRequest",
+									"WritableStream",
+									"WritableStreamDefaultWriter",
+									"WritableStreamDefaultController",
+									"TransformStream",
+									"TransformStreamDefaultController"
+								]
+							},
+							{
+								"from": "file",
+								"path": "./extensions/agent-browser/lib/orchestration/extension-prompt.ts",
+								"name": ["BrowserPrompt"]
+							},
+							{
+								"from": "file",
+								"path": "./extensions/agent-browser/lib/orchestration/extension-artifacts.ts",
+								"name": ["BrowserArtifacts"]
+							},
+							{
+								"from": "file",
+								"path": "./extensions/agent-browser/lib/orchestration/extension-recording.ts",
+								"name": ["BrowserRecordingRegistry"]
+							},
+							{
+								"from": "file",
+								"path": "./extensions/agent-browser/lib/orchestration/extension-electron-ownership.ts",
+								"name": ["BrowserElectronResources"]
+							},
+							{
+								"from": "file",
+								"path": "./extensions/agent-browser/lib/orchestration/extension-runtime.ts",
+								"name": [
+									"BrowserManagedSessions",
+									"BrowserSessionResources",
+									"BrowserBranchState",
+									"BrowserCodeActivity"
+								]
+							},
+							{
+								"from": "file",
+								"path": "./extensions/agent-browser/lib/orchestration/execution-queue.ts",
+								"name": ["AsyncExecutionQueue"]
+							},
+							{
+								"from": "file",
+								"path": "./extensions/agent-browser/lib/orchestration/execution-queue.ts",
+								"name": ["KeyedAsyncExecutionQueue"]
+							},
+							{
+								"from": "file",
+								"path": "./extensions/agent-browser/lib/session-page-state.ts",
+								"name": ["SessionPageState"]
+							},
+							{
+								"from": "file",
+								"path": "./extensions/agent-browser/lib/orchestration/browser-run/types.ts",
+								"name": ["BrowserRunState"]
+							},
+							{
+								"from": "file",
+								"path": "./extensions/agent-browser/lib/orchestration/extension-resource-contracts.ts",
+								"name": ["ValidatedUpstreamPaths"]
+							}
+						]
+					}
+				]
+			}
+		},
+		{
+			"files": ["extensions/agent-browser/lib/orchestration/extension-host-run.ts"],
+			"rules": {
+				"typescript/prefer-readonly-parameter-types": [
+					"error",
+					{
+						"checkParameterProperties": true,
+						"ignoreInferredTypes": true,
+						"treatMethodsAsReadonly": false,
+						"allow": [
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-ai",
+								"name": ["Model", "Context", "SimpleStreamOptions", "JsonObject", "ToolCall"]
+							},
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-coding-agent",
+								"name": [
+									"ExtensionAPI",
+									"ExtensionContext",
+									"ToolDefinition",
+									"SourceInfo",
+									"Theme",
+									"ToolNamespace",
+									"SessionManager",
+									"AgentSession",
+									"ModelRuntime",
+									"ExtensionToolContext"
+								]
+							},
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-agent-core",
+								"name": ["AgentToolResult"]
+							},
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-tui",
+								"name": ["Component"]
+							},
+							{
+								"from": "package",
+								"package": "node",
+								"name": [
+									"ChildProcess",
+									"ChildProcessWithoutNullStreams",
+									"SpawnOptions",
+									"ExecFileOptions",
+									"URL",
+									"StatOptions",
+									"ReadFileOptions",
+									"Dirent",
+									"Stats",
+									"FileHandle",
+									"Server",
+									"IncomingMessage",
+									"ServerResponse",
+									"AddressInfo",
+									"Buffer",
+									"Timeout",
+									"ProcessEnv",
+									"EventEmitter"
+								]
+							},
+							{
+								"from": "package",
+								"package": "typebox",
+								"name": ["TSchemaOptions"]
+							},
+							{
+								"from": "package",
+								"package": "stream-json",
+								"name": ["Token"]
+							},
+							{
+								"from": "package",
+								"package": "node:test",
+								"name": ["TestContext"]
+							},
+							{
+								"from": "lib",
+								"name": [
+									"Error",
+									"RegExp",
+									"Uint8Array",
+									"Promise",
+									"PromiseLike",
+									"Request",
+									"RequestInit",
+									"RequestInfo",
+									"Response",
+									"ResponseInit",
+									"Headers",
+									"HeadersInit",
+									"URL",
+									"URLSearchParams",
+									"AbortController",
+									"AbortSignal",
+									"Blob",
+									"File",
+									"FormData",
+									"ReadableStream",
+									"ReadableStreamDefaultReader",
+									"ReadableStreamBYOBReader",
+									"ReadableStreamDefaultController",
+									"ReadableByteStreamController",
+									"ReadableStreamBYOBRequest",
+									"WritableStream",
+									"WritableStreamDefaultWriter",
+									"WritableStreamDefaultController",
+									"TransformStream",
+									"TransformStreamDefaultController"
+								]
+							},
+							{
+								"from": "file",
+								"path": "./extensions/agent-browser/lib/orchestration/extension-prompt.ts",
+								"name": ["BrowserPrompt"]
+							},
+							{
+								"from": "file",
+								"path": "./extensions/agent-browser/lib/orchestration/extension-artifacts.ts",
+								"name": ["BrowserArtifacts"]
+							},
+							{
+								"from": "file",
+								"path": "./extensions/agent-browser/lib/orchestration/extension-recording.ts",
+								"name": ["BrowserRecordingRegistry"]
+							},
+							{
+								"from": "file",
+								"path": "./extensions/agent-browser/lib/orchestration/extension-electron-ownership.ts",
+								"name": ["BrowserElectronResources"]
+							},
+							{
+								"from": "file",
+								"path": "./extensions/agent-browser/lib/orchestration/extension-runtime.ts",
+								"name": [
+									"BrowserManagedSessions",
+									"BrowserSessionResources",
+									"BrowserBranchState",
+									"BrowserCodeActivity"
+								]
+							},
+							{
+								"from": "file",
+								"path": "./extensions/agent-browser/lib/orchestration/execution-queue.ts",
+								"name": ["AsyncExecutionQueue"]
+							},
+							{
+								"from": "file",
+								"path": "./extensions/agent-browser/lib/orchestration/execution-queue.ts",
+								"name": ["KeyedAsyncExecutionQueue"]
+							},
+							{
+								"from": "file",
+								"path": "./extensions/agent-browser/lib/orchestration/extension-resource-contracts.ts",
+								"name": ["ValidatedUpstreamPaths"]
+							},
+							{
+								"from": "file",
+								"path": "./extensions/agent-browser/lib/session-page-state.ts",
+								"name": ["SessionPageState"]
+							}
+						]
+					}
+				]
+			}
+		},
+		{
+			"files": ["extensions/agent-browser/lib/orchestration/extension-command-output.ts"],
+			"rules": {
+				"typescript/prefer-readonly-parameter-types": [
+					"error",
+					{
+						"checkParameterProperties": true,
+						"ignoreInferredTypes": true,
+						"treatMethodsAsReadonly": false,
+						"allow": [
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-ai",
+								"name": ["Model", "Context", "SimpleStreamOptions", "JsonObject", "ToolCall"]
+							},
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-coding-agent",
+								"name": [
+									"ExtensionAPI",
+									"ExtensionContext",
+									"ToolDefinition",
+									"SourceInfo",
+									"Theme",
+									"ToolNamespace",
+									"SessionManager",
+									"AgentSession",
+									"ModelRuntime",
+									"ExtensionToolContext"
+								]
+							},
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-agent-core",
+								"name": ["AgentToolResult"]
+							},
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-tui",
+								"name": ["Component"]
+							},
+							{
+								"from": "package",
+								"package": "node",
+								"name": [
+									"ChildProcess",
+									"ChildProcessWithoutNullStreams",
+									"SpawnOptions",
+									"ExecFileOptions",
+									"URL",
+									"StatOptions",
+									"ReadFileOptions",
+									"Dirent",
+									"Stats",
+									"FileHandle",
+									"Server",
+									"IncomingMessage",
+									"ServerResponse",
+									"AddressInfo",
+									"Buffer",
+									"Timeout",
+									"ProcessEnv",
+									"EventEmitter"
+								]
+							},
+							{
+								"from": "package",
+								"package": "typebox",
+								"name": ["TSchemaOptions"]
+							},
+							{
+								"from": "package",
+								"package": "stream-json",
+								"name": ["Token"]
+							},
+							{
+								"from": "package",
+								"package": "node:test",
+								"name": ["TestContext"]
+							},
+							{
+								"from": "lib",
+								"name": [
+									"Error",
+									"RegExp",
+									"Uint8Array",
+									"Promise",
+									"PromiseLike",
+									"Request",
+									"RequestInit",
+									"RequestInfo",
+									"Response",
+									"ResponseInit",
+									"Headers",
+									"HeadersInit",
+									"URL",
+									"URLSearchParams",
+									"AbortController",
+									"AbortSignal",
+									"Blob",
+									"File",
+									"FormData",
+									"ReadableStream",
+									"ReadableStreamDefaultReader",
+									"ReadableStreamBYOBReader",
+									"ReadableStreamDefaultController",
+									"ReadableByteStreamController",
+									"ReadableStreamBYOBRequest",
+									"WritableStream",
+									"WritableStreamDefaultWriter",
+									"WritableStreamDefaultController",
+									"TransformStream",
+									"TransformStreamDefaultController"
+								]
+							},
+							{
+								"from": "file",
+								"path": "./extensions/agent-browser/lib/orchestration/execution-queue.ts",
+								"name": ["AsyncExecutionQueue"]
+							}
+						]
+					}
+				]
+			}
+		},
+		{
+			"files": ["extensions/agent-browser/lib/orchestration/browser-run/prepare.ts"],
+			"rules": {
+				"typescript/prefer-readonly-parameter-types": [
+					"error",
+					{
+						"checkParameterProperties": true,
+						"ignoreInferredTypes": true,
+						"treatMethodsAsReadonly": false,
+						"allow": [
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-ai",
+								"name": ["Model", "Context", "SimpleStreamOptions", "JsonObject", "ToolCall"]
+							},
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-coding-agent",
+								"name": [
+									"ExtensionAPI",
+									"ExtensionContext",
+									"ToolDefinition",
+									"SourceInfo",
+									"Theme",
+									"ToolNamespace",
+									"SessionManager",
+									"AgentSession",
+									"ModelRuntime",
+									"ExtensionToolContext"
+								]
+							},
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-agent-core",
+								"name": ["AgentToolResult"]
+							},
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-tui",
+								"name": ["Component"]
+							},
+							{
+								"from": "package",
+								"package": "node",
+								"name": [
+									"ChildProcess",
+									"ChildProcessWithoutNullStreams",
+									"SpawnOptions",
+									"ExecFileOptions",
+									"URL",
+									"StatOptions",
+									"ReadFileOptions",
+									"Dirent",
+									"Stats",
+									"FileHandle",
+									"Server",
+									"IncomingMessage",
+									"ServerResponse",
+									"AddressInfo",
+									"Buffer",
+									"Timeout",
+									"ProcessEnv",
+									"EventEmitter"
+								]
+							},
+							{
+								"from": "package",
+								"package": "typebox",
+								"name": ["TSchemaOptions"]
+							},
+							{
+								"from": "package",
+								"package": "stream-json",
+								"name": ["Token"]
+							},
+							{
+								"from": "package",
+								"package": "node:test",
+								"name": ["TestContext"]
+							},
+							{
+								"from": "lib",
+								"name": [
+									"Error",
+									"RegExp",
+									"Uint8Array",
+									"Promise",
+									"PromiseLike",
+									"Request",
+									"RequestInit",
+									"RequestInfo",
+									"Response",
+									"ResponseInit",
+									"Headers",
+									"HeadersInit",
+									"URL",
+									"URLSearchParams",
+									"AbortController",
+									"AbortSignal",
+									"Blob",
+									"File",
+									"FormData",
+									"ReadableStream",
+									"ReadableStreamDefaultReader",
+									"ReadableStreamBYOBReader",
+									"ReadableStreamDefaultController",
+									"ReadableByteStreamController",
+									"ReadableStreamBYOBRequest",
+									"WritableStream",
+									"WritableStreamDefaultWriter",
+									"WritableStreamDefaultController",
+									"TransformStream",
+									"TransformStreamDefaultController"
+								]
+							},
+							{
+								"from": "file",
+								"path": "./extensions/agent-browser/lib/orchestration/browser-run/types.ts",
+								"name": ["BrowserRunState"]
+							},
+							{
+								"from": "file",
+								"path": "./extensions/agent-browser/lib/orchestration/browser-run/observation-types.ts",
+								"name": ["ClickDispatchProbe"]
+							},
+							{
+								"from": "file",
+								"path": "./extensions/agent-browser/lib/managed-session-restore-state.ts",
+								"name": ["ManagedSessionRestoreState"]
+							}
+						]
+					}
+				]
+			}
+		},
+		{
+			"files": [
+				"extensions/agent-browser/lib/orchestration/browser-run/prepare-resources.ts",
+				"extensions/agent-browser/lib/orchestration/browser-run/native-helper-observation.ts"
+			],
+			"rules": {
+				"typescript/prefer-readonly-parameter-types": [
+					"error",
+					{
+						"checkParameterProperties": true,
+						"ignoreInferredTypes": true,
+						"treatMethodsAsReadonly": false,
+						"allow": [
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-ai",
+								"name": ["Model", "Context", "SimpleStreamOptions", "JsonObject", "ToolCall"]
+							},
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-coding-agent",
+								"name": [
+									"ExtensionAPI",
+									"ExtensionContext",
+									"ToolDefinition",
+									"SourceInfo",
+									"Theme",
+									"ToolNamespace",
+									"SessionManager",
+									"AgentSession",
+									"ModelRuntime",
+									"ExtensionToolContext"
+								]
+							},
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-agent-core",
+								"name": ["AgentToolResult"]
+							},
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-tui",
+								"name": ["Component"]
+							},
+							{
+								"from": "package",
+								"package": "node",
+								"name": [
+									"ChildProcess",
+									"ChildProcessWithoutNullStreams",
+									"SpawnOptions",
+									"ExecFileOptions",
+									"URL",
+									"StatOptions",
+									"ReadFileOptions",
+									"Dirent",
+									"Stats",
+									"FileHandle",
+									"Server",
+									"IncomingMessage",
+									"ServerResponse",
+									"AddressInfo",
+									"Buffer",
+									"Timeout",
+									"ProcessEnv",
+									"EventEmitter"
+								]
+							},
+							{
+								"from": "package",
+								"package": "typebox",
+								"name": ["TSchemaOptions"]
+							},
+							{
+								"from": "package",
+								"package": "stream-json",
+								"name": ["Token"]
+							},
+							{
+								"from": "package",
+								"package": "node:test",
+								"name": ["TestContext"]
+							},
+							{
+								"from": "lib",
+								"name": [
+									"Error",
+									"RegExp",
+									"Uint8Array",
+									"Promise",
+									"PromiseLike",
+									"Request",
+									"RequestInit",
+									"RequestInfo",
+									"Response",
+									"ResponseInit",
+									"Headers",
+									"HeadersInit",
+									"URL",
+									"URLSearchParams",
+									"AbortController",
+									"AbortSignal",
+									"Blob",
+									"File",
+									"FormData",
+									"ReadableStream",
+									"ReadableStreamDefaultReader",
+									"ReadableStreamBYOBReader",
+									"ReadableStreamDefaultController",
+									"ReadableByteStreamController",
+									"ReadableStreamBYOBRequest",
+									"WritableStream",
+									"WritableStreamDefaultWriter",
+									"WritableStreamDefaultController",
+									"TransformStream",
+									"TransformStreamDefaultController"
+								]
+							},
+							{
+								"from": "file",
+								"path": "./extensions/agent-browser/lib/orchestration/browser-run/types.ts",
+								"name": ["BrowserRunState"]
+							}
+						]
+					}
+				]
+			}
+		},
+		{
+			"files": ["extensions/agent-browser/lib/orchestration/browser-run/prepare-page-state.ts"],
+			"rules": {
+				"typescript/prefer-readonly-parameter-types": [
+					"error",
+					{
+						"checkParameterProperties": true,
+						"ignoreInferredTypes": true,
+						"treatMethodsAsReadonly": false,
+						"allow": [
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-ai",
+								"name": ["Model", "Context", "SimpleStreamOptions", "JsonObject", "ToolCall"]
+							},
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-coding-agent",
+								"name": [
+									"ExtensionAPI",
+									"ExtensionContext",
+									"ToolDefinition",
+									"SourceInfo",
+									"Theme",
+									"ToolNamespace",
+									"SessionManager",
+									"AgentSession",
+									"ModelRuntime",
+									"ExtensionToolContext"
+								]
+							},
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-agent-core",
+								"name": ["AgentToolResult"]
+							},
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-tui",
+								"name": ["Component"]
+							},
+							{
+								"from": "package",
+								"package": "node",
+								"name": [
+									"ChildProcess",
+									"ChildProcessWithoutNullStreams",
+									"SpawnOptions",
+									"ExecFileOptions",
+									"URL",
+									"StatOptions",
+									"ReadFileOptions",
+									"Dirent",
+									"Stats",
+									"FileHandle",
+									"Server",
+									"IncomingMessage",
+									"ServerResponse",
+									"AddressInfo",
+									"Buffer",
+									"Timeout",
+									"ProcessEnv",
+									"EventEmitter"
+								]
+							},
+							{
+								"from": "package",
+								"package": "typebox",
+								"name": ["TSchemaOptions"]
+							},
+							{
+								"from": "package",
+								"package": "stream-json",
+								"name": ["Token"]
+							},
+							{
+								"from": "package",
+								"package": "node:test",
+								"name": ["TestContext"]
+							},
+							{
+								"from": "lib",
+								"name": [
+									"Error",
+									"RegExp",
+									"Uint8Array",
+									"Promise",
+									"PromiseLike",
+									"Request",
+									"RequestInit",
+									"RequestInfo",
+									"Response",
+									"ResponseInit",
+									"Headers",
+									"HeadersInit",
+									"URL",
+									"URLSearchParams",
+									"AbortController",
+									"AbortSignal",
+									"Blob",
+									"File",
+									"FormData",
+									"ReadableStream",
+									"ReadableStreamDefaultReader",
+									"ReadableStreamBYOBReader",
+									"ReadableStreamDefaultController",
+									"ReadableByteStreamController",
+									"ReadableStreamBYOBRequest",
+									"WritableStream",
+									"WritableStreamDefaultWriter",
+									"WritableStreamDefaultController",
+									"TransformStream",
+									"TransformStreamDefaultController"
+								]
+							},
+							{
+								"from": "file",
+								"path": "./extensions/agent-browser/lib/orchestration/browser-run/types.ts",
+								"name": ["BrowserRunState"]
+							},
+							{
+								"from": "file",
+								"path": "./extensions/agent-browser/lib/session-page-state.ts",
+								"name": ["SessionPageState"]
+							},
+							{
+								"from": "file",
+								"path": "./extensions/agent-browser/lib/managed-session-restore-state.ts",
+								"name": ["ManagedSessionRestoreState"]
+							}
+						]
+					}
+				]
+			}
+		},
+		{
+			"files": [
+				"extensions/agent-browser/lib/orchestration/browser-run/process-output-confirmation.ts",
+				"extensions/agent-browser/lib/orchestration/browser-run/process-output-publication.ts",
+				"extensions/agent-browser/lib/orchestration/browser-run/process-output-electron.ts",
+				"extensions/agent-browser/lib/orchestration/browser-run/process-output-analysis.ts",
+				"extensions/agent-browser/lib/orchestration/browser-run/process-output-receipts.ts",
+				"extensions/agent-browser/lib/orchestration/browser-run/process-output-refs.ts",
+				"extensions/agent-browser/lib/orchestration/browser-run/process-output-presentation.ts",
+				"extensions/agent-browser/lib/orchestration/browser-run/process-output-tabs.ts",
+				"extensions/agent-browser/lib/orchestration/browser-run/process-output-navigation.ts",
+				"extensions/agent-browser/lib/orchestration/browser-run/process-output-native.ts",
+				"extensions/agent-browser/lib/orchestration/browser-run/process-output-lifecycle.ts",
+				"extensions/agent-browser/lib/orchestration/browser-run/process-output-managed.ts",
+				"extensions/agent-browser/lib/orchestration/browser-run/process-output-ownership.ts",
+				"extensions/agent-browser/lib/orchestration/browser-run/process-output-native-phase.ts",
+				"extensions/agent-browser/lib/orchestration/browser-run/process-output-page-phase.ts",
+				"extensions/agent-browser/lib/orchestration/browser-run/process-output-lifecycle-phase.ts",
+				"extensions/agent-browser/lib/orchestration/browser-run/process-output-publication-phase.ts",
+				"extensions/agent-browser/lib/orchestration/browser-run/process-output.ts"
+			],
+			"rules": {
+				"typescript/prefer-readonly-parameter-types": [
+					"error",
+					{
+						"checkParameterProperties": true,
+						"ignoreInferredTypes": true,
+						"treatMethodsAsReadonly": false,
+						"allow": [
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-ai",
+								"name": ["Model", "Context", "SimpleStreamOptions", "JsonObject", "ToolCall"]
+							},
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-coding-agent",
+								"name": [
+									"ExtensionAPI",
+									"ExtensionContext",
+									"ToolDefinition",
+									"SourceInfo",
+									"Theme",
+									"ToolNamespace",
+									"SessionManager",
+									"AgentSession",
+									"ModelRuntime",
+									"ExtensionToolContext"
+								]
+							},
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-agent-core",
+								"name": ["AgentToolResult"]
+							},
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-tui",
+								"name": ["Component"]
+							},
+							{
+								"from": "package",
+								"package": "node",
+								"name": [
+									"ChildProcess",
+									"ChildProcessWithoutNullStreams",
+									"SpawnOptions",
+									"ExecFileOptions",
+									"URL",
+									"StatOptions",
+									"ReadFileOptions",
+									"Dirent",
+									"Stats",
+									"FileHandle",
+									"Server",
+									"IncomingMessage",
+									"ServerResponse",
+									"AddressInfo",
+									"Buffer",
+									"Timeout",
+									"ProcessEnv",
+									"EventEmitter"
+								]
+							},
+							{
+								"from": "package",
+								"package": "typebox",
+								"name": ["TSchemaOptions"]
+							},
+							{
+								"from": "package",
+								"package": "stream-json",
+								"name": ["Token"]
+							},
+							{
+								"from": "package",
+								"package": "node:test",
+								"name": ["TestContext"]
+							},
+							{
+								"from": "lib",
+								"name": [
+									"Error",
+									"RegExp",
+									"Uint8Array",
+									"Promise",
+									"PromiseLike",
+									"Request",
+									"RequestInit",
+									"RequestInfo",
+									"Response",
+									"ResponseInit",
+									"Headers",
+									"HeadersInit",
+									"URL",
+									"URLSearchParams",
+									"AbortController",
+									"AbortSignal",
+									"Blob",
+									"File",
+									"FormData",
+									"ReadableStream",
+									"ReadableStreamDefaultReader",
+									"ReadableStreamBYOBReader",
+									"ReadableStreamDefaultController",
+									"ReadableByteStreamController",
+									"ReadableStreamBYOBRequest",
+									"WritableStream",
+									"WritableStreamDefaultWriter",
+									"WritableStreamDefaultController",
+									"TransformStream",
+									"TransformStreamDefaultController"
+								]
+							},
+							{
+								"from": "file",
+								"path": "./extensions/agent-browser/lib/orchestration/browser-run/types.ts",
+								"name": ["BrowserRunState"]
+							},
+							{
+								"from": "file",
+								"path": "./extensions/agent-browser/lib/orchestration/browser-run/observation-types.ts",
+								"name": ["ClickDispatchProbe"]
+							},
+							{
+								"from": "file",
+								"path": "./extensions/agent-browser/lib/managed-session-restore-state.ts",
+								"name": ["ManagedSessionRestoreState"]
+							},
+							{
+								"from": "file",
+								"path": "./extensions/agent-browser/lib/results/contracts.ts",
+								"name": ["ToolPresentation"]
+							}
+						]
+					}
+				]
+			}
+		},
+		{
+			"files": [
+				"extensions/agent-browser/lib/orchestration/browser-run/prepare-page-selection.ts",
+				"extensions/agent-browser/lib/orchestration/browser-run/prepare-session-plan.ts",
+				"extensions/agent-browser/lib/orchestration/browser-run/prepare-guards.ts",
+				"extensions/agent-browser/lib/orchestration/browser-run/prepare-observations.ts"
+			],
+			"rules": {
+				"typescript/prefer-readonly-parameter-types": [
+					"error",
+					{
+						"checkParameterProperties": true,
+						"ignoreInferredTypes": true,
+						"treatMethodsAsReadonly": false,
+						"allow": [
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-ai",
+								"name": ["Model", "Context", "SimpleStreamOptions", "JsonObject", "ToolCall"]
+							},
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-coding-agent",
+								"name": [
+									"ExtensionAPI",
+									"ExtensionContext",
+									"ToolDefinition",
+									"SourceInfo",
+									"Theme",
+									"ToolNamespace",
+									"SessionManager",
+									"AgentSession",
+									"ModelRuntime",
+									"ExtensionToolContext"
+								]
+							},
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-agent-core",
+								"name": ["AgentToolResult"]
+							},
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-tui",
+								"name": ["Component"]
+							},
+							{
+								"from": "package",
+								"package": "node",
+								"name": [
+									"ChildProcess",
+									"ChildProcessWithoutNullStreams",
+									"SpawnOptions",
+									"ExecFileOptions",
+									"URL",
+									"StatOptions",
+									"ReadFileOptions",
+									"Dirent",
+									"Stats",
+									"FileHandle",
+									"Server",
+									"IncomingMessage",
+									"ServerResponse",
+									"AddressInfo",
+									"Buffer",
+									"Timeout",
+									"ProcessEnv",
+									"EventEmitter"
+								]
+							},
+							{
+								"from": "package",
+								"package": "typebox",
+								"name": ["TSchemaOptions"]
+							},
+							{
+								"from": "package",
+								"package": "stream-json",
+								"name": ["Token"]
+							},
+							{
+								"from": "package",
+								"package": "node:test",
+								"name": ["TestContext"]
+							},
+							{
+								"from": "lib",
+								"name": [
+									"Error",
+									"RegExp",
+									"Uint8Array",
+									"Promise",
+									"PromiseLike",
+									"Request",
+									"RequestInit",
+									"RequestInfo",
+									"Response",
+									"ResponseInit",
+									"Headers",
+									"HeadersInit",
+									"URL",
+									"URLSearchParams",
+									"AbortController",
+									"AbortSignal",
+									"Blob",
+									"File",
+									"FormData",
+									"ReadableStream",
+									"ReadableStreamDefaultReader",
+									"ReadableStreamBYOBReader",
+									"ReadableStreamDefaultController",
+									"ReadableByteStreamController",
+									"ReadableStreamBYOBRequest",
+									"WritableStream",
+									"WritableStreamDefaultWriter",
+									"WritableStreamDefaultController",
+									"TransformStream",
+									"TransformStreamDefaultController"
+								]
+							},
+							{
+								"from": "file",
+								"path": "./extensions/agent-browser/lib/session-page-state.ts",
+								"name": ["SessionPageState"]
+							},
+							{
+								"from": "file",
+								"path": "./extensions/agent-browser/lib/managed-session-restore-state.ts",
+								"name": ["ManagedSessionRestoreState"]
+							}
+						]
+					}
+				]
+			}
+		},
+		{
+			"files": ["extensions/agent-browser/lib/orchestration/browser-run/prepare-command.ts"],
+			"rules": {
+				"typescript/prefer-readonly-parameter-types": [
+					"error",
+					{
+						"checkParameterProperties": true,
+						"ignoreInferredTypes": true,
+						"treatMethodsAsReadonly": false,
+						"allow": [
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-ai",
+								"name": ["Model", "Context", "SimpleStreamOptions", "JsonObject", "ToolCall"]
+							},
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-coding-agent",
+								"name": [
+									"ExtensionAPI",
+									"ExtensionContext",
+									"ToolDefinition",
+									"SourceInfo",
+									"Theme",
+									"ToolNamespace",
+									"SessionManager",
+									"AgentSession",
+									"ModelRuntime",
+									"ExtensionToolContext"
+								]
+							},
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-agent-core",
+								"name": ["AgentToolResult"]
+							},
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-tui",
+								"name": ["Component"]
+							},
+							{
+								"from": "package",
+								"package": "node",
+								"name": [
+									"ChildProcess",
+									"ChildProcessWithoutNullStreams",
+									"SpawnOptions",
+									"ExecFileOptions",
+									"URL",
+									"StatOptions",
+									"ReadFileOptions",
+									"Dirent",
+									"Stats",
+									"FileHandle",
+									"Server",
+									"IncomingMessage",
+									"ServerResponse",
+									"AddressInfo",
+									"Buffer",
+									"Timeout",
+									"ProcessEnv",
+									"EventEmitter"
+								]
+							},
+							{
+								"from": "package",
+								"package": "typebox",
+								"name": ["TSchemaOptions"]
+							},
+							{
+								"from": "package",
+								"package": "stream-json",
+								"name": ["Token"]
+							},
+							{
+								"from": "package",
+								"package": "node:test",
+								"name": ["TestContext"]
+							},
+							{
+								"from": "lib",
+								"name": [
+									"Error",
+									"RegExp",
+									"Uint8Array",
+									"Promise",
+									"PromiseLike",
+									"Request",
+									"RequestInit",
+									"RequestInfo",
+									"Response",
+									"ResponseInit",
+									"Headers",
+									"HeadersInit",
+									"URL",
+									"URLSearchParams",
+									"AbortController",
+									"AbortSignal",
+									"Blob",
+									"File",
+									"FormData",
+									"ReadableStream",
+									"ReadableStreamDefaultReader",
+									"ReadableStreamBYOBReader",
+									"ReadableStreamDefaultController",
+									"ReadableByteStreamController",
+									"ReadableStreamBYOBRequest",
+									"WritableStream",
+									"WritableStreamDefaultWriter",
+									"WritableStreamDefaultController",
+									"TransformStream",
+									"TransformStreamDefaultController"
+								]
+							},
+							{
+								"from": "file",
+								"path": "./extensions/agent-browser/lib/orchestration/browser-run/observation-types.ts",
+								"name": ["ClickDispatchProbe"]
+							},
+							{
+								"from": "file",
+								"path": "./extensions/agent-browser/lib/managed-session-restore-state.ts",
+								"name": ["ManagedSessionRestoreState"]
+							}
+						]
+					}
+				]
+			}
+		},
+		{
+			"files": ["extensions/agent-browser/lib/browser-journal.ts"],
+			"rules": {
+				"typescript/prefer-readonly-parameter-types": [
+					"error",
+					{
+						"checkParameterProperties": true,
+						"ignoreInferredTypes": true,
+						"treatMethodsAsReadonly": false,
+						"allow": [
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-ai",
+								"name": ["Model", "Context", "SimpleStreamOptions", "JsonObject", "ToolCall"]
+							},
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-coding-agent",
+								"name": [
+									"ExtensionAPI",
+									"ExtensionContext",
+									"ToolDefinition",
+									"SourceInfo",
+									"Theme",
+									"ToolNamespace",
+									"SessionManager",
+									"AgentSession",
+									"ModelRuntime",
+									"ExtensionToolContext"
+								]
+							},
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-agent-core",
+								"name": ["AgentToolResult"]
+							},
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-tui",
+								"name": ["Component"]
+							},
+							{
+								"from": "package",
+								"package": "node",
+								"name": [
+									"ChildProcess",
+									"ChildProcessWithoutNullStreams",
+									"SpawnOptions",
+									"ExecFileOptions",
+									"URL",
+									"StatOptions",
+									"ReadFileOptions",
+									"Dirent",
+									"Stats",
+									"FileHandle",
+									"Server",
+									"IncomingMessage",
+									"ServerResponse",
+									"AddressInfo",
+									"Buffer",
+									"Timeout",
+									"ProcessEnv",
+									"EventEmitter"
+								]
+							},
+							{
+								"from": "package",
+								"package": "typebox",
+								"name": ["TSchemaOptions"]
+							},
+							{
+								"from": "package",
+								"package": "stream-json",
+								"name": ["Token"]
+							},
+							{
+								"from": "package",
+								"package": "node:test",
+								"name": ["TestContext"]
+							},
+							{
+								"from": "lib",
+								"name": [
+									"Error",
+									"RegExp",
+									"Uint8Array",
+									"Promise",
+									"PromiseLike",
+									"Request",
+									"RequestInit",
+									"RequestInfo",
+									"Response",
+									"ResponseInit",
+									"Headers",
+									"HeadersInit",
+									"URL",
+									"URLSearchParams",
+									"AbortController",
+									"AbortSignal",
+									"Blob",
+									"File",
+									"FormData",
+									"ReadableStream",
+									"ReadableStreamDefaultReader",
+									"ReadableStreamBYOBReader",
+									"ReadableStreamDefaultController",
+									"ReadableByteStreamController",
+									"ReadableStreamBYOBRequest",
+									"WritableStream",
+									"WritableStreamDefaultWriter",
+									"WritableStreamDefaultController",
+									"TransformStream",
+									"TransformStreamDefaultController"
+								]
+							},
+							{
+								"from": "file",
+								"path": "./extensions/agent-browser/lib/browser-journal-branch.ts",
+								"name": ["BrowserBranch"]
+							}
+						]
+					}
+				]
+			}
+		},
+		{
+			"files": [
+				"extensions/agent-browser/lib/process.ts",
+				"extensions/agent-browser/lib/owned-managed-session-context.ts",
+				"extensions/agent-browser/lib/managed-session-restore.ts",
+				"extensions/agent-browser/lib/managed-session-restore-policy.ts",
+				"extensions/agent-browser/lib/managed-session-restore-context.ts",
+				"extensions/agent-browser/lib/orchestration/browser-run/managed-session-close.ts",
+				"extensions/agent-browser/lib/orchestration/browser-run/managed-session-daemon-policy.ts",
+				"test/agent-browser.managed-session-restore.test.ts",
+				"extensions/agent-browser/lib/orchestration/browser-run/prepare-daemon.ts"
+			],
+			"rules": {
+				"typescript/prefer-readonly-parameter-types": [
+					"error",
+					{
+						"checkParameterProperties": true,
+						"ignoreInferredTypes": true,
+						"treatMethodsAsReadonly": false,
+						"allow": [
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-ai",
+								"name": ["Model", "Context", "SimpleStreamOptions", "JsonObject", "ToolCall"]
+							},
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-coding-agent",
+								"name": [
+									"ExtensionAPI",
+									"ExtensionContext",
+									"ToolDefinition",
+									"SourceInfo",
+									"Theme",
+									"ToolNamespace",
+									"SessionManager",
+									"AgentSession",
+									"ModelRuntime",
+									"ExtensionToolContext"
+								]
+							},
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-agent-core",
+								"name": ["AgentToolResult"]
+							},
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-tui",
+								"name": ["Component"]
+							},
+							{
+								"from": "package",
+								"package": "node",
+								"name": [
+									"ChildProcess",
+									"ChildProcessWithoutNullStreams",
+									"SpawnOptions",
+									"ExecFileOptions",
+									"URL",
+									"StatOptions",
+									"ReadFileOptions",
+									"Dirent",
+									"Stats",
+									"FileHandle",
+									"Server",
+									"IncomingMessage",
+									"ServerResponse",
+									"AddressInfo",
+									"Buffer",
+									"Timeout",
+									"ProcessEnv",
+									"EventEmitter"
+								]
+							},
+							{
+								"from": "package",
+								"package": "typebox",
+								"name": ["TSchemaOptions"]
+							},
+							{
+								"from": "package",
+								"package": "stream-json",
+								"name": ["Token"]
+							},
+							{
+								"from": "package",
+								"package": "node:test",
+								"name": ["TestContext"]
+							},
+							{
+								"from": "lib",
+								"name": [
+									"Error",
+									"RegExp",
+									"Uint8Array",
+									"Promise",
+									"PromiseLike",
+									"Request",
+									"RequestInit",
+									"RequestInfo",
+									"Response",
+									"ResponseInit",
+									"Headers",
+									"HeadersInit",
+									"URL",
+									"URLSearchParams",
+									"AbortController",
+									"AbortSignal",
+									"Blob",
+									"File",
+									"FormData",
+									"ReadableStream",
+									"ReadableStreamDefaultReader",
+									"ReadableStreamBYOBReader",
+									"ReadableStreamDefaultController",
+									"ReadableByteStreamController",
+									"ReadableStreamBYOBRequest",
+									"WritableStream",
+									"WritableStreamDefaultWriter",
+									"WritableStreamDefaultController",
+									"TransformStream",
+									"TransformStreamDefaultController"
+								]
+							},
+							{
+								"from": "file",
+								"path": "./extensions/agent-browser/lib/managed-session-restore-state.ts",
+								"name": ["ManagedSessionRestoreState"]
+							}
+						]
+					}
+				]
+			}
+		},
+		{
+			"files": ["extensions/agent-browser/lib/orchestration/browser-run/index.ts"],
+			"rules": {
+				"typescript/prefer-readonly-parameter-types": [
+					"error",
+					{
+						"checkParameterProperties": true,
+						"ignoreInferredTypes": true,
+						"treatMethodsAsReadonly": false,
+						"allow": [
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-ai",
+								"name": ["Model", "Context", "SimpleStreamOptions", "JsonObject", "ToolCall"]
+							},
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-coding-agent",
+								"name": [
+									"ExtensionAPI",
+									"ExtensionContext",
+									"ToolDefinition",
+									"SourceInfo",
+									"Theme",
+									"ToolNamespace",
+									"SessionManager",
+									"AgentSession",
+									"ModelRuntime",
+									"ExtensionToolContext"
+								]
+							},
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-agent-core",
+								"name": ["AgentToolResult"]
+							},
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-tui",
+								"name": ["Component"]
+							},
+							{
+								"from": "package",
+								"package": "node",
+								"name": [
+									"ChildProcess",
+									"ChildProcessWithoutNullStreams",
+									"SpawnOptions",
+									"ExecFileOptions",
+									"URL",
+									"StatOptions",
+									"ReadFileOptions",
+									"Dirent",
+									"Stats",
+									"FileHandle",
+									"Server",
+									"IncomingMessage",
+									"ServerResponse",
+									"AddressInfo",
+									"Buffer",
+									"Timeout",
+									"ProcessEnv",
+									"EventEmitter"
+								]
+							},
+							{
+								"from": "package",
+								"package": "typebox",
+								"name": ["TSchemaOptions"]
+							},
+							{
+								"from": "package",
+								"package": "stream-json",
+								"name": ["Token"]
+							},
+							{
+								"from": "package",
+								"package": "node:test",
+								"name": ["TestContext"]
+							},
+							{
+								"from": "lib",
+								"name": [
+									"Error",
+									"RegExp",
+									"Uint8Array",
+									"Promise",
+									"PromiseLike",
+									"Request",
+									"RequestInit",
+									"RequestInfo",
+									"Response",
+									"ResponseInit",
+									"Headers",
+									"HeadersInit",
+									"URL",
+									"URLSearchParams",
+									"AbortController",
+									"AbortSignal",
+									"Blob",
+									"File",
+									"FormData",
+									"ReadableStream",
+									"ReadableStreamDefaultReader",
+									"ReadableStreamBYOBReader",
+									"ReadableStreamDefaultController",
+									"ReadableByteStreamController",
+									"ReadableStreamBYOBRequest",
+									"WritableStream",
+									"WritableStreamDefaultWriter",
+									"WritableStreamDefaultController",
+									"TransformStream",
+									"TransformStreamDefaultController"
+								]
+							},
+							{
+								"from": "file",
+								"path": "./extensions/agent-browser/lib/managed-session-restore-state.ts",
+								"name": ["ManagedSessionRestoreState"]
+							},
+							{
+								"from": "file",
+								"path": "./extensions/agent-browser/lib/orchestration/browser-run/types.ts",
+								"name": ["BrowserRunState"]
+							},
+							{
+								"from": "file",
+								"path": "./extensions/agent-browser/lib/orchestration/browser-run/observation-types.ts",
+								"name": ["ClickDispatchProbe"]
+							}
+						]
+					}
+				]
+			}
+		},
+		{
+			"files": [
+				"extensions/agent-browser/lib/orchestration/electron-host/policy.ts",
+				"extensions/agent-browser/lib/orchestration/electron-host/probe.ts",
+				"extensions/agent-browser/lib/orchestration/electron-host/status.ts"
+			],
+			"rules": {
+				"typescript/prefer-readonly-parameter-types": [
+					"error",
+					{
+						"checkParameterProperties": true,
+						"ignoreInferredTypes": true,
+						"treatMethodsAsReadonly": false,
+						"allow": [
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-ai",
+								"name": ["Model", "Context", "SimpleStreamOptions", "JsonObject", "ToolCall"]
+							},
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-coding-agent",
+								"name": [
+									"ExtensionAPI",
+									"ExtensionContext",
+									"ToolDefinition",
+									"SourceInfo",
+									"Theme",
+									"ToolNamespace",
+									"SessionManager",
+									"AgentSession",
+									"ModelRuntime",
+									"ExtensionToolContext"
+								]
+							},
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-agent-core",
+								"name": ["AgentToolResult"]
+							},
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-tui",
+								"name": ["Component"]
+							},
+							{
+								"from": "package",
+								"package": "node",
+								"name": [
+									"ChildProcess",
+									"ChildProcessWithoutNullStreams",
+									"SpawnOptions",
+									"ExecFileOptions",
+									"URL",
+									"StatOptions",
+									"ReadFileOptions",
+									"Dirent",
+									"Stats",
+									"FileHandle",
+									"Server",
+									"IncomingMessage",
+									"ServerResponse",
+									"AddressInfo",
+									"Buffer",
+									"Timeout",
+									"ProcessEnv",
+									"EventEmitter"
+								]
+							},
+							{
+								"from": "package",
+								"package": "typebox",
+								"name": ["TSchemaOptions"]
+							},
+							{
+								"from": "package",
+								"package": "stream-json",
+								"name": ["Token"]
+							},
+							{
+								"from": "package",
+								"package": "node:test",
+								"name": ["TestContext"]
+							},
+							{
+								"from": "lib",
+								"name": [
+									"Error",
+									"RegExp",
+									"Uint8Array",
+									"Promise",
+									"PromiseLike",
+									"Request",
+									"RequestInit",
+									"RequestInfo",
+									"Response",
+									"ResponseInit",
+									"Headers",
+									"HeadersInit",
+									"URL",
+									"URLSearchParams",
+									"AbortController",
+									"AbortSignal",
+									"Blob",
+									"File",
+									"FormData",
+									"ReadableStream",
+									"ReadableStreamDefaultReader",
+									"ReadableStreamBYOBReader",
+									"ReadableStreamDefaultController",
+									"ReadableByteStreamController",
+									"ReadableStreamBYOBRequest",
+									"WritableStream",
+									"WritableStreamDefaultWriter",
+									"WritableStreamDefaultController",
+									"TransformStream",
+									"TransformStreamDefaultController"
+								]
+							},
+							{
+								"from": "file",
+								"path": "./extensions/agent-browser/lib/managed-session-restore-state.ts",
+								"name": ["ManagedSessionRestoreState"]
+							},
+							{
+								"from": "file",
+								"path": "./extensions/agent-browser/lib/session-page-state.ts",
+								"name": ["SessionPageState"]
+							}
+						]
+					}
+				]
+			}
+		},
+		{
+			"files": [
+				"extensions/agent-browser/lib/orchestration/electron-host/index.ts",
+				"extensions/agent-browser/lib/orchestration/electron-host/cleanup.ts"
+			],
+			"rules": {
+				"typescript/prefer-readonly-parameter-types": [
+					"error",
+					{
+						"checkParameterProperties": true,
+						"ignoreInferredTypes": true,
+						"treatMethodsAsReadonly": false,
+						"allow": [
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-ai",
+								"name": ["Model", "Context", "SimpleStreamOptions", "JsonObject", "ToolCall"]
+							},
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-coding-agent",
+								"name": [
+									"ExtensionAPI",
+									"ExtensionContext",
+									"ToolDefinition",
+									"SourceInfo",
+									"Theme",
+									"ToolNamespace",
+									"SessionManager",
+									"AgentSession",
+									"ModelRuntime",
+									"ExtensionToolContext"
+								]
+							},
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-agent-core",
+								"name": ["AgentToolResult"]
+							},
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-tui",
+								"name": ["Component"]
+							},
+							{
+								"from": "package",
+								"package": "node",
+								"name": [
+									"ChildProcess",
+									"ChildProcessWithoutNullStreams",
+									"SpawnOptions",
+									"ExecFileOptions",
+									"URL",
+									"StatOptions",
+									"ReadFileOptions",
+									"Dirent",
+									"Stats",
+									"FileHandle",
+									"Server",
+									"IncomingMessage",
+									"ServerResponse",
+									"AddressInfo",
+									"Buffer",
+									"Timeout",
+									"ProcessEnv",
+									"EventEmitter"
+								]
+							},
+							{
+								"from": "package",
+								"package": "typebox",
+								"name": ["TSchemaOptions"]
+							},
+							{
+								"from": "package",
+								"package": "stream-json",
+								"name": ["Token"]
+							},
+							{
+								"from": "package",
+								"package": "node:test",
+								"name": ["TestContext"]
+							},
+							{
+								"from": "lib",
+								"name": [
+									"Error",
+									"RegExp",
+									"Uint8Array",
+									"Promise",
+									"PromiseLike",
+									"Request",
+									"RequestInit",
+									"RequestInfo",
+									"Response",
+									"ResponseInit",
+									"Headers",
+									"HeadersInit",
+									"URL",
+									"URLSearchParams",
+									"AbortController",
+									"AbortSignal",
+									"Blob",
+									"File",
+									"FormData",
+									"ReadableStream",
+									"ReadableStreamDefaultReader",
+									"ReadableStreamBYOBReader",
+									"ReadableStreamDefaultController",
+									"ReadableByteStreamController",
+									"ReadableStreamBYOBRequest",
+									"WritableStream",
+									"WritableStreamDefaultWriter",
+									"WritableStreamDefaultController",
+									"TransformStream",
+									"TransformStreamDefaultController"
+								]
+							},
+							{
+								"from": "file",
+								"path": "./extensions/agent-browser/lib/managed-session-restore-state.ts",
+								"name": ["ManagedSessionRestoreState"]
+							},
+							{
+								"from": "file",
+								"path": "./extensions/agent-browser/lib/orchestration/electron-host/contracts.ts",
+								"name": ["ElectronHostLaunchRecords", "ElectronHostChildProcesses"]
+							},
+							{
+								"from": "file",
+								"path": "./extensions/agent-browser/lib/session-page-state.ts",
+								"name": ["SessionPageState"]
+							}
+						]
+					}
+				]
+			}
+		},
+		{
+			"files": [
+				"extensions/agent-browser/lib/orchestration/browser-run/final-result-recovery.ts",
+				"extensions/agent-browser/lib/orchestration/browser-run/prepare/snapshot-filter.ts",
+				"extensions/agent-browser/lib/orchestration/extension-result-state.ts"
+			],
+			"rules": {
+				"typescript/prefer-readonly-parameter-types": [
+					"error",
+					{
+						"checkParameterProperties": true,
+						"ignoreInferredTypes": true,
+						"treatMethodsAsReadonly": false,
+						"allow": [
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-ai",
+								"name": ["Model", "Context", "SimpleStreamOptions", "JsonObject", "ToolCall"]
+							},
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-coding-agent",
+								"name": [
+									"ExtensionAPI",
+									"ExtensionContext",
+									"ToolDefinition",
+									"SourceInfo",
+									"Theme",
+									"ToolNamespace",
+									"SessionManager",
+									"AgentSession",
+									"ModelRuntime",
+									"ExtensionToolContext"
+								]
+							},
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-agent-core",
+								"name": ["AgentToolResult"]
+							},
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-tui",
+								"name": ["Component"]
+							},
+							{
+								"from": "package",
+								"package": "node",
+								"name": [
+									"ChildProcess",
+									"ChildProcessWithoutNullStreams",
+									"SpawnOptions",
+									"ExecFileOptions",
+									"URL",
+									"StatOptions",
+									"ReadFileOptions",
+									"Dirent",
+									"Stats",
+									"FileHandle",
+									"Server",
+									"IncomingMessage",
+									"ServerResponse",
+									"AddressInfo",
+									"Buffer",
+									"Timeout",
+									"ProcessEnv",
+									"EventEmitter"
+								]
+							},
+							{
+								"from": "package",
+								"package": "typebox",
+								"name": ["TSchemaOptions"]
+							},
+							{
+								"from": "package",
+								"package": "stream-json",
+								"name": ["Token"]
+							},
+							{
+								"from": "package",
+								"package": "node:test",
+								"name": ["TestContext"]
+							},
+							{
+								"from": "lib",
+								"name": [
+									"Error",
+									"RegExp",
+									"Uint8Array",
+									"Promise",
+									"PromiseLike",
+									"Request",
+									"RequestInit",
+									"RequestInfo",
+									"Response",
+									"ResponseInit",
+									"Headers",
+									"HeadersInit",
+									"URL",
+									"URLSearchParams",
+									"AbortController",
+									"AbortSignal",
+									"Blob",
+									"File",
+									"FormData",
+									"ReadableStream",
+									"ReadableStreamDefaultReader",
+									"ReadableStreamBYOBReader",
+									"ReadableStreamDefaultController",
+									"ReadableByteStreamController",
+									"ReadableStreamBYOBRequest",
+									"WritableStream",
+									"WritableStreamDefaultWriter",
+									"WritableStreamDefaultController",
+									"TransformStream",
+									"TransformStreamDefaultController"
+								]
+							},
+							{
+								"from": "file",
+								"path": "./extensions/agent-browser/lib/session-page-state.ts",
+								"name": ["SessionPageState"]
+							}
+						]
+					}
+				]
+			}
+		},
+		{
+			"files": ["extensions/agent-browser/lib/orchestration/browser-run/click-dispatch.ts"],
+			"rules": {
+				"typescript/prefer-readonly-parameter-types": [
+					"error",
+					{
+						"checkParameterProperties": true,
+						"ignoreInferredTypes": true,
+						"treatMethodsAsReadonly": false,
+						"allow": [
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-ai",
+								"name": ["Model", "Context", "SimpleStreamOptions", "JsonObject", "ToolCall"]
+							},
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-coding-agent",
+								"name": [
+									"ExtensionAPI",
+									"ExtensionContext",
+									"ToolDefinition",
+									"SourceInfo",
+									"Theme",
+									"ToolNamespace",
+									"SessionManager",
+									"AgentSession",
+									"ModelRuntime",
+									"ExtensionToolContext"
+								]
+							},
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-agent-core",
+								"name": ["AgentToolResult"]
+							},
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-tui",
+								"name": ["Component"]
+							},
+							{
+								"from": "package",
+								"package": "node",
+								"name": [
+									"ChildProcess",
+									"ChildProcessWithoutNullStreams",
+									"SpawnOptions",
+									"ExecFileOptions",
+									"URL",
+									"StatOptions",
+									"ReadFileOptions",
+									"Dirent",
+									"Stats",
+									"FileHandle",
+									"Server",
+									"IncomingMessage",
+									"ServerResponse",
+									"AddressInfo",
+									"Buffer",
+									"Timeout",
+									"ProcessEnv",
+									"EventEmitter"
+								]
+							},
+							{
+								"from": "package",
+								"package": "typebox",
+								"name": ["TSchemaOptions"]
+							},
+							{
+								"from": "package",
+								"package": "stream-json",
+								"name": ["Token"]
+							},
+							{
+								"from": "package",
+								"package": "node:test",
+								"name": ["TestContext"]
+							},
+							{
+								"from": "lib",
+								"name": [
+									"Error",
+									"RegExp",
+									"Uint8Array",
+									"Promise",
+									"PromiseLike",
+									"Request",
+									"RequestInit",
+									"RequestInfo",
+									"Response",
+									"ResponseInit",
+									"Headers",
+									"HeadersInit",
+									"URL",
+									"URLSearchParams",
+									"AbortController",
+									"AbortSignal",
+									"Blob",
+									"File",
+									"FormData",
+									"ReadableStream",
+									"ReadableStreamDefaultReader",
+									"ReadableStreamBYOBReader",
+									"ReadableStreamDefaultController",
+									"ReadableByteStreamController",
+									"ReadableStreamBYOBRequest",
+									"WritableStream",
+									"WritableStreamDefaultWriter",
+									"WritableStreamDefaultController",
+									"TransformStream",
+									"TransformStreamDefaultController"
+								]
+							},
+							{
+								"from": "file",
+								"path": "./extensions/agent-browser/lib/orchestration/browser-run/observation-types.ts",
+								"name": ["ClickDispatchProbe"]
+							}
+						]
+					}
+				]
+			}
+		},
+		{
+			"files": ["extensions/agent-browser/lib/orchestration/extension-command-state.ts"],
+			"rules": {
+				"typescript/prefer-readonly-parameter-types": [
+					"error",
+					{
+						"checkParameterProperties": true,
+						"ignoreInferredTypes": true,
+						"treatMethodsAsReadonly": false,
+						"allow": [
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-ai",
+								"name": ["Model", "Context", "SimpleStreamOptions", "JsonObject", "ToolCall"]
+							},
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-coding-agent",
+								"name": [
+									"ExtensionAPI",
+									"ExtensionContext",
+									"ToolDefinition",
+									"SourceInfo",
+									"Theme",
+									"ToolNamespace",
+									"SessionManager",
+									"AgentSession",
+									"ModelRuntime",
+									"ExtensionToolContext"
+								]
+							},
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-agent-core",
+								"name": ["AgentToolResult"]
+							},
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-tui",
+								"name": ["Component"]
+							},
+							{
+								"from": "package",
+								"package": "node",
+								"name": [
+									"ChildProcess",
+									"ChildProcessWithoutNullStreams",
+									"SpawnOptions",
+									"ExecFileOptions",
+									"URL",
+									"StatOptions",
+									"ReadFileOptions",
+									"Dirent",
+									"Stats",
+									"FileHandle",
+									"Server",
+									"IncomingMessage",
+									"ServerResponse",
+									"AddressInfo",
+									"Buffer",
+									"Timeout",
+									"ProcessEnv",
+									"EventEmitter"
+								]
+							},
+							{
+								"from": "package",
+								"package": "typebox",
+								"name": ["TSchemaOptions"]
+							},
+							{
+								"from": "package",
+								"package": "stream-json",
+								"name": ["Token"]
+							},
+							{
+								"from": "package",
+								"package": "node:test",
+								"name": ["TestContext"]
+							},
+							{
+								"from": "lib",
+								"name": [
+									"Error",
+									"RegExp",
+									"Uint8Array",
+									"Promise",
+									"PromiseLike",
+									"Request",
+									"RequestInit",
+									"RequestInfo",
+									"Response",
+									"ResponseInit",
+									"Headers",
+									"HeadersInit",
+									"URL",
+									"URLSearchParams",
+									"AbortController",
+									"AbortSignal",
+									"Blob",
+									"File",
+									"FormData",
+									"ReadableStream",
+									"ReadableStreamDefaultReader",
+									"ReadableStreamBYOBReader",
+									"ReadableStreamDefaultController",
+									"ReadableByteStreamController",
+									"ReadableStreamBYOBRequest",
+									"WritableStream",
+									"WritableStreamDefaultWriter",
+									"WritableStreamDefaultController",
+									"TransformStream",
+									"TransformStreamDefaultController"
+								]
+							},
+							{
+								"from": "file",
+								"path": "./extensions/agent-browser/lib/session-page-state.ts",
+								"name": ["SessionPageState"]
+							},
+							{
+								"from": "file",
+								"path": "./extensions/agent-browser/lib/orchestration/browser-run/types.ts",
+								"name": ["BrowserRunState"]
+							}
+						]
+					}
+				]
+			}
+		},
+		{
+			"files": ["extensions/agent-browser/lib/orchestration/browser-run/session-state.ts"],
+			"rules": {
+				"typescript/prefer-readonly-parameter-types": [
+					"error",
+					{
+						"checkParameterProperties": true,
+						"ignoreInferredTypes": true,
+						"treatMethodsAsReadonly": false,
+						"allow": [
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-ai",
+								"name": ["Model", "Context", "SimpleStreamOptions", "JsonObject", "ToolCall"]
+							},
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-coding-agent",
+								"name": [
+									"ExtensionAPI",
+									"ExtensionContext",
+									"ToolDefinition",
+									"SourceInfo",
+									"Theme",
+									"ToolNamespace",
+									"SessionManager",
+									"AgentSession",
+									"ModelRuntime",
+									"ExtensionToolContext"
+								]
+							},
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-agent-core",
+								"name": ["AgentToolResult"]
+							},
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-tui",
+								"name": ["Component"]
+							},
+							{
+								"from": "package",
+								"package": "node",
+								"name": [
+									"ChildProcess",
+									"ChildProcessWithoutNullStreams",
+									"SpawnOptions",
+									"ExecFileOptions",
+									"URL",
+									"StatOptions",
+									"ReadFileOptions",
+									"Dirent",
+									"Stats",
+									"FileHandle",
+									"Server",
+									"IncomingMessage",
+									"ServerResponse",
+									"AddressInfo",
+									"Buffer",
+									"Timeout",
+									"ProcessEnv",
+									"EventEmitter"
+								]
+							},
+							{
+								"from": "package",
+								"package": "typebox",
+								"name": ["TSchemaOptions"]
+							},
+							{
+								"from": "package",
+								"package": "stream-json",
+								"name": ["Token"]
+							},
+							{
+								"from": "package",
+								"package": "node:test",
+								"name": ["TestContext"]
+							},
+							{
+								"from": "lib",
+								"name": [
+									"Error",
+									"RegExp",
+									"Uint8Array",
+									"Promise",
+									"PromiseLike",
+									"Request",
+									"RequestInit",
+									"RequestInfo",
+									"Response",
+									"ResponseInit",
+									"Headers",
+									"HeadersInit",
+									"URL",
+									"URLSearchParams",
+									"AbortController",
+									"AbortSignal",
+									"Blob",
+									"File",
+									"FormData",
+									"ReadableStream",
+									"ReadableStreamDefaultReader",
+									"ReadableStreamBYOBReader",
+									"ReadableStreamDefaultController",
+									"ReadableByteStreamController",
+									"ReadableStreamBYOBRequest",
+									"WritableStream",
+									"WritableStreamDefaultWriter",
+									"WritableStreamDefaultController",
+									"TransformStream",
+									"TransformStreamDefaultController"
+								]
+							},
+							{
+								"from": "file",
+								"path": "./extensions/agent-browser/lib/orchestration/browser-run/types.ts",
+								"name": ["BrowserRunState", "BrowserRunStatePatch"]
+							}
+						]
+					}
+				]
+			}
+		},
+		{
+			"files": ["extensions/agent-browser/lib/browser-legacy-projection.ts"],
+			"rules": {
+				"typescript/prefer-readonly-parameter-types": [
+					"error",
+					{
+						"checkParameterProperties": true,
+						"ignoreInferredTypes": true,
+						"treatMethodsAsReadonly": false,
+						"allow": [
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-ai",
+								"name": ["Model", "Context", "SimpleStreamOptions", "JsonObject", "ToolCall"]
+							},
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-coding-agent",
+								"name": [
+									"ExtensionAPI",
+									"ExtensionContext",
+									"ToolDefinition",
+									"SourceInfo",
+									"Theme",
+									"ToolNamespace",
+									"SessionManager",
+									"AgentSession",
+									"ModelRuntime",
+									"ExtensionToolContext"
+								]
+							},
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-agent-core",
+								"name": ["AgentToolResult"]
+							},
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-tui",
+								"name": ["Component"]
+							},
+							{
+								"from": "package",
+								"package": "node",
+								"name": [
+									"ChildProcess",
+									"ChildProcessWithoutNullStreams",
+									"SpawnOptions",
+									"ExecFileOptions",
+									"URL",
+									"StatOptions",
+									"ReadFileOptions",
+									"Dirent",
+									"Stats",
+									"FileHandle",
+									"Server",
+									"IncomingMessage",
+									"ServerResponse",
+									"AddressInfo",
+									"Buffer",
+									"Timeout",
+									"ProcessEnv",
+									"EventEmitter"
+								]
+							},
+							{
+								"from": "package",
+								"package": "typebox",
+								"name": ["TSchemaOptions"]
+							},
+							{
+								"from": "package",
+								"package": "stream-json",
+								"name": ["Token"]
+							},
+							{
+								"from": "package",
+								"package": "node:test",
+								"name": ["TestContext"]
+							},
+							{
+								"from": "lib",
+								"name": [
+									"Error",
+									"RegExp",
+									"Uint8Array",
+									"Promise",
+									"PromiseLike",
+									"Request",
+									"RequestInit",
+									"RequestInfo",
+									"Response",
+									"ResponseInit",
+									"Headers",
+									"HeadersInit",
+									"URL",
+									"URLSearchParams",
+									"AbortController",
+									"AbortSignal",
+									"Blob",
+									"File",
+									"FormData",
+									"ReadableStream",
+									"ReadableStreamDefaultReader",
+									"ReadableStreamBYOBReader",
+									"ReadableStreamDefaultController",
+									"ReadableByteStreamController",
+									"ReadableStreamBYOBRequest",
+									"WritableStream",
+									"WritableStreamDefaultWriter",
+									"WritableStreamDefaultController",
+									"TransformStream",
+									"TransformStreamDefaultController"
+								]
+							},
+							{
+								"from": "file",
+								"path": "./extensions/agent-browser/lib/browser-legacy-types.ts",
+								"name": ["LegacyProjectionState"]
+							}
+						]
+					}
+				]
+			}
+		},
+		{
+			"files": [
+				"extensions/agent-browser/lib/orchestration/extension-managed-ownership.ts",
+				"extensions/agent-browser/lib/orchestration/extension-script-leases.ts"
+			],
+			"rules": {
+				"typescript/prefer-readonly-parameter-types": [
+					"error",
+					{
+						"checkParameterProperties": true,
+						"ignoreInferredTypes": true,
+						"treatMethodsAsReadonly": false,
+						"allow": [
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-ai",
+								"name": ["Model", "Context", "SimpleStreamOptions", "JsonObject", "ToolCall"]
+							},
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-coding-agent",
+								"name": [
+									"ExtensionAPI",
+									"ExtensionContext",
+									"ToolDefinition",
+									"SourceInfo",
+									"Theme",
+									"ToolNamespace",
+									"SessionManager",
+									"AgentSession",
+									"ModelRuntime",
+									"ExtensionToolContext"
+								]
+							},
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-agent-core",
+								"name": ["AgentToolResult"]
+							},
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-tui",
+								"name": ["Component"]
+							},
+							{
+								"from": "package",
+								"package": "node",
+								"name": [
+									"ChildProcess",
+									"ChildProcessWithoutNullStreams",
+									"SpawnOptions",
+									"ExecFileOptions",
+									"URL",
+									"StatOptions",
+									"ReadFileOptions",
+									"Dirent",
+									"Stats",
+									"FileHandle",
+									"Server",
+									"IncomingMessage",
+									"ServerResponse",
+									"AddressInfo",
+									"Buffer",
+									"Timeout",
+									"ProcessEnv",
+									"EventEmitter"
+								]
+							},
+							{
+								"from": "package",
+								"package": "typebox",
+								"name": ["TSchemaOptions"]
+							},
+							{
+								"from": "package",
+								"package": "stream-json",
+								"name": ["Token"]
+							},
+							{
+								"from": "package",
+								"package": "node:test",
+								"name": ["TestContext"]
+							},
+							{
+								"from": "lib",
+								"name": [
+									"Error",
+									"RegExp",
+									"Uint8Array",
+									"Promise",
+									"PromiseLike",
+									"Request",
+									"RequestInit",
+									"RequestInfo",
+									"Response",
+									"ResponseInit",
+									"Headers",
+									"HeadersInit",
+									"URL",
+									"URLSearchParams",
+									"AbortController",
+									"AbortSignal",
+									"Blob",
+									"File",
+									"FormData",
+									"ReadableStream",
+									"ReadableStreamDefaultReader",
+									"ReadableStreamBYOBReader",
+									"ReadableStreamDefaultController",
+									"ReadableByteStreamController",
+									"ReadableStreamBYOBRequest",
+									"WritableStream",
+									"WritableStreamDefaultWriter",
+									"WritableStreamDefaultController",
+									"TransformStream",
+									"TransformStreamDefaultController"
+								]
+							},
+							{
+								"from": "file",
+								"path": "./extensions/agent-browser/lib/orchestration/extension-resource-contracts.ts",
+								"name": ["OwnedManagedSessionStore"]
+							},
+							{
+								"from": "file",
+								"path": "./extensions/agent-browser/lib/managed-session-restore-state.ts",
+								"name": ["ManagedSessionRestoreState"]
+							}
+						]
+					}
+				]
+			}
+		},
+		{
+			"files": ["extensions/agent-browser/lib/orchestration/extension-electron-ownership.ts"],
+			"rules": {
+				"typescript/prefer-readonly-parameter-types": [
+					"error",
+					{
+						"checkParameterProperties": true,
+						"ignoreInferredTypes": true,
+						"treatMethodsAsReadonly": false,
+						"allow": [
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-ai",
+								"name": ["Model", "Context", "SimpleStreamOptions", "JsonObject", "ToolCall"]
+							},
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-coding-agent",
+								"name": [
+									"ExtensionAPI",
+									"ExtensionContext",
+									"ToolDefinition",
+									"SourceInfo",
+									"Theme",
+									"ToolNamespace",
+									"SessionManager",
+									"AgentSession",
+									"ModelRuntime",
+									"ExtensionToolContext"
+								]
+							},
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-agent-core",
+								"name": ["AgentToolResult"]
+							},
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-tui",
+								"name": ["Component"]
+							},
+							{
+								"from": "package",
+								"package": "node",
+								"name": [
+									"ChildProcess",
+									"ChildProcessWithoutNullStreams",
+									"SpawnOptions",
+									"ExecFileOptions",
+									"URL",
+									"StatOptions",
+									"ReadFileOptions",
+									"Dirent",
+									"Stats",
+									"FileHandle",
+									"Server",
+									"IncomingMessage",
+									"ServerResponse",
+									"AddressInfo",
+									"Buffer",
+									"Timeout",
+									"ProcessEnv",
+									"EventEmitter"
+								]
+							},
+							{
+								"from": "package",
+								"package": "typebox",
+								"name": ["TSchemaOptions"]
+							},
+							{
+								"from": "package",
+								"package": "stream-json",
+								"name": ["Token"]
+							},
+							{
+								"from": "package",
+								"package": "node:test",
+								"name": ["TestContext"]
+							},
+							{
+								"from": "lib",
+								"name": [
+									"Error",
+									"RegExp",
+									"Uint8Array",
+									"Promise",
+									"PromiseLike",
+									"Request",
+									"RequestInit",
+									"RequestInfo",
+									"Response",
+									"ResponseInit",
+									"Headers",
+									"HeadersInit",
+									"URL",
+									"URLSearchParams",
+									"AbortController",
+									"AbortSignal",
+									"Blob",
+									"File",
+									"FormData",
+									"ReadableStream",
+									"ReadableStreamDefaultReader",
+									"ReadableStreamBYOBReader",
+									"ReadableStreamDefaultController",
+									"ReadableByteStreamController",
+									"ReadableStreamBYOBRequest",
+									"WritableStream",
+									"WritableStreamDefaultWriter",
+									"WritableStreamDefaultController",
+									"TransformStream",
+									"TransformStreamDefaultController"
+								]
+							},
+							{
+								"from": "file",
+								"path": "./extensions/agent-browser/lib/orchestration/extension-resource-contracts.ts",
+								"name": ["OwnedManagedSessionStore"]
+							}
+						]
+					}
+				]
+			}
+		},
+		{
+			"files": ["extensions/agent-browser/lib/orchestration/extension-version-check.ts"],
+			"rules": {
+				"typescript/prefer-readonly-parameter-types": [
+					"error",
+					{
+						"checkParameterProperties": true,
+						"ignoreInferredTypes": true,
+						"treatMethodsAsReadonly": false,
+						"allow": [
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-ai",
+								"name": ["Model", "Context", "SimpleStreamOptions", "JsonObject", "ToolCall"]
+							},
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-coding-agent",
+								"name": [
+									"ExtensionAPI",
+									"ExtensionContext",
+									"ToolDefinition",
+									"SourceInfo",
+									"Theme",
+									"ToolNamespace",
+									"SessionManager",
+									"AgentSession",
+									"ModelRuntime",
+									"ExtensionToolContext"
+								]
+							},
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-agent-core",
+								"name": ["AgentToolResult"]
+							},
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-tui",
+								"name": ["Component"]
+							},
+							{
+								"from": "package",
+								"package": "node",
+								"name": [
+									"ChildProcess",
+									"ChildProcessWithoutNullStreams",
+									"SpawnOptions",
+									"ExecFileOptions",
+									"URL",
+									"StatOptions",
+									"ReadFileOptions",
+									"Dirent",
+									"Stats",
+									"FileHandle",
+									"Server",
+									"IncomingMessage",
+									"ServerResponse",
+									"AddressInfo",
+									"Buffer",
+									"Timeout",
+									"ProcessEnv",
+									"EventEmitter"
+								]
+							},
+							{
+								"from": "package",
+								"package": "typebox",
+								"name": ["TSchemaOptions"]
+							},
+							{
+								"from": "package",
+								"package": "stream-json",
+								"name": ["Token"]
+							},
+							{
+								"from": "package",
+								"package": "node:test",
+								"name": ["TestContext"]
+							},
+							{
+								"from": "lib",
+								"name": [
+									"Error",
+									"RegExp",
+									"Uint8Array",
+									"Promise",
+									"PromiseLike",
+									"Request",
+									"RequestInit",
+									"RequestInfo",
+									"Response",
+									"ResponseInit",
+									"Headers",
+									"HeadersInit",
+									"URL",
+									"URLSearchParams",
+									"AbortController",
+									"AbortSignal",
+									"Blob",
+									"File",
+									"FormData",
+									"ReadableStream",
+									"ReadableStreamDefaultReader",
+									"ReadableStreamBYOBReader",
+									"ReadableStreamDefaultController",
+									"ReadableByteStreamController",
+									"ReadableStreamBYOBRequest",
+									"WritableStream",
+									"WritableStreamDefaultWriter",
+									"WritableStreamDefaultController",
+									"TransformStream",
+									"TransformStreamDefaultController"
+								]
+							},
+							{
+								"from": "file",
+								"path": "./extensions/agent-browser/lib/orchestration/extension-resource-contracts.ts",
+								"name": ["ValidatedUpstreamPaths"]
+							}
+						]
+					}
+				]
+			}
+		},
+		{
+			"files": [
+				"extensions/agent-browser/lib/config-validation.js",
+				"extensions/agent-browser/lib/config-policy.js"
+			],
+			"rules": {
+				"typescript/prefer-readonly-parameter-types": [
+					"error",
+					{
+						"checkParameterProperties": true,
+						"ignoreInferredTypes": true,
+						"treatMethodsAsReadonly": false,
+						"allow": [
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-ai",
+								"name": ["Model", "Context", "SimpleStreamOptions", "JsonObject", "ToolCall"]
+							},
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-coding-agent",
+								"name": [
+									"ExtensionAPI",
+									"ExtensionContext",
+									"ToolDefinition",
+									"SourceInfo",
+									"Theme",
+									"ToolNamespace",
+									"SessionManager",
+									"AgentSession",
+									"ModelRuntime",
+									"ExtensionToolContext"
+								]
+							},
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-agent-core",
+								"name": ["AgentToolResult"]
+							},
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-tui",
+								"name": ["Component"]
+							},
+							{
+								"from": "package",
+								"package": "node",
+								"name": [
+									"ChildProcess",
+									"ChildProcessWithoutNullStreams",
+									"SpawnOptions",
+									"ExecFileOptions",
+									"URL",
+									"StatOptions",
+									"ReadFileOptions",
+									"Dirent",
+									"Stats",
+									"FileHandle",
+									"Server",
+									"IncomingMessage",
+									"ServerResponse",
+									"AddressInfo",
+									"Buffer",
+									"Timeout",
+									"ProcessEnv",
+									"EventEmitter"
+								]
+							},
+							{
+								"from": "package",
+								"package": "typebox",
+								"name": ["TSchemaOptions"]
+							},
+							{
+								"from": "package",
+								"package": "stream-json",
+								"name": ["Token"]
+							},
+							{
+								"from": "package",
+								"package": "node:test",
+								"name": ["TestContext"]
+							},
+							{
+								"from": "lib",
+								"name": [
+									"Error",
+									"RegExp",
+									"Uint8Array",
+									"Promise",
+									"PromiseLike",
+									"Request",
+									"RequestInit",
+									"RequestInfo",
+									"Response",
+									"ResponseInit",
+									"Headers",
+									"HeadersInit",
+									"URL",
+									"URLSearchParams",
+									"AbortController",
+									"AbortSignal",
+									"Blob",
+									"File",
+									"FormData",
+									"ReadableStream",
+									"ReadableStreamDefaultReader",
+									"ReadableStreamBYOBReader",
+									"ReadableStreamDefaultController",
+									"ReadableByteStreamController",
+									"ReadableStreamBYOBRequest",
+									"WritableStream",
+									"WritableStreamDefaultWriter",
+									"WritableStreamDefaultController",
+									"TransformStream",
+									"TransformStreamDefaultController"
+								]
+							},
+							{
+								"from": "file",
+								"path": "./extensions/agent-browser/lib/config-validation.js",
+								"name": ["ConfigDiagnostics"]
+							}
+						]
+					}
+				]
+			}
+		},
+		{
+			"files": ["extensions/agent-browser/lib/web-search.ts"],
+			"rules": {
+				"typescript/prefer-readonly-parameter-types": [
+					"error",
+					{
+						"checkParameterProperties": true,
+						"ignoreInferredTypes": true,
+						"treatMethodsAsReadonly": false,
+						"allow": [
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-ai",
+								"name": ["Model", "Context", "SimpleStreamOptions", "JsonObject", "ToolCall"]
+							},
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-coding-agent",
+								"name": [
+									"ExtensionAPI",
+									"ExtensionContext",
+									"ToolDefinition",
+									"SourceInfo",
+									"Theme",
+									"ToolNamespace",
+									"SessionManager",
+									"AgentSession",
+									"ModelRuntime",
+									"ExtensionToolContext"
+								]
+							},
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-agent-core",
+								"name": ["AgentToolResult"]
+							},
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-tui",
+								"name": ["Component"]
+							},
+							{
+								"from": "package",
+								"package": "node",
+								"name": [
+									"ChildProcess",
+									"ChildProcessWithoutNullStreams",
+									"SpawnOptions",
+									"ExecFileOptions",
+									"URL",
+									"StatOptions",
+									"ReadFileOptions",
+									"Dirent",
+									"Stats",
+									"FileHandle",
+									"Server",
+									"IncomingMessage",
+									"ServerResponse",
+									"AddressInfo",
+									"Buffer",
+									"Timeout",
+									"ProcessEnv",
+									"EventEmitter"
+								]
+							},
+							{
+								"from": "package",
+								"package": "typebox",
+								"name": ["TSchemaOptions"]
+							},
+							{
+								"from": "package",
+								"package": "stream-json",
+								"name": ["Token"]
+							},
+							{
+								"from": "package",
+								"package": "node:test",
+								"name": ["TestContext"]
+							},
+							{
+								"from": "lib",
+								"name": [
+									"Error",
+									"RegExp",
+									"Uint8Array",
+									"Promise",
+									"PromiseLike",
+									"Request",
+									"RequestInit",
+									"RequestInfo",
+									"Response",
+									"ResponseInit",
+									"Headers",
+									"HeadersInit",
+									"URL",
+									"URLSearchParams",
+									"AbortController",
+									"AbortSignal",
+									"Blob",
+									"File",
+									"FormData",
+									"ReadableStream",
+									"ReadableStreamDefaultReader",
+									"ReadableStreamBYOBReader",
+									"ReadableStreamDefaultController",
+									"ReadableByteStreamController",
+									"ReadableStreamBYOBRequest",
+									"WritableStream",
+									"WritableStreamDefaultWriter",
+									"WritableStreamDefaultController",
+									"TransformStream",
+									"TransformStreamDefaultController"
+								]
+							},
+							{
+								"from": "file",
+								"path": "./extensions/agent-browser/lib/web-search-request.ts",
+								"name": ["WebSearchRequestGate"]
+							}
+						]
+					}
+				]
+			}
+		},
+		{
+			"files": ["extensions/agent-browser/lib/results/next-actions.ts"],
+			"rules": {
+				"typescript/prefer-readonly-parameter-types": [
+					"error",
+					{
+						"checkParameterProperties": true,
+						"ignoreInferredTypes": true,
+						"treatMethodsAsReadonly": false,
+						"allow": [
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-ai",
+								"name": ["Model", "Context", "SimpleStreamOptions", "JsonObject", "ToolCall"]
+							},
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-coding-agent",
+								"name": [
+									"ExtensionAPI",
+									"ExtensionContext",
+									"ToolDefinition",
+									"SourceInfo",
+									"Theme",
+									"ToolNamespace",
+									"SessionManager",
+									"AgentSession",
+									"ModelRuntime",
+									"ExtensionToolContext"
+								]
+							},
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-agent-core",
+								"name": ["AgentToolResult"]
+							},
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-tui",
+								"name": ["Component"]
+							},
+							{
+								"from": "package",
+								"package": "node",
+								"name": [
+									"ChildProcess",
+									"ChildProcessWithoutNullStreams",
+									"SpawnOptions",
+									"ExecFileOptions",
+									"URL",
+									"StatOptions",
+									"ReadFileOptions",
+									"Dirent",
+									"Stats",
+									"FileHandle",
+									"Server",
+									"IncomingMessage",
+									"ServerResponse",
+									"AddressInfo",
+									"Buffer",
+									"Timeout",
+									"ProcessEnv",
+									"EventEmitter"
+								]
+							},
+							{
+								"from": "package",
+								"package": "typebox",
+								"name": ["TSchemaOptions"]
+							},
+							{
+								"from": "package",
+								"package": "stream-json",
+								"name": ["Token"]
+							},
+							{
+								"from": "package",
+								"package": "node:test",
+								"name": ["TestContext"]
+							},
+							{
+								"from": "lib",
+								"name": [
+									"Error",
+									"RegExp",
+									"Uint8Array",
+									"Promise",
+									"PromiseLike",
+									"Request",
+									"RequestInit",
+									"RequestInfo",
+									"Response",
+									"ResponseInit",
+									"Headers",
+									"HeadersInit",
+									"URL",
+									"URLSearchParams",
+									"AbortController",
+									"AbortSignal",
+									"Blob",
+									"File",
+									"FormData",
+									"ReadableStream",
+									"ReadableStreamDefaultReader",
+									"ReadableStreamBYOBReader",
+									"ReadableStreamDefaultController",
+									"ReadableByteStreamController",
+									"ReadableStreamBYOBRequest",
+									"WritableStream",
+									"WritableStreamDefaultWriter",
+									"WritableStreamDefaultController",
+									"TransformStream",
+									"TransformStreamDefaultController"
+								]
+							},
+							{
+								"from": "file",
+								"path": "./extensions/agent-browser/lib/results/next-actions.ts",
+								"name": ["AgentBrowserNextActionAccumulator"]
+							}
+						]
+					}
+				]
+			}
+		},
+		{
+			"files": ["test/agent-browser.read-confirmation.test.ts"],
+			"rules": {
+				"typescript/prefer-readonly-parameter-types": [
+					"error",
+					{
+						"checkParameterProperties": true,
+						"ignoreInferredTypes": true,
+						"treatMethodsAsReadonly": false,
+						"allow": [
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-ai",
+								"name": ["Model", "Context", "SimpleStreamOptions", "JsonObject", "ToolCall"]
+							},
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-coding-agent",
+								"name": [
+									"ExtensionAPI",
+									"ExtensionContext",
+									"ToolDefinition",
+									"SourceInfo",
+									"Theme",
+									"ToolNamespace",
+									"SessionManager",
+									"AgentSession",
+									"ModelRuntime",
+									"ExtensionToolContext"
+								]
+							},
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-agent-core",
+								"name": ["AgentToolResult"]
+							},
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-tui",
+								"name": ["Component"]
+							},
+							{
+								"from": "package",
+								"package": "node",
+								"name": [
+									"ChildProcess",
+									"ChildProcessWithoutNullStreams",
+									"SpawnOptions",
+									"ExecFileOptions",
+									"URL",
+									"StatOptions",
+									"ReadFileOptions",
+									"Dirent",
+									"Stats",
+									"FileHandle",
+									"Server",
+									"IncomingMessage",
+									"ServerResponse",
+									"AddressInfo",
+									"Buffer",
+									"Timeout",
+									"ProcessEnv",
+									"EventEmitter"
+								]
+							},
+							{
+								"from": "package",
+								"package": "typebox",
+								"name": ["TSchemaOptions"]
+							},
+							{
+								"from": "package",
+								"package": "stream-json",
+								"name": ["Token"]
+							},
+							{
+								"from": "package",
+								"package": "node:test",
+								"name": ["TestContext"]
+							},
+							{
+								"from": "lib",
+								"name": [
+									"Error",
+									"RegExp",
+									"Uint8Array",
+									"Promise",
+									"PromiseLike",
+									"Request",
+									"RequestInit",
+									"RequestInfo",
+									"Response",
+									"ResponseInit",
+									"Headers",
+									"HeadersInit",
+									"URL",
+									"URLSearchParams",
+									"AbortController",
+									"AbortSignal",
+									"Blob",
+									"File",
+									"FormData",
+									"ReadableStream",
+									"ReadableStreamDefaultReader",
+									"ReadableStreamBYOBReader",
+									"ReadableStreamDefaultController",
+									"ReadableByteStreamController",
+									"ReadableStreamBYOBRequest",
+									"WritableStream",
+									"WritableStreamDefaultWriter",
+									"WritableStreamDefaultController",
+									"TransformStream",
+									"TransformStreamDefaultController"
+								]
+							},
+							{
+								"from": "file",
+								"path": "./test/agent-browser.read-confirmation.test.ts",
+								"name": ["ConfirmationFixture"]
+							}
+						]
+					}
+				]
+			}
+		},
+		{
+			"files": ["test/helpers/agent-browser-harness.ts"],
+			"rules": {
+				"typescript/prefer-readonly-parameter-types": [
+					"error",
+					{
+						"checkParameterProperties": true,
+						"ignoreInferredTypes": true,
+						"treatMethodsAsReadonly": false,
+						"allow": [
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-ai",
+								"name": ["Model", "Context", "SimpleStreamOptions", "JsonObject", "ToolCall"]
+							},
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-coding-agent",
+								"name": [
+									"ExtensionAPI",
+									"ExtensionContext",
+									"ToolDefinition",
+									"SourceInfo",
+									"Theme",
+									"ToolNamespace",
+									"SessionManager",
+									"AgentSession",
+									"ModelRuntime",
+									"ExtensionToolContext"
+								]
+							},
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-agent-core",
+								"name": ["AgentToolResult"]
+							},
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-tui",
+								"name": ["Component"]
+							},
+							{
+								"from": "package",
+								"package": "node",
+								"name": [
+									"ChildProcess",
+									"ChildProcessWithoutNullStreams",
+									"SpawnOptions",
+									"ExecFileOptions",
+									"URL",
+									"StatOptions",
+									"ReadFileOptions",
+									"Dirent",
+									"Stats",
+									"FileHandle",
+									"Server",
+									"IncomingMessage",
+									"ServerResponse",
+									"AddressInfo",
+									"Buffer",
+									"Timeout",
+									"ProcessEnv",
+									"EventEmitter"
+								]
+							},
+							{
+								"from": "package",
+								"package": "typebox",
+								"name": ["TSchemaOptions"]
+							},
+							{
+								"from": "package",
+								"package": "stream-json",
+								"name": ["Token"]
+							},
+							{
+								"from": "package",
+								"package": "node:test",
+								"name": ["TestContext"]
+							},
+							{
+								"from": "lib",
+								"name": [
+									"Error",
+									"RegExp",
+									"Uint8Array",
+									"Promise",
+									"PromiseLike",
+									"Request",
+									"RequestInit",
+									"RequestInfo",
+									"Response",
+									"ResponseInit",
+									"Headers",
+									"HeadersInit",
+									"URL",
+									"URLSearchParams",
+									"AbortController",
+									"AbortSignal",
+									"Blob",
+									"File",
+									"FormData",
+									"ReadableStream",
+									"ReadableStreamDefaultReader",
+									"ReadableStreamBYOBReader",
+									"ReadableStreamDefaultController",
+									"ReadableByteStreamController",
+									"ReadableStreamBYOBRequest",
+									"WritableStream",
+									"WritableStreamDefaultWriter",
+									"WritableStreamDefaultController",
+									"TransformStream",
+									"TransformStreamDefaultController"
+								]
+							},
+							{
+								"from": "file",
+								"path": "./test/helpers/agent-browser-harness.ts",
+								"name": ["ExtensionHarnessOptions", "FixtureBranch"]
+							}
+						]
+					}
+				]
+			}
+		},
+		{
+			"files": [
+				"extensions/agent-browser/lib/results/presentation/artifacts.ts",
+				"extensions/agent-browser/lib/results/presentation/artifact-images.ts",
+				"extensions/agent-browser/lib/results/presentation/early-result.ts",
+				"extensions/agent-browser/lib/results/presentation/outcomes.ts",
+				"extensions/agent-browser/lib/results/presentation/notices.ts",
+				"extensions/agent-browser/lib/results/presentation/output-completion.ts",
+				"extensions/agent-browser/lib/results/presentation/large-output.ts"
+			],
+			"rules": {
+				"typescript/prefer-readonly-parameter-types": [
+					"error",
+					{
+						"checkParameterProperties": true,
+						"ignoreInferredTypes": true,
+						"treatMethodsAsReadonly": false,
+						"allow": [
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-ai",
+								"name": ["Model", "Context", "SimpleStreamOptions", "JsonObject", "ToolCall"]
+							},
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-coding-agent",
+								"name": [
+									"ExtensionAPI",
+									"ExtensionContext",
+									"ToolDefinition",
+									"SourceInfo",
+									"Theme",
+									"ToolNamespace",
+									"SessionManager",
+									"AgentSession",
+									"ModelRuntime",
+									"ExtensionToolContext"
+								]
+							},
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-agent-core",
+								"name": ["AgentToolResult"]
+							},
+							{
+								"from": "package",
+								"package": "@earendil-works/pi-tui",
+								"name": ["Component"]
+							},
+							{
+								"from": "package",
+								"package": "node",
+								"name": [
+									"ChildProcess",
+									"ChildProcessWithoutNullStreams",
+									"SpawnOptions",
+									"ExecFileOptions",
+									"URL",
+									"StatOptions",
+									"ReadFileOptions",
+									"Dirent",
+									"Stats",
+									"FileHandle",
+									"Server",
+									"IncomingMessage",
+									"ServerResponse",
+									"AddressInfo",
+									"Buffer",
+									"Timeout",
+									"ProcessEnv",
+									"EventEmitter"
+								]
+							},
+							{
+								"from": "package",
+								"package": "typebox",
+								"name": ["TSchemaOptions"]
+							},
+							{
+								"from": "package",
+								"package": "stream-json",
+								"name": ["Token"]
+							},
+							{
+								"from": "package",
+								"package": "node:test",
+								"name": ["TestContext"]
+							},
+							{
+								"from": "lib",
+								"name": [
+									"Error",
+									"RegExp",
+									"Uint8Array",
+									"Promise",
+									"PromiseLike",
+									"Request",
+									"RequestInit",
+									"RequestInfo",
+									"Response",
+									"ResponseInit",
+									"Headers",
+									"HeadersInit",
+									"URL",
+									"URLSearchParams",
+									"AbortController",
+									"AbortSignal",
+									"Blob",
+									"File",
+									"FormData",
+									"ReadableStream",
+									"ReadableStreamDefaultReader",
+									"ReadableStreamBYOBReader",
+									"ReadableStreamDefaultController",
+									"ReadableByteStreamController",
+									"ReadableStreamBYOBRequest",
+									"WritableStream",
+									"WritableStreamDefaultWriter",
+									"WritableStreamDefaultController",
+									"TransformStream",
+									"TransformStreamDefaultController"
+								]
+							},
+							{
+								"from": "file",
+								"path": "./extensions/agent-browser/lib/results/contracts.ts",
+								"name": ["ToolPresentation"]
+							}
+						]
+					}
+				]
+			}
+		},
+		{
+			"files": ["extensions/agent-browser/lib/orchestration/browser-run/prepare-page-state.ts"],
+			"rules": {
+				"no-param-reassign": [
+					"error",
+					{
+						"props": true,
+						"ignorePropertyModificationsFor": ["state"]
+					}
+				]
+			}
+		},
+		{
+			"files": ["extensions/agent-browser/lib/orchestration/browser-run/index.ts"],
+			"rules": {
+				"no-param-reassign": [
+					"error",
+					{
+						"props": true,
+						"ignorePropertyModificationsFor": ["options"]
+					}
+				]
+			}
+		},
+		{
+			"files": ["extensions/agent-browser/lib/orchestration/browser-run/click-dispatch.ts"],
+			"rules": {
+				"no-param-reassign": [
+					"error",
+					{
+						"props": true,
+						"ignorePropertyModificationsFor": ["options"]
+					}
+				]
+			}
+		},
+		{
+			"files": [
+				"extensions/agent-browser/lib/orchestration/browser-run/native-helper-observation.ts"
+			],
+			"rules": {
+				"no-param-reassign": [
+					"error",
+					{
+						"props": true,
+						"ignorePropertyModificationsFor": ["state"]
+					}
+				]
+			}
+		},
+		{
+			"files": ["extensions/agent-browser/lib/browser-journal.ts"],
+			"rules": {
+				"no-param-reassign": [
+					"error",
+					{
+						"props": true,
+						"ignorePropertyModificationsFor": ["branch"]
+					}
+				]
+			}
+		},
+		{
+			"files": ["extensions/agent-browser/lib/results/presentation/notices.ts"],
+			"rules": {
+				"no-param-reassign": [
+					"error",
+					{
+						"props": true,
+						"ignorePropertyModificationsFor": ["draft"]
+					}
+				]
+			}
+		},
+		{
+			"files": ["extensions/agent-browser/lib/results/presentation/large-output.ts"],
+			"rules": {
+				"no-param-reassign": [
+					"error",
+					{
+						"props": true,
+						"ignorePropertyModificationsFor": ["draft"]
+					}
+				]
+			}
+		},
+		{
+			"files": ["extensions/agent-browser/lib/results/presentation/outcomes.ts"],
+			"rules": {
+				"no-param-reassign": [
+					"error",
+					{
+						"props": true,
+						"ignorePropertyModificationsFor": ["draft"]
+					}
+				]
+			}
+		},
+		{
+			"files": ["extensions/agent-browser/lib/results/presentation/output-completion.ts"],
+			"rules": {
+				"no-param-reassign": [
+					"error",
+					{
+						"props": true,
+						"ignorePropertyModificationsFor": ["draft"]
+					}
+				]
+			}
+		},
+		{
+			"files": [
+				"extensions/agent-browser/lib/orchestration/browser-run/process-output-confirmation.ts"
+			],
+			"rules": {
+				"no-param-reassign": [
+					"error",
+					{
+						"props": true,
+						"ignorePropertyModificationsFor": ["draft"]
+					}
+				]
+			}
+		},
+		{
+			"files": [
+				"extensions/agent-browser/lib/orchestration/browser-run/process-output-publication.ts"
+			],
+			"rules": {
+				"no-param-reassign": [
+					"error",
+					{
+						"props": true,
+						"ignorePropertyModificationsFor": ["draft"]
+					}
+				]
+			}
+		},
+		{
+			"files": [
+				"extensions/agent-browser/lib/orchestration/browser-run/process-output-electron.ts"
+			],
+			"rules": {
+				"no-param-reassign": [
+					"error",
+					{
+						"props": true,
+						"ignorePropertyModificationsFor": ["draft"]
+					}
+				]
+			}
+		},
+		{
+			"files": [
+				"extensions/agent-browser/lib/orchestration/browser-run/process-output-analysis.ts"
+			],
+			"rules": {
+				"no-param-reassign": [
+					"error",
+					{
+						"props": true,
+						"ignorePropertyModificationsFor": ["draft"]
+					}
+				]
+			}
+		},
+		{
+			"files": [
+				"extensions/agent-browser/lib/orchestration/browser-run/process-output-receipts.ts"
+			],
+			"rules": {
+				"no-param-reassign": [
+					"error",
+					{
+						"props": true,
+						"ignorePropertyModificationsFor": ["draft"]
+					}
+				]
+			}
+		},
+		{
+			"files": ["extensions/agent-browser/lib/orchestration/browser-run/process-output-refs.ts"],
+			"rules": {
+				"no-param-reassign": [
+					"error",
+					{
+						"props": true,
+						"ignorePropertyModificationsFor": ["draft"]
+					}
+				]
+			}
+		},
+		{
+			"files": [
+				"extensions/agent-browser/lib/orchestration/browser-run/process-output-presentation.ts"
+			],
+			"rules": {
+				"no-param-reassign": [
+					"error",
+					{
+						"props": true,
+						"ignorePropertyModificationsFor": ["draft"]
+					}
+				]
+			}
+		},
+		{
+			"files": ["extensions/agent-browser/lib/orchestration/browser-run/process-output-tabs.ts"],
+			"rules": {
+				"no-param-reassign": [
+					"error",
+					{
+						"props": true,
+						"ignorePropertyModificationsFor": ["draft"]
+					}
+				]
+			}
+		},
+		{
+			"files": [
+				"extensions/agent-browser/lib/orchestration/browser-run/process-output-navigation.ts"
+			],
+			"rules": {
+				"no-param-reassign": [
+					"error",
+					{
+						"props": true,
+						"ignorePropertyModificationsFor": ["draft"]
+					}
+				]
+			}
+		},
+		{
+			"files": ["extensions/agent-browser/lib/orchestration/browser-run/process-output-native.ts"],
+			"rules": {
+				"no-param-reassign": [
+					"error",
+					{
+						"props": true,
+						"ignorePropertyModificationsFor": ["draft"]
+					}
+				]
+			}
+		},
+		{
+			"files": [
+				"extensions/agent-browser/lib/orchestration/browser-run/process-output-lifecycle.ts"
+			],
+			"rules": {
+				"no-param-reassign": [
+					"error",
+					{
+						"props": true,
+						"ignorePropertyModificationsFor": ["draft"]
+					}
+				]
+			}
+		},
+		{
+			"files": ["extensions/agent-browser/lib/orchestration/browser-run/process-output-managed.ts"],
+			"rules": {
+				"no-param-reassign": [
+					"error",
+					{
+						"props": true,
+						"ignorePropertyModificationsFor": ["draft"]
+					}
+				]
+			}
+		},
+		{
+			"files": ["extensions/agent-browser/lib/orchestration/browser-run/session-state.ts"],
+			"rules": {
+				"no-param-reassign": [
+					"error",
+					{
+						"props": true,
+						"ignorePropertyModificationsFor": ["state"]
+					}
+				]
+			}
+		},
+		{
+			"files": ["extensions/agent-browser/lib/browser-legacy-projection.ts"],
+			"rules": {
+				"no-param-reassign": [
+					"error",
+					{
+						"props": true,
+						"ignorePropertyModificationsFor": ["current"]
+					}
+				]
+			}
+		},
+		{
+			"files": ["scripts/verify-recording-native.mjs"],
+			"rules": {
+				"no-param-reassign": [
+					"error",
+					{
+						"props": true,
+						"ignorePropertyModificationsFor": ["sm"]
+					}
+				]
+			}
+		},
+		{
+			"files": ["extensions/agent-browser/lib/orchestration/extension-prompt.ts"],
+			"rules": {
+				"no-param-reassign": [
+					"error",
+					{
+						"props": true,
+						"ignorePropertyModificationsFor": ["event"]
+					}
+				]
+			}
+		},
+		{
+			"files": ["extensions/agent-browser/lib/results/presentation/artifacts.ts"],
+			"rules": {
+				"no-param-reassign": [
+					"error",
+					{
+						"props": true,
+						"ignorePropertyModificationsFor": ["presentation"]
+					}
+				]
+			}
+		},
+		{
+			"files": ["extensions/agent-browser/lib/results/presentation/artifact-images.ts"],
+			"rules": {
+				"no-param-reassign": [
+					"error",
+					{
+						"props": true,
+						"ignorePropertyModificationsFor": ["presentation"]
+					}
+				]
+			}
+		},
+		{
+			"files": [
+				"platform-smoke.config.mjs",
+				"scripts/agent-browser-capability-baseline.mjs",
+				"scripts/agent-browser-target.mjs",
+				"scripts/build.mjs",
+				"scripts/capability-core-commands.mjs",
+				"scripts/capability-options.mjs",
+				"scripts/capability-samples.mjs",
+				"scripts/capability-section.mjs",
+				"scripts/check-command-reference-baseline.mjs",
+				"scripts/ci-host-compat.mjs",
+				"scripts/code-quality-boundaries.mjs",
+				"scripts/code-quality-policy.mjs",
+				"scripts/code-quality.mjs",
+				"scripts/compat-host.mjs",
+				"scripts/config.mjs",
+				"scripts/convert-browser-session.mjs",
+				"scripts/doctor-sources.mjs",
+				"scripts/doctor.mjs",
+				"scripts/lifecycle-fake-browser.mjs",
+				"scripts/lifecycle-fixture.mjs",
+				"scripts/lifecycle-run.mjs",
+				"scripts/lifecycle-tmux.mjs",
+				"scripts/lifecycle-transcript.mjs",
+				"scripts/oxlint.mjs",
+				"scripts/package-pack.mjs",
+				"scripts/package-pi.mjs",
+				"scripts/platform-smoke.mjs",
+				"scripts/platform-smoke/artifacts.mjs",
+				"scripts/platform-smoke/build-ubuntu-image.mjs",
+				"scripts/platform-smoke/commands.mjs",
+				"scripts/platform-smoke/crabbox-runner.mjs",
+				"scripts/platform-smoke/doctor-support.mjs",
+				"scripts/platform-smoke/doctor-windows.mjs",
+				"scripts/platform-smoke/doctor.mjs",
+				"scripts/platform-smoke/lease-evidence.mjs",
+				"scripts/platform-smoke/suite-checks.mjs",
+				"scripts/platform-smoke/suite-evidence.mjs",
+				"scripts/platform-smoke/targets.mjs",
+				"scripts/prepare-quality-checker.mjs",
+				"scripts/prepare.mjs",
+				"scripts/profile-startup.mjs",
+				"scripts/project.mjs",
+				"scripts/publish-contract.mjs",
+				"scripts/startup-measurement.mjs",
+				"scripts/verify-command-reference.mjs",
+				"scripts/verify-lifecycle.mjs",
+				"scripts/verify-package.mjs",
+				"scripts/verify-quality-mutations.mjs",
+				"scripts/verify-recording-native.mjs",
+				"test/agent-browser.native-lifecycle.test.mjs",
+				"test/helpers/browser-execution-order-proxy.cjs",
+				"test/helpers/large-browser-journal.mjs",
+				"test/helpers/lifecycle-offbranch-native.mjs"
+			],
 			"rules": {
 				"typescript/await-thenable": "off",
 				"typescript/consistent-return": "off",

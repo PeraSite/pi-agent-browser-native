@@ -3,18 +3,34 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import type { ExtensionAPI, ExtensionContext, SourceInfo } from "@earendil-works/pi-coding-agent";
+import {
+	SessionManager,
+	type ExtensionAPI,
+	type ExtensionContext,
+	type SourceInfo,
+} from "@earendil-works/pi-coding-agent";
+import { readRecord } from "./helpers/assertions.js";
 import { resolveExecutionCwd } from "../extensions/agent-browser/lib/execution-cwd.js";
 
-const ctx = { cwd: process.cwd(), sessionManager: {} } as Pick<
-	ExtensionContext,
-	"cwd" | "sessionManager"
->;
+const ctx: Pick<ExtensionContext, "cwd" | "sessionManager"> = {
+	cwd: process.cwd(),
+	sessionManager: SessionManager.inMemory(),
+};
 const api = (
-	emit: ExtensionAPI["events"]["emit"] = () => {},
-	sources: { tools?: SourceInfo[]; commands?: SourceInfo[] } = {},
+	emit: ExtensionAPI["events"]["emit"] = () => {
+		/* No directory owner responds by default. */
+	},
+	sources: {
+		readonly tools?: readonly SourceInfo[];
+		readonly commands?: readonly SourceInfo[];
+	} = {},
 ) => ({
-	events: { emit, on: () => () => {} },
+	events: {
+		emit,
+		on: () => () => {
+			/* Fixture has no listeners to remove. */
+		},
+	},
 	getAllTools: () =>
 		(sources.tools ?? []).map((sourceInfo) => ({
 			id: "change_dir",
@@ -40,8 +56,8 @@ test("execution cwd uses a synchronous owner reply and never silently replaces o
 		resolveExecutionCwd(
 			api((channel, request) => {
 				assert.equal(channel, "pi-change-working-dir:resolve-execution-cwd");
-				assert.equal((request as { sessionManager: unknown }).sessionManager, ctx.sessionManager);
-				Object.assign(request as object, { result: { cwd: b } });
+				assert.equal(readRecord(request).sessionManager, ctx.sessionManager);
+				Object.assign(readRecord(request), { result: { cwd: b } });
 			}),
 			ctx,
 		),
@@ -61,10 +77,14 @@ test("execution cwd uses a synchronous owner reply and never silently replaces o
 		{ cwd: b, error: null },
 		Object.assign([], { cwd: b }),
 	]) {
+		// Every fixed malformed reply must fail closed; none are filtered from this matrix.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.throws(
 			() =>
 				resolveExecutionCwd(
-					api((_channel, request) => Object.assign(request as object, { result })),
+					api((_channel, request) => {
+						Object.assign(readRecord(request), { result });
+					}),
 					ctx,
 				),
 			/invalid execution directory/,
@@ -73,11 +93,11 @@ test("execution cwd uses a synchronous owner reply and never silently replaces o
 	assert.throws(
 		() =>
 			resolveExecutionCwd(
-				api((_channel, request) =>
-					Object.assign(request as object, {
+				api((_channel, request) => {
+					Object.assign(readRecord(request), {
 						result: { cwd: b, error: "Selected directory disappeared" },
-					}),
-				),
+					});
+				}),
 				ctx,
 			),
 		/Selected directory disappeared/,
@@ -116,7 +136,9 @@ test("legacy owner detection checks package provenance for excluded tools and di
 			ctx.cwd,
 		);
 		const responding = api(
-			(_channel, request) => Object.assign(request as object, { result: { cwd: owner } }),
+			(_channel, request) => {
+				Object.assign(readRecord(request), { result: { cwd: owner } });
+			},
 			{ tools: [source(owner, true)] },
 		);
 		assert.equal(
@@ -131,9 +153,9 @@ test("legacy owner detection checks package provenance for excluded tools and di
 		const tools = otherSurfaces.getAllTools(),
 			commands = otherSurfaces.getCommands();
 		otherSurfaces.getAllTools = () =>
-			tools.map((tool) => ({ ...tool, id: "cwd_helper", name: "cwd_helper" }));
+			tools.map((tool) => Object.assign({}, tool, { id: "cwd_helper", name: "cwd_helper" }));
 		otherSurfaces.getCommands = () =>
-			commands.map((command) => ({ ...command, name: "cwd-status" }));
+			commands.map((command) => Object.assign({}, command, { name: "cwd-status" }));
 		assert.equal(
 			resolveExecutionCwd(otherSurfaces, ctx),
 			ctx.cwd,
@@ -157,10 +179,14 @@ test("exact package source provenance identifies legacy owners when manifests ar
 		"git:github.com/fitchmultz/pi-change-working-dir",
 		"git:github.com/fitchmultz/pi-change-working-dir.git@main",
 	]) {
+		// Every declared package spelling must reject its missing source.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.throws(
 			() => resolveExecutionCwd(api(undefined, { tools: [missingSource(name)] }), ctx),
 			/Update pi-change-working-dir/,
 		);
+		// Every declared package spelling must also reject its missing command source.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.throws(
 			() => resolveExecutionCwd(api(undefined, { commands: [missingSource(name)] }), ctx),
 			/Update pi-change-working-dir/,
@@ -171,6 +197,8 @@ test("exact package source provenance identifies legacy owners when manifests ar
 		"git:github.com/other/pi-change-working-dir",
 		"npm:@other/pi-change-working-dir",
 	]) {
+		// Each fixed unrelated package is a negative identity-isolation control.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.equal(
 			resolveExecutionCwd(
 				api(undefined, { tools: [missingSource(name)], commands: [missingSource(name)] }),

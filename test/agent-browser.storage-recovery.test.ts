@@ -1,3 +1,4 @@
+import { readArray, readRecord, readString } from "./helpers/assertions.js";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -6,7 +7,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import test from "node:test";
-import { SessionManager, type ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { SessionManager } from "@earendil-works/pi-coding-agent";
 
 import {
 	BROWSER_TRANSITION_ENTRY,
@@ -45,15 +46,15 @@ function manager(file: string, leaf: string | null) {
 		getEntry() {
 			throw new Error("Official replay must token-load only the winning definition.");
 		},
-	} as unknown as ExtensionContext["sessionManager"];
+	};
 }
 
 async function records(file: string): Promise<Array<Record<string, unknown>>> {
 	return (await readFile(file, "utf8"))
 		.trim()
 		.split("\n")
-		.filter((line) => line.trim())
-		.map((line) => JSON.parse(line));
+		.filter((line) => line.trim().length > 0)
+		.map((line) => readRecord(JSON.parse(line)));
 }
 
 test("published replay retains its captured branch while a new leaf is appended", async () => {
@@ -103,7 +104,7 @@ test("published replay retains its captured branch while a new leaf is appended"
 				}
 				return header;
 			},
-		} as unknown as ExtensionContext["sessionManager"];
+		};
 		const first = await readBrowserEntries(selected);
 		assert.equal(appended, true, "the fixture must reach the concurrent publication window");
 		assert.equal(
@@ -134,7 +135,7 @@ test("published replay retains its captured branch while a new leaf is appended"
 });
 
 test("native branch admission permits descendants and siblings without reading bodies, but validates identity and ancestry", async () => {
-	const entries = new Map<string, { id: string; parentId: string | null }>([
+	const entries = new Map<string, { id: string; parentId: unknown }>([
 		["a", { id: "a", parentId: null }],
 		["first", { id: "first", parentId: "a" }],
 		["sibling", { id: "sibling", parentId: "a" }],
@@ -152,16 +153,19 @@ test("native branch admission permits descendants and siblings without reading b
 		generationCurrent = true;
 	const native = {
 		getSessionId: () => sessionId,
+		getHeader: () => ({ id: "fixture-session" }),
 		getLeafId: () => leaf,
 		getEntry: (id: string) => entries.get(id),
-		getSessionFile: () => undefined,
+		getSessionFile: (): string | undefined => {
+			/* This ancestry fixture has no persisted journal. */ return;
+		},
 		getEntries() {
 			throw new Error("No eager physical scan.");
 		},
 		getBranch() {
 			throw new Error("No eager branch scan.");
 		},
-	} as unknown as ExtensionContext["sessionManager"];
+	};
 	const branch = captureBrowserBranch(native, () => generationCurrent);
 	assert.equal(branch.isCurrent(), true);
 	generationCurrent = false;
@@ -194,8 +198,10 @@ test("native branch admission permits descendants and siblings without reading b
 		{ id: "bad", parentId: "bad" },
 		{ id: "bad", parentId: 7 },
 	]) {
-		entries.set("bad", broken as { id: string; parentId: string });
+		entries.set("bad", broken);
 		leaf = "bad";
+		// Missing, cyclic and malformed parents must each fail closed; every variant is asserted.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.throws(
 			() => branch.isCurrent(),
 			/ancestry/,
@@ -242,7 +248,7 @@ test("captured admission validates its prefix once and bounds subsequent work by
 	const entries = new Map(
 		Array.from({ length: 781 }, (_, index) => {
 			const id = `e${index}`;
-			return [id, { id, parentId: index ? `e${index - 1}` : null }] as const;
+			return [id, { id, parentId: index > 0 ? `e${index - 1}` : null }] as const;
 		}),
 	);
 	let leaf = "e780",
@@ -250,17 +256,21 @@ test("captured admission validates its prefix once and bounds subsequent work by
 	const native = {
 		getSessionId: () => "fixture",
 		getLeafId: () => leaf,
-		getSessionFile: () => undefined,
+		getSessionFile: (): string | undefined => {
+			/* This ancestry fixture has no persisted journal. */ return;
+		},
 		getEntry(id: string) {
 			reads += 1;
 			return entries.get(id);
 		},
-	} as unknown as ExtensionContext["sessionManager"];
+	};
 	const branch = captureBrowserBranch(native, () => true);
 	assert.equal(branch.isCurrent(), true);
 	assert.ok(reads >= 781, "even leaf === anchor must validate the complete initial prefix");
 	reads = 0;
 	for (let index = 0; index < 20; index++) {
+		// Exhaustive fixture variant (index < 20): this selected path must satisfy its own contract.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.equal(branch.isCurrent(), true);
 	}
 	assert.ok(
@@ -272,6 +282,8 @@ test("captured admission validates its prefix once and bounds subsequent work by
 		const id = `append${index}`;
 		entries.set(id, { id, parentId: leaf });
 		leaf = id;
+		// Exhaustive fixture variant (index < 20): this selected path must satisfy its own contract.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.equal(branch.isCurrent(), true);
 	}
 	assert.ok(
@@ -299,11 +311,17 @@ test("equal-leaf admission does not bypass malformed, missing or cyclic captured
 		const native = {
 			getSessionId: () => "fixture",
 			getLeafId: () => "anchor",
-			getSessionFile: () => undefined,
+			getSessionFile: (): string | undefined => {
+				/* This ancestry fixture has no persisted journal. */ return;
+			},
 			getEntry: (id: string) => entries.get(id),
-		} as unknown as ExtensionContext["sessionManager"];
+		};
 		const branch = captureBrowserBranch(native, () => true);
+		// Every invalid captured ancestry variant must fail initial and repeated admission.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.throws(() => branch.isCurrent(), /ancestry/);
+		// Every invalid captured ancestry variant must fail initial and repeated admission.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.throws(
 			() => branch.isCurrent(),
 			/ancestry/,
@@ -333,7 +351,8 @@ for (const change of ["locator", "replace", "truncate"] as const) {
 				timestamp: header.timestamp,
 				data: {},
 			});
-			const bytes = (rows: unknown[]) => rows.map((row) => JSON.stringify(row)).join("\n") + "\n";
+			const bytes = (rows: readonly unknown[]) =>
+				rows.map((row) => JSON.stringify(row)).join("\n") + "\n";
 			await writeFile(file, bytes([header, entry("root", null), entry("anchor", "root")]));
 			const native = SessionManager.open(file, root);
 			const branch = captureBrowserBranch(native, () => true);
@@ -347,8 +366,9 @@ for (const change of ["locator", "replace", "truncate"] as const) {
 						: [header, entry("root", "missing"), entry("anchor", "root")],
 				),
 			);
-			if (change === "locator") native.setSessionFile(replacement);
-			else {
+			if (change === "locator") {
+				native.setSessionFile(replacement);
+			} else {
 				renameSync(replacement, file);
 				native.setSessionFile(file);
 			}
@@ -357,14 +377,19 @@ for (const change of ["locator", "replace", "truncate"] as const) {
 				branch.sessionId,
 				"the native reseed retains the UUID, not its indexed objects",
 			);
-			if (change === "truncate")
+			if (change === "truncate") {
+				// Exhaustive fixture variant (change === "truncate"): this selected path must satisfy its own contract.
+				// oxlint-disable-next-line node-test/no-conditional-assertion
 				assert.equal(branch.isCurrent(), false, "the selected entry has been withdrawn");
-			else
+			} else {
+				// Exhaustive fixture variant (change === "truncate"): this selected path must satisfy its own contract.
+				// oxlint-disable-next-line node-test/no-conditional-assertion
 				assert.throws(
 					() => branch.isCurrent(),
 					/ancestry/,
 					"equal entry IDs cannot certify a replacement prefix",
 				);
+			}
 		} finally {
 			await rm(root, { recursive: true, force: true });
 		}
@@ -387,10 +412,12 @@ for (const change of ["replace", "truncate"] as const) {
 					if (change === "replace") {
 						writeFileSync(`${file}.replacement`, `${JSON.stringify(header)}\n`);
 						renameSync(`${file}.replacement`, file);
-					} else writeFileSync(file, `${JSON.stringify(header)}\n`);
+					} else {
+						writeFileSync(file, `${JSON.stringify(header)}\n`);
+					}
 					return header;
 				},
-			} as unknown as ExtensionContext["sessionManager"];
+			};
 			await assert.rejects(
 				readBrowserEntries(native),
 				/replaced or truncated/,
@@ -403,7 +430,7 @@ for (const change of ["replace", "truncate"] as const) {
 }
 
 for (const earlierHandler of [false, true]) {
-	for (const boundary of ["begin", "finish", "observation", "host-finish"] as const)
+	for (const boundary of ["begin", "finish", "observation", "host-finish"] as const) {
 		test(
 			`branch selection during ${boundary} journal preparation cannot publish old state onto B (${earlierHandler ? "earlier awaited handler" : "immediate event"})`,
 			{ concurrency: false, timeout: 30_000 },
@@ -420,7 +447,7 @@ process.stdout.write(JSON.stringify({success:true,data:args.includes('eval')?{re
 					);
 					await withPatchedEnv(
 						{
-							PATH: `${root}${delimiter}${process.env.PATH}`,
+							PATH: `${root}${delimiter}${process.env.PATH ?? ""}`,
 							AGENT_BROWSER_SESSION: undefined,
 							AGENT_BROWSER_NAMESPACE: undefined,
 						},
@@ -446,9 +473,13 @@ process.stdout.write(JSON.stringify({success:true,data:args.includes('eval')?{re
 								sessionFile: file,
 								branch: branch("a"),
 								onAppendEntry(type, data) {
-									if (type !== BROWSER_TRANSITION_ENTRY) return;
-									const phase = (data as { event: { phase: string } }).event.phase;
-									if (phase === (boundary === "observation" ? "finish" : "begin")) armed = true;
+									if (type !== BROWSER_TRANSITION_ENTRY) {
+										return;
+									}
+									const phase = readRecord(readRecord(data).event).phase;
+									if (phase === (boundary === "observation" ? "finish" : "begin")) {
+										armed = true;
+									}
 								},
 							});
 							await runExtensionEvent(
@@ -457,11 +488,17 @@ process.stdout.write(JSON.stringify({success:true,data:args.includes('eval')?{re
 								{ reason: "new" },
 								harness.ctx,
 							);
-							if (earlierHandler)
-								harness.handlers.get("session_tree")!.unshift(async () => {
+							if (earlierHandler) {
+								(
+									harness.handlers.get("session_tree") ??
+									// Exhaustive fixture variant (earlierHandler): this selected path must satisfy its own contract.
+									// oxlint-disable-next-line node-test/no-conditional-assertion
+									assert.fail("tree handler must be registered")
+								).unshift(async () => {
 									earlierHandlerEntered = true;
 									await earlierHandlerHeld;
 								});
+							}
 							const getSessionFile = harness.ctx.sessionManager.getSessionFile;
 							Object.defineProperty(harness.ctx.sessionManager, "getSessionFile", {
 								value: () => {
@@ -482,37 +519,53 @@ process.stdout.write(JSON.stringify({success:true,data:args.includes('eval')?{re
 								},
 							});
 							armed = boundary === "begin";
-							const result =
-								boundary === "observation"
-									? await executeRegisteredTool(
-											harness.getTool("agent_browser_code")!,
+							const invokeBoundary = () => {
+								switch (boundary) {
+									case "observation":
+										return executeRegisteredTool(
+											harness.getTool("agent_browser_code") ??
+												// Exhaustive fixture variant ("observation"): this selected path must satisfy its own contract.
+												// oxlint-disable-next-line node-test/no-conditional-assertion
+												assert.fail("code tool must be registered"),
 											harness.ctx,
 											{
 												session: "append-race",
 												code: 'await browser({args:["get","url"]}); emit("x".repeat(24000));',
 											},
-										)
-									: boundary === "host-finish"
-										? await executeRegisteredTool(
-												harness.getTool("agent_browser_electron")!,
-												harness.ctx,
-												{ action: "probe" },
-											)
-										: await executeRegisteredTool(harness.tool, harness.ctx, {
-												args: ["--session", "append-race", "eval", "--stdin"],
-												stdin: "MUTATE_FIXTURE",
-											});
-							if (earlierHandler)
+										);
+									case "host-finish":
+										return executeRegisteredTool(
+											harness.getTool("agent_browser_electron") ??
+												// Exhaustive fixture variant ("host-finish"): this selected path must satisfy its own contract.
+												// oxlint-disable-next-line node-test/no-conditional-assertion
+												assert.fail("electron tool must be registered"),
+											harness.ctx,
+											{ action: "probe" },
+										);
+									case "begin":
+									case "finish":
+										return executeRegisteredTool(harness.tool, harness.ctx, {
+											args: ["--session", "append-race", "eval", "--stdin"],
+											stdin: "MUTATE_FIXTURE",
+										});
+								}
+							};
+							const result = await invokeBoundary();
+							const resultDetails = readRecord(result.details);
+							if (earlierHandler) {
+								// Exhaustive fixture variant (earlierHandler): this selected path must satisfy its own contract.
+								// oxlint-disable-next-line node-test/no-conditional-assertion
 								assert.equal(
 									earlierHandlerEntered,
 									true,
 									"the earlier extension is still awaiting work before this extension sees the tree event",
 								);
+							}
 							releaseEarlierHandler();
 							await tree;
 							assert.equal(selected, true, "navigation must reach the awaited publication window");
 							assert.deepEqual(
-								harness.ctx.sessionManager.getBranch().map((entry) => (entry as { id: string }).id),
+								harness.ctx.sessionManager.getBranch().map((entry) => readRecord(entry).id),
 								["b"],
 								"the old caller cannot append a begin, finish or artifact receipt beneath B",
 							);
@@ -520,47 +573,76 @@ process.stdout.write(JSON.stringify({success:true,data:args.includes('eval')?{re
 								(row) => row.stdin === "MUTATE_FIXTURE",
 							);
 							if (boundary === "begin") {
-								assert.equal(result.details?.browserStatePersistence, "begin-unconfirmed");
+								// Exhaustive fixture variant (boundary === "begin"): this selected path must satisfy its own contract.
+								// oxlint-disable-next-line node-test/no-conditional-assertion
+								assert.equal(resultDetails.browserStatePersistence, "begin-unconfirmed");
+								// Exhaustive fixture variant (boundary === "begin"): this selected path must satisfy its own contract.
+								// oxlint-disable-next-line node-test/no-conditional-assertion
 								assert.equal(mutations.length, 0, "stale intent never authorizes dispatch");
 							} else if (boundary === "finish") {
-								assert.equal(result.details?.browserStatePersistence, "finish-unconfirmed");
+								// Exhaustive fixture variant (boundary === "finish"): this selected path must satisfy its own contract.
+								// oxlint-disable-next-line node-test/no-conditional-assertion
+								assert.equal(resultDetails.browserStatePersistence, "finish-unconfirmed");
+								// Exhaustive fixture variant (boundary === "finish"): this selected path must satisfy its own contract.
+								// oxlint-disable-next-line node-test/no-conditional-assertion
 								assert.equal(mutations.length, 1, "the completed effect is not retried");
+								// Exhaustive fixture variant (boundary === "finish"): this selected path must satisfy its own contract.
+								// oxlint-disable-next-line node-test/no-conditional-assertion
 								assert.equal(
-									JSON.parse(await readFile(String(result.details?.fullOutputPath), "utf8")).result,
+									readRecord(
+										JSON.parse(await readFile(readString(resultDetails.fullOutputPath), "utf8")),
+									).result,
 									"x".repeat(24000),
 									"the stale caller retains its full observation",
 								);
 								const all = (await records(file)).filter((entry) => entry.type !== "session");
+								// Exhaustive fixture variant (boundary === "finish"): this selected path must satisfy its own contract.
+								// oxlint-disable-next-line node-test/no-conditional-assertion
 								assert.equal(
 									all.map(getBrowserRecord).filter((record) => record?.event.phase === "begin")
 										.length,
 									1,
 								);
+								// Exhaustive fixture variant (boundary === "finish"): this selected path must satisfy its own contract.
+								// oxlint-disable-next-line node-test/no-conditional-assertion
 								assert.equal(
 									all.map(getBrowserRecord).some((record) => record?.event.phase === "finish"),
 									false,
 								);
+								// Exhaustive fixture variant (boundary === "finish"): this selected path must satisfy its own contract.
+								// oxlint-disable-next-line node-test/no-conditional-assertion
 								assert.equal(
 									SessionPageState.fromBranch(all).get("append-race").tabTargetUnknown,
 									true,
 									"A keeps its unfinished intent",
 								);
 							} else if (boundary === "observation") {
+								// Exhaustive fixture variant (boundary === "observation"): this selected path must satisfy its own contract.
+								// oxlint-disable-next-line node-test/no-conditional-assertion
 								assert.equal(result.isError, false, JSON.stringify(result));
-								assert.equal(result.details?.data, "x".repeat(24000));
-								const observation = JSON.parse(
-									result.content.find((part) => part.type === "text")?.text ?? "{}",
+								// Exhaustive fixture variant (boundary === "observation"): this selected path must satisfy its own contract.
+								// oxlint-disable-next-line node-test/no-conditional-assertion
+								assert.equal(resultDetails.data, "x".repeat(24000));
+								const observation = readRecord(
+									JSON.parse(result.content.find((part) => part.type === "text")?.text ?? "{}"),
 								);
+								// Exhaustive fixture variant (boundary === "observation"): this selected path must satisfy its own contract.
+								// oxlint-disable-next-line node-test/no-conditional-assertion
 								assert.equal(
-									JSON.parse(await readFile(observation.observationPath, "utf8")).data,
+									readRecord(
+										JSON.parse(await readFile(readString(observation.observationPath), "utf8")),
+									).data,
 									"x".repeat(24000),
 								);
-							} else
+							} else {
+								// Exhaustive fixture variant (boundary === "observation"): this selected path must satisfy its own contract.
+								// oxlint-disable-next-line node-test/no-conditional-assertion
 								assert.equal(
-									result.details?.browserStatePersistence,
+									resultDetails.browserStatePersistence,
 									"finish-unconfirmed",
 									"host completion does not claim a durable finish after branch withdrawal",
 								);
+							}
 							await runExtensionEvent(
 								harness.handlers,
 								"session_shutdown",
@@ -574,6 +656,7 @@ process.stdout.write(JSON.stringify({success:true,data:args.includes('eval')?{re
 				}
 			},
 		);
+	}
 }
 
 for (const memory of [false, true]) {
@@ -594,7 +677,7 @@ process.stdout.write(JSON.stringify({success:true,data}));`,
 				);
 				await withPatchedEnv(
 					{
-						PATH: `${root}${delimiter}${process.env.PATH}`,
+						PATH: `${root}${delimiter}${process.env.PATH ?? ""}`,
 						PI_AGENT_BROWSER_TEST_CUSTOM_SESSION_INFO: "1",
 						AGENT_BROWSER_SESSION: undefined,
 						AGENT_BROWSER_NAMESPACE: undefined,
@@ -610,17 +693,22 @@ process.stdout.write(JSON.stringify({success:true,data}));`,
 							{ reason: "new" },
 							harness.ctx,
 						);
-						if (!memory) await rm(file);
+						if (!memory) {
+							await rm(file);
+						}
 						const commands = [
 							["skills", "list"],
 							["session", "info"],
 							["read", "https://fixture.test/content"],
 						];
 						for (const args of commands) {
+							// Sessionless commands share the invocation journal; finish each subtest before the next command.
+							// oxlint-disable-next-line no-await-in-loop
 							await t.test(args.join(" "), async () => {
 								const result = await executeRegisteredTool(harness.tool, harness.ctx, { args });
+								const resultDetails = readRecord(result.details);
 								assert.equal(result.isError, false, JSON.stringify(result));
-								assert.equal(result.details?.browserStatePersistence, undefined);
+								assert.equal(resultDetails.browserStatePersistence, undefined);
 							});
 						}
 						await t.test("oversized output and selected readback", async () => {
@@ -629,15 +717,16 @@ process.stdout.write(JSON.stringify({success:true,data}));`,
 								args: ["skills", "get", "core", "--full"],
 								outputPath: selectedPath,
 							});
+							const largeDetails = readRecord(large.details);
 							assert.equal(large.isError, false, JSON.stringify(large));
-							assert.equal(large.details?.browserStatePersistence, undefined);
-							assert.equal(typeof large.details?.fullOutputPath, "string");
-							const full = await readFile(String(large.details?.fullOutputPath), "utf8");
-							assert.equal(JSON.parse(full).content, "x".repeat(60000));
-							assert.doesNotMatch(full, /fixture-output-secret/);
+							assert.equal(largeDetails.browserStatePersistence, undefined);
+							assert.equal(typeof largeDetails.fullOutputPath, "string");
+							const full = await readFile(readString(largeDetails.fullOutputPath), "utf8");
+							assert.equal(readRecord(JSON.parse(full)).content, "x".repeat(60000));
+							assert.doesNotMatch(readString(full), /fixture-output-secret/);
 							assert.deepEqual(
-								JSON.parse(await readFile(selectedPath, "utf8")),
-								JSON.parse(full),
+								readRecord(JSON.parse(await readFile(selectedPath, "utf8"))),
+								readRecord(JSON.parse(full)),
 								"selected output retains the complete redacted data",
 							);
 						});
@@ -650,19 +739,26 @@ process.stdout.write(JSON.stringify({success:true,data}));`,
 						observations
 							.slice(0, commands.length)
 							.forEach((row, index) =>
-								assert.deepEqual(row.args.slice(-commands[index].length), commands[index]),
+								assert.deepEqual(
+									readArray(row.args).map(readString).slice(-commands[index].length),
+									commands[index],
+								),
 							);
 						const status = await executeRegisteredTool(
-							harness.getTool("agent_browser_electron")!,
+							harness.getTool("agent_browser_electron") ??
+								// Exhaustive fixture variant ([false, true]): this selected path must satisfy its own contract.
+								// oxlint-disable-next-line node-test/no-conditional-assertion
+								assert.fail("electron tool must be registered"),
 							harness.ctx,
 							{ action: "status", launchId: "missing" },
 						);
+						const statusDetails = readRecord(status.details);
 						assert.equal(
-							status.details?.failureCategory,
+							statusDetails.failureCategory,
 							"validation-error",
 							"local host validation keeps its own result without a replay write",
 						);
-						assert.equal(status.details?.browserStatePersistence, undefined);
+						assert.equal(statusDetails.browserStatePersistence, undefined);
 						assert.equal(
 							harness.appendedEntries.length,
 							0,
@@ -671,13 +767,20 @@ process.stdout.write(JSON.stringify({success:true,data}));`,
 						const browser = await executeRegisteredTool(harness.tool, harness.ctx, {
 							args: ["--session", "memory-boundary", "get", "url"],
 						});
+						const browserDetails = readRecord(browser.details);
 						if (memory) {
+							// Exhaustive fixture variant (memory): this selected path must satisfy its own contract.
+							// oxlint-disable-next-line node-test/no-conditional-assertion
 							assert.equal(browser.isError, false, JSON.stringify(browser));
+							// Exhaustive fixture variant (memory): this selected path must satisfy its own contract.
+							// oxlint-disable-next-line node-test/no-conditional-assertion
 							assert.equal(
-								browser.details?.browserStatePersistence,
+								browserDetails.browserStatePersistence,
 								undefined,
 								"direct in-memory state makes no durability claim",
 							);
+							// Exhaustive fixture variant (memory): this selected path must satisfy its own contract.
+							// oxlint-disable-next-line node-test/no-conditional-assertion
 							assert.equal(
 								harness.appendedEntries.filter(
 									(entry) =>
@@ -685,38 +788,54 @@ process.stdout.write(JSON.stringify({success:true,data}));`,
 								).length,
 								1,
 							);
+							// Exhaustive fixture variant (memory): this selected path must satisfy its own contract.
+							// oxlint-disable-next-line node-test/no-conditional-assertion
 							assert.equal(
-								(
-									await readBrowserEntries(
-										harness.ctx.sessionManager as unknown as ExtensionContext["sessionManager"],
-									)
-								).length,
+								(await readBrowserEntries(harness.ctx.sessionManager)).length,
 								harness.appendedEntries.length,
 								"public in-memory ancestry retains canonical state",
 							);
 							const beforeCode = (await readInvocationLog(log)).length;
 							const code = await executeRegisteredTool(
-								harness.getTool("agent_browser_code")!,
+								harness.getTool("agent_browser_code") ??
+									// Exhaustive fixture variant (memory): this selected path must satisfy its own contract.
+									// oxlint-disable-next-line node-test/no-conditional-assertion
+									assert.fail("code tool must be registered"),
 								harness.ctx,
 								{ code: 'await browser({args:["eval","--stdin"],stdin:"NEVER_DISPATCH"});' },
 							);
+							const codeDetails = readRecord(code.details);
+							// Exhaustive fixture variant (memory): this selected path must satisfy its own contract.
+							// oxlint-disable-next-line node-test/no-conditional-assertion
 							assert.equal(code.isError, true);
-							assert.equal(code.details?.failureCategory, "validation-error");
+							// Exhaustive fixture variant (memory): this selected path must satisfy its own contract.
+							// oxlint-disable-next-line node-test/no-conditional-assertion
+							assert.equal(codeDetails.failureCategory, "validation-error");
+							// Exhaustive fixture variant (memory): this selected path must satisfy its own contract.
+							// oxlint-disable-next-line node-test/no-conditional-assertion
 							assert.equal(
 								(await readInvocationLog(log)).length,
 								beforeCode,
 								"code requires published intent even in an in-memory session",
 							);
 						} else {
+							// Exhaustive fixture variant (memory): this selected path must satisfy its own contract.
+							// oxlint-disable-next-line node-test/no-conditional-assertion
 							assert.equal(
-								browser.details?.browserStatePersistence,
+								browserDetails.browserStatePersistence,
 								"begin-unconfirmed",
 								"a named but unpublished persistent session still refuses dispatch",
 							);
+							// Exhaustive fixture variant (memory): this selected path must satisfy its own contract.
+							// oxlint-disable-next-line node-test/no-conditional-assertion
 							assert.equal(
-								(await readInvocationLog(log)).some((row) => row.args.includes("memory-boundary")),
+								(await readInvocationLog(log)).some((row) =>
+									readArray(row.args).map(readString).includes("memory-boundary"),
+								),
 								false,
 							);
+							// Exhaustive fixture variant (memory): this selected path must satisfy its own contract.
+							// oxlint-disable-next-line node-test/no-conditional-assertion
 							assert.equal(harness.appendedEntries.length, 0);
 						}
 						await runExtensionEvent(
@@ -756,8 +875,8 @@ test("converter CLI retains the published copy's receipt when its optional recei
 		];
 		const converted = spawnSync(process.execPath, args, { encoding: "utf8" });
 		assert.equal(converted.status, 1, "optional receipt failure remains visible");
-		assert.match(converted.stderr, /EEXIST/);
-		const receipt = JSON.parse(converted.stdout);
+		assert.match(readString(converted.stderr), /EEXIST/);
+		const receipt = readRecord(JSON.parse(converted.stdout));
 		assert.equal(receipt.sourceSha256, createHash("sha256").update(bytes).digest("hex"));
 		assert.equal(
 			receipt.destinationSha256,
@@ -770,7 +889,7 @@ test("converter CLI retains the published copy's receipt when its optional recei
 		assert.equal(await readFile(receiptPath, "utf8"), "retained receipt");
 		const occupied = spawnSync(process.execPath, args, { encoding: "utf8" });
 		assert.equal(occupied.status, 1);
-		assert.match(occupied.stderr, /occupied/);
+		assert.match(readString(occupied.stderr), /occupied/);
 		assert.equal(occupied.stdout, "", "a refusal does not invent a new conversion receipt");
 	} finally {
 		await rm(root, { recursive: true, force: true });
@@ -794,7 +913,7 @@ process.stdout.write(JSON.stringify({success:true,data:{url:'https://fixture.tes
 				);
 				await withPatchedEnv(
 					{
-						PATH: `${root}${delimiter}${process.env.PATH}`,
+						PATH: `${root}${delimiter}${process.env.PATH ?? ""}`,
 						AGENT_BROWSER_SESSION: undefined,
 						AGENT_BROWSER_NAMESPACE: undefined,
 					},
@@ -805,17 +924,22 @@ process.stdout.write(JSON.stringify({success:true,data:{url:'https://fixture.tes
 							cwd: root,
 							sessionFile: file,
 							onAppendEntry(type, data) {
-								if (type !== BROWSER_TRANSITION_ENTRY) return;
-								if (!failed && (data as { event?: { phase: string } }).event?.phase === "begin") {
+								if (type !== BROWSER_TRANSITION_ENTRY) {
+									return;
+								}
+								if (!failed && readRecord(readRecord(data).event).phase === "begin") {
 									failed = true;
 									dirty = JSON.stringify(
-										harness.ctx.sessionManager.getEntry(harness.ctx.sessionManager.getLeafId()!),
+										harness.ctx.sessionManager.getEntry(
+											readString(harness.ctx.sessionManager.getLeafId()),
+										),
 									);
 									throw new Error("accepted native entry could not be persisted");
 								}
-								if (dirty) {
-									if (repair === "append") appendFileSync(file, `\n${dirty}\n`);
-									else {
+								if (dirty !== undefined) {
+									if (repair === "append") {
+										appendFileSync(file, `\n${dirty}\n`);
+									} else {
 										writeFileSync(`${file}.repair`, `${readFileSync(file, "utf8")}\n${dirty}\n`);
 										renameSync(`${file}.repair`, file);
 									}
@@ -834,8 +958,9 @@ process.stdout.write(JSON.stringify({success:true,data:{url:'https://fixture.tes
 							args: [...prefix, "eval", "--stdin"],
 							stdin: "NEVER_RETRY_MUTATION",
 						});
+						const refusedDetails = readRecord(refused.details);
 						assert.equal(
-							refused.details?.browserStatePersistence,
+							refusedDetails.browserStatePersistence,
 							"begin-unconfirmed",
 							JSON.stringify(refused),
 						);
@@ -889,7 +1014,7 @@ process.stdout.write(JSON.stringify({success:true,data}));`,
 				);
 				await withPatchedEnv(
 					{
-						PATH: `${root}${delimiter}${process.env.PATH}`,
+						PATH: `${root}${delimiter}${process.env.PATH ?? ""}`,
 						AGENT_BROWSER_SESSION: undefined,
 						AGENT_BROWSER_NAMESPACE: undefined,
 					},
@@ -903,9 +1028,10 @@ process.stdout.write(JSON.stringify({success:true,data}));`,
 								if (
 									fail &&
 									type === BROWSER_TRANSITION_ENTRY &&
-									(data as { event?: { phase: string } }).event?.phase === failPhase
-								)
+									readRecord(readRecord(data).event).phase === failPhase
+								) {
 									throw new Error("fixture disk write failed");
+								}
 							},
 						});
 						await runExtensionEvent(
@@ -919,7 +1045,9 @@ process.stdout.write(JSON.stringify({success:true,data}));`,
 						});
 						fail = true;
 						const result = await executeRegisteredTool(
-							harness.getTool("agent_browser_code")!,
+							// Exhaustive fixture variant (["begin", "finish"] as const): this selected path must satisfy its own contract.
+							// oxlint-disable-next-line node-test/no-conditional-assertion
+							harness.getTool("agent_browser_code") ?? assert.fail("code tool must be registered"),
 							harness.ctx,
 							{
 								session: "fault",
@@ -941,7 +1069,11 @@ process.stdout.write(JSON.stringify({success:true,data}));`,
 								(entry) => entry.type !== "session",
 							);
 							const pending = SessionPageState.fromBranch(persisted).get("fault");
+							// Exhaustive fixture variant (failPhase === "finish"): this selected path must satisfy its own contract.
+							// oxlint-disable-next-line node-test/no-conditional-assertion
 							assert.equal(pending.tabTargetUnknown, true);
+							// Exhaustive fixture variant (failPhase === "finish"): this selected path must satisfy its own contract.
+							// oxlint-disable-next-line node-test/no-conditional-assertion
 							assert.equal(pending.refSnapshot, undefined);
 							const resumed = createExtensionHarness({
 								cwd: root,
@@ -954,6 +1086,8 @@ process.stdout.write(JSON.stringify({success:true,data}));`,
 								{ reason: "resume" },
 								resumed.ctx,
 							);
+							// Exhaustive fixture variant (failPhase === "finish"): this selected path must satisfy its own contract.
+							// oxlint-disable-next-line node-test/no-conditional-assertion
 							assert.equal(
 								(
 									await executeRegisteredTool(resumed.tool, resumed.ctx, {
@@ -965,11 +1099,16 @@ process.stdout.write(JSON.stringify({success:true,data}));`,
 							const stale = await executeRegisteredTool(resumed.tool, resumed.ctx, {
 								args: ["--session", "fault", "click", "@e1"],
 							});
+							const staleDetails = readRecord(stale.details);
+							// Exhaustive fixture variant (failPhase === "finish"): this selected path must satisfy its own contract.
+							// oxlint-disable-next-line node-test/no-conditional-assertion
 							assert.equal(
-								stale.details?.failureCategory,
+								staleDetails.failureCategory,
 								"stale-ref",
 								"URL inspection cannot restore an unfinished operation's refs",
 							);
+							// Exhaustive fixture variant (failPhase === "finish"): this selected path must satisfy its own contract.
+							// oxlint-disable-next-line node-test/no-conditional-assertion
 							assert.equal(
 								(await readInvocationLog(log)).filter((row) => row.stdin === "MUTATE_FIXTURE")
 									.length,
@@ -1014,7 +1153,7 @@ process.stdout.write(JSON.stringify({success:true,data:{url:'https://fixture.tes
 			);
 			await withPatchedEnv(
 				{
-					PATH: `${root}${delimiter}${process.env.PATH}`,
+					PATH: `${root}${delimiter}${process.env.PATH ?? ""}`,
 					PI_AGENT_BROWSER_SOCKET_DIR: socketDir,
 					AGENT_BROWSER_SESSION: undefined,
 					AGENT_BROWSER_NAMESPACE: undefined,
@@ -1027,7 +1166,7 @@ process.stdout.write(JSON.stringify({success:true,data:{url:'https://fixture.tes
 						onAppendEntry(type, data) {
 							if (
 								type === BROWSER_TRANSITION_ENTRY &&
-								(data as { event?: { phase: string } }).event?.phase === "finish"
+								readRecord(readRecord(data).event).phase === "finish"
 							) {
 								throw new Error("finish write failed");
 							}
@@ -1043,19 +1182,22 @@ process.stdout.write(JSON.stringify({success:true,data:{url:'https://fixture.tes
 						args: ["open", "https://fixture.test/created"],
 						sessionMode: "fresh",
 					});
-					assert.equal(result.details?.browserStatePersistence, "finish-unconfirmed");
+					const resultDetails = readRecord(result.details);
+					assert.equal(resultDetails.browserStatePersistence, "finish-unconfirmed");
 					const persisted = (await records(file)).filter((entry) => entry.type !== "session");
-					const begin = persisted
+					const beginRecord = persisted
 						.map(getBrowserRecord)
-						.find((record) => record?.event.phase === "begin")!.event;
-					assert.equal(begin.state.wrapperManaged, true);
+						.find((record) => record?.event.phase === "begin");
+					assert.ok(beginRecord);
+					const begin = beginRecord.event;
+					assert.equal(readRecord(begin.state).wrapperManaged, true);
 					assert.equal(
-						begin.state.usedImplicitSession,
+						readRecord(begin.state).usedImplicitSession,
 						false,
 						"fresh allocation is owned even though it is not automatic session reuse",
 					);
-					assert.equal(begin.state.managedSessionSocketDir, socketDir);
-					const sessionName = String(begin.state.sessionName);
+					assert.equal(readRecord(begin.state).managedSessionSocketDir, socketDir);
+					const sessionName = readString(readRecord(begin.state).sessionName);
 					await writeFile(log, "");
 					await withPatchedEnv({ PI_AGENT_BROWSER_SOCKET_DIR: otherSocketDir }, async () => {
 						const fork = createExtensionHarness({
@@ -1071,7 +1213,9 @@ process.stdout.write(JSON.stringify({success:true,data:{url:'https://fixture.tes
 							fork.ctx,
 						);
 						assert.equal(
-							(await readInvocationLog(log)).some((row) => row.args.includes("close")),
+							(await readInvocationLog(log)).some((row) =>
+								readArray(row.args).map(readString).includes("close"),
+							),
 							false,
 						);
 						const resumed = createExtensionHarness({ cwd: root, branch: persisted });
@@ -1093,27 +1237,28 @@ process.stdout.write(JSON.stringify({success:true,data:{url:'https://fixture.tes
 							{ reason: "quit" },
 							resumed.ctx,
 						);
-						const invocations = (await readInvocationLog(log)) as Array<{
-							args: string[];
-							socketDir: string;
-						}>;
+						const invocations = readArray(await readInvocationLog(log)).map((value) =>
+							readRecord(value),
+						);
 						assert.equal(
 							invocations.filter(
-								(row) => row.args.includes("close") && row.args.includes(sessionName),
+								(row) =>
+									readArray(row.args).map(readString).includes("close") &&
+									readArray(row.args).map(readString).includes(sessionName),
 							).length,
 							1,
 							"restart can clean its wrapper-selected unresolved launch without claiming it succeeded",
 						);
 						assert.equal(
 							invocations
-								.filter((row) => row.args.includes(sessionName))
+								.filter((row) => readArray(row.args).map(readString).includes(sessionName))
 								.every((row) => row.socketDir === socketDir),
 							true,
 							"helpers, commands and cleanup retain their original socket root",
 						);
 						assert.equal(
 							invocations
-								.filter((row) => row.args.includes("caller-owned"))
+								.filter((row) => readArray(row.args).map(readString).includes("caller-owned"))
 								.every((row) => row.socketDir === otherSocketDir),
 							true,
 							"unrelated caller sessions keep native routing",
@@ -1273,22 +1418,34 @@ test("conversion preserves all original ancestry, interrupted prefixes, snapshot
 			2,
 			"repeated completions reuse only ancestral definitions",
 		);
-		for (const leaf of ["capture", "begin", "finish", "branch-b", "label-b", "result", "modern"]) {
+		const verifyLeaf = async (leaf: string) => {
 			const branch = await readBrowserEntries(manager(destination, leaf));
 			const state = SessionPageState.fromBranch(branch).get("shared");
 			if (leaf === "begin") {
+				// Exhaustive fixture variant (leaf === "begin"): this selected path must satisfy its own contract.
+				// oxlint-disable-next-line node-test/no-conditional-assertion
 				assert.equal(state.tabTargetUnknown, true);
+				// Exhaustive fixture variant (leaf === "begin"): this selected path must satisfy its own contract.
+				// oxlint-disable-next-line node-test/no-conditional-assertion
 				assert.equal(state.refSnapshot, undefined);
 			} else {
+				// Exhaustive fixture variant (leaf === "begin"): this selected path must satisfy its own contract.
+				// oxlint-disable-next-line node-test/no-conditional-assertion
 				assert.deepEqual(
 					state.refSnapshot?.refIds,
 					leaf === "branch-b" || leaf === "label-b" ? ["e3"] : ["e1", "e2"],
 				);
 			}
 			if (["capture", "finish", "result"].includes(leaf)) {
+				// Exhaustive fixture variant (["capture", "finish", "result"].includes(leaf)): this selected path must satisfy its own contract.
+				// oxlint-disable-next-line node-test/no-conditional-assertion
 				assert.equal(state.tabTarget?.url, "https://fixture.test/page#private-fragment");
+				// Exhaustive fixture variant (["capture", "finish", "result"].includes(leaf)): this selected path must satisfy its own contract.
+				// oxlint-disable-next-line node-test/no-conditional-assertion
 				assert.equal(state.refSnapshot?.refs?.e1.isEditable, true);
-				assert.equal(state.refSnapshot?.target?.targetId, "native-tab");
+				// Exhaustive fixture variant (["capture", "finish", "result"].includes(leaf)): this selected path must satisfy its own contract.
+				// oxlint-disable-next-line node-test/no-conditional-assertion
+				assert.equal(state.refSnapshot.target?.targetId, "native-tab");
 			}
 			let recent;
 			for (const entry of branch) {
@@ -1296,29 +1453,35 @@ test("conversion preserves all original ancestry, interrupted prefixes, snapshot
 			}
 			assert.equal(recent?.entries[0].path, row.path);
 			assert.equal(
-				recent?.entries[0].retentionState,
+				recent.entries[0].retentionState,
 				leaf === "branch-b" || leaf === "label-b" ? "missing" : "live",
 			);
-		}
-		const result = converted.find((entry) => entry.id === "result")!;
-		assert.deepEqual(
-			(result.message as { details: { data: object }; content: unknown }).details.data,
-			{ explicit: "caller data 🧪" },
+		};
+		await Promise.all(
+			["capture", "begin", "finish", "branch-b", "label-b", "result", "modern"].map(verifyLeaf),
 		);
+		const result = converted.find((entry) => entry.id === "result");
+		assert.ok(result);
+		assert.deepEqual(readRecord(readRecord(result.message).details).data, {
+			explicit: "caller data 🧪",
+		});
 		assert.deepEqual(
-			(result.message as { content: unknown }).content,
-			(originals.find((entry) => entry.id === "result")! as { message: { content: unknown } })
-				.message.content,
+			readRecord(result.message).content,
+			readRecord(
+				readRecord(
+					originals.find((entry) => entry.id === "result") ??
+						// A missing original result fails immediately; conversion equivalence cannot pass without it.
+						// oxlint-disable-next-line node-test/no-conditional-assertion
+						assert.fail("original result must be present"),
+				).message,
+			).content,
 		);
 		assert.deepEqual(
 			converted.find((entry) => entry.id === "modern"),
 			originals.at(-1),
 			"modern observations retain explicit bodies and cannot overwrite canonical state with an invocation-only receipt",
 		);
-		assert.equal(
-			(result.data as { archive: { sourceSha256: string } }).archive.sourceSha256,
-			receipt.sourceSha256,
-		);
+		assert.equal(readRecord(readRecord(result.data).archive).sourceSha256, receipt.sourceSha256);
 		await assert.rejects(
 			convertBrowserSession({ source, destination, confirmedStopped: true }),
 			/occupied/,
@@ -1331,7 +1494,7 @@ test("conversion preserves all original ancestry, interrupted prefixes, snapshot
 			}),
 			/quiesce/,
 		);
-		await writeFile(source, `${bytes}\n{broken`);
+		await writeFile(source, `${bytes.toString("utf8")}\n{broken`);
 		await assert.rejects(
 			convertBrowserSession({
 				source,
@@ -1404,11 +1567,21 @@ test("missing or corrupt winning snapshots fail replay before refs can be used",
 			{ id: "definition", refs: { e1: "corrupt" } },
 			{ id: "other", refs: {} },
 		]) {
+			// The next variant overwrites these fixture files; finish this publication and readback first.
+			// oxlint-disable-next-line no-await-in-loop
 			await writeFile(
 				file,
 				`${JSON.stringify(header)}\n${JSON.stringify({ ...entry, data: { ...entry.data, snapshot } })}\n`,
 			);
-			await assert.rejects(readBrowserEntries(manager(file, "capture")), /snapshot|definition/i);
+			// Missing, malformed and mismatched snapshot definitions must each be rejected.
+			// oxlint-disable-next-line node-test/no-conditional-assertion
+			const rejected = assert.rejects(
+				readBrowserEntries(manager(file, "capture")),
+				/snapshot|definition/i,
+			);
+			// The next variant overwrites these fixture files; finish this publication and readback first.
+			// oxlint-disable-next-line no-await-in-loop
+			await rejected;
 		}
 		await writeFile(
 			file,
@@ -1420,7 +1593,7 @@ test("missing or corrupt winning snapshots fail replay before refs can be used",
 			["e1"],
 			"a torn live tail is not committed or repaired",
 		);
-		assert.match(await readFile(file, "utf8"), /"broken":$/);
+		assert.match(readString(await readFile(file, "utf8")), /"broken":$/);
 	} finally {
 		await rm(root, { recursive: true, force: true });
 	}
@@ -1447,7 +1620,7 @@ process.stdout.write(JSON.stringify({success:true,data}));`,
 			);
 			await withPatchedEnv(
 				{
-					PATH: `${root}${delimiter}${process.env.PATH}`,
+					PATH: `${root}${delimiter}${process.env.PATH ?? ""}`,
 					PI_AGENT_BROWSER_TEST_CUSTOM_SESSION_INFO: "1",
 					AGENT_BROWSER_SESSION: undefined,
 					AGENT_BROWSER_NAMESPACE: undefined,
@@ -1488,7 +1661,9 @@ process.stdout.write(JSON.stringify({success:true,data}));`,
 						"stale-ref",
 					);
 					assert.equal(
-						(await readInvocationLog(log)).some((row) => row.args.includes("text")),
+						(await readInvocationLog(log)).some((row) =>
+							readArray(row.args).map(readString).includes("text"),
+						),
 						false,
 						"old refs never reach the replacement daemon",
 					);
@@ -1540,7 +1715,7 @@ process.stdout.write(JSON.stringify({success:true,data}));`,
 			);
 			await withPatchedEnv(
 				{
-					PATH: `${root}${delimiter}${process.env.PATH}`,
+					PATH: `${root}${delimiter}${process.env.PATH ?? ""}`,
 					PI_AGENT_BROWSER_TEST_CUSTOM_SESSION_INFO: "1",
 					AGENT_BROWSER_SESSION: undefined,
 					AGENT_BROWSER_NAMESPACE: undefined,
@@ -1560,29 +1735,47 @@ process.stdout.write(JSON.stringify({success:true,data}));`,
 					assert.equal(opened.isError, false, JSON.stringify(opened));
 					const branch = [...original.ctx.sessionManager.getBranch()];
 					for (const current of ["original", "replacement"]) {
+						// The next variant overwrites these fixture files; finish this publication and readback first.
+						// oxlint-disable-next-line no-await-in-loop
 						await writeFile(generation, current);
+						// The next variant overwrites these fixture files; finish this publication and readback first.
+						// oxlint-disable-next-line no-await-in-loop
 						await writeFile(log, "");
 						const resumed = createExtensionHarness({ cwd: root, branch: [...branch] });
+						// The next variant overwrites these fixture files; finish this publication and readback first.
+						// oxlint-disable-next-line no-await-in-loop
 						await runExtensionEvent(
 							resumed.handlers,
 							"session_start",
 							{ reason: "resume" },
 							resumed.ctx,
 						);
+						// The next variant overwrites these fixture files; finish this publication and readback first.
+						// oxlint-disable-next-line no-await-in-loop
 						const result = await executeRegisteredTool(resumed.tool, resumed.ctx, {
 							args: ["get", "title"],
 						});
+						// Exhaustive fixture variant (["original", "replacement"]): this selected path must satisfy its own contract.
+						// oxlint-disable-next-line node-test/no-conditional-assertion
 						assert.equal(result.isError, current === "replacement", JSON.stringify(result));
+						// The next variant overwrites these fixture files; finish this publication and readback first.
+						// oxlint-disable-next-line no-await-in-loop
 						const titleCalls = (await readInvocationLog(log)).filter(
-							(row) => row.args.at(-2) === "get" && row.args.at(-1) === "title",
+							(row) =>
+								readArray(row.args).map(readString).at(-2) === "get" &&
+								readArray(row.args).map(readString).at(-1) === "title",
 						);
+						// Exhaustive fixture variant (["original", "replacement"]): this selected path must satisfy its own contract.
+						// oxlint-disable-next-line node-test/no-conditional-assertion
 						assert.equal(
 							titleCalls.length,
 							current === "original" ? 1 : 0,
 							"a changed daemon cannot inherit recorded launch provenance",
 						);
 						if (current === "replacement") {
-							assert.match(result.content[0]?.text ?? "", /live daemon.*restore policy/);
+							// Exhaustive fixture variant (current === "replacement"): this selected path must satisfy its own contract.
+							// oxlint-disable-next-line node-test/no-conditional-assertion
+							assert.match(readString(result.content[0].text ?? ""), /live daemon.*restore policy/);
 						}
 					}
 				},

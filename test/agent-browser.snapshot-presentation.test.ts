@@ -11,6 +11,7 @@ import { lstat, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
+import { readArray, readRecord, readString } from "./helpers/assertions.js";
 
 import { buildToolPresentation } from "../extensions/agent-browser/lib/results/presentation.js";
 import { cleanupSecureTempArtifacts } from "../extensions/agent-browser/lib/temp.js";
@@ -28,7 +29,7 @@ test("buildToolPresentation reuses compact snapshot rendering inside batch outpu
 	);
 	const snapshot = Array.from({ length: 120 }, (_, index) => {
 		const ref = `e${index + 1}`;
-		return `- generic \"Large batched snapshot row ${index + 1} that should compact inside batch output\" [ref=${ref}] clickable [onclick]`;
+		return `- generic "Large batched snapshot row ${index + 1} that should compact inside batch output" [ref=${ref}] clickable [onclick]`;
 	}).join("\n");
 
 	const presentation = await buildToolPresentation({
@@ -50,19 +51,19 @@ test("buildToolPresentation reuses compact snapshot rendering inside batch outpu
 		},
 	});
 
-	const text = (presentation.content[0] as { text: string }).text;
+	const text = readString(readRecord(presentation.content[0]).text);
 	assert.match(text, /Step 1 — snapshot -i/);
 	assert.match(text, /Compact snapshot view/);
 	assert.match(text, /Key refs:/);
 	assert.equal(typeof presentation.fullOutputPath, "string");
 	assert.equal(presentation.batchSteps?.length, 1);
-	assert.equal(typeof presentation.batchSteps?.[0]?.fullOutputPath, "string");
-	assert.match(presentation.batchSteps?.[0]?.text ?? "", /Compact snapshot view/);
+	assert.equal(typeof presentation.batchSteps[0].fullOutputPath, "string");
+	assert.match(presentation.batchSteps[0].text, /Compact snapshot view/);
 
-	const spillPath = presentation.batchSteps?.[0]?.fullOutputPath;
-	assert.ok(spillPath);
+	const spillPath = presentation.batchSteps[0].fullOutputPath;
+	assert.ok(typeof spillPath === "string" && spillPath.length > 0);
 	assert.match(text, new RegExp(spillPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
-	if (spillPath) {
+	if (spillPath !== "") {
 		await rm(spillPath, { force: true });
 	}
 });
@@ -79,7 +80,7 @@ test("buildToolPresentation compacts oversized snapshots and spills a redacted s
 	);
 	const snapshot = Array.from({ length: 120 }, (_, index) => {
 		const ref = `e${index + 1}`;
-		return `- generic \"Large snapshot row ${index + 1} with lots of repeated visible text that should not all stay inline\" [ref=${ref}] clickable [onclick]`;
+		return `- generic "Large snapshot row ${index + 1} with lots of repeated visible text that should not all stay inline" [ref=${ref}] clickable [onclick]`;
 	}).join("\n");
 
 	const presentation = await buildToolPresentation({
@@ -95,8 +96,8 @@ test("buildToolPresentation compacts oversized snapshots and spills a redacted s
 		},
 	});
 
-	assert.equal(presentation.content[0]?.type, "text");
-	const text = (presentation.content[0] as { text: string }).text;
+	assert.equal(presentation.content[0].type, "text");
+	const text = readString(readRecord(presentation.content[0]).text);
 	assert.match(text, /Compact snapshot view/);
 	assert.match(text, /Viewport note: compact snapshots are DOM\/signal-prioritized/);
 	assert.match(text, /Key refs:/);
@@ -105,17 +106,11 @@ test("buildToolPresentation compacts oversized snapshots and spills a redacted s
 		/Snapshot: 90 refs on https:\/\/example.com\/huge\?SAMLRequest=%5BREDACTED%5D&RelayState=%5BREDACTED%5D \(compact\)/,
 	);
 	assert.equal(typeof presentation.fullOutputPath, "string");
-	assert.equal(
-		(presentation.data as { compacted: boolean; viewportOrdering?: string }).compacted,
-		true,
-	);
-	assert.equal(
-		(presentation.data as { compacted: boolean; viewportOrdering?: string }).viewportOrdering,
-		"dom-signal-prioritized",
-	);
+	assert.equal(readRecord(presentation.data).compacted, true);
+	assert.equal(readRecord(presentation.data).viewportOrdering, "dom-signal-prioritized");
 
 	const spillPath = presentation.fullOutputPath;
-	assert.ok(spillPath);
+	assert.ok(typeof spillPath === "string" && spillPath.length > 0);
 	assert.match(text, new RegExp(spillPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
 	const spillText = await readFile(spillPath, "utf8");
 	const spillStats = await lstat(spillPath);
@@ -128,7 +123,11 @@ test("buildToolPresentation compacts oversized snapshots and spills a redacted s
 	assert.equal(spillDirStats.isDirectory(), true);
 	// Windows mode bits do not represent POSIX owner-only access; retain type and content proof there.
 	if (process.platform !== "win32") {
+		// Windows has no POSIX mode-bit contract; native POSIX variants assert owner-only file/directory permissions.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.equal(spillStats.mode & 0o777, 0o600);
+		// Windows has no POSIX mode-bit contract; native POSIX variants assert owner-only file/directory permissions.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.equal(spillDirStats.mode & 0o777, 0o700);
 	}
 	await rm(spillPath, { force: true });
@@ -152,7 +151,7 @@ test(
 		const snapshot = Array.from(
 			{ length: 120 },
 			(_, index) =>
-				`- generic \"Persisted snapshot row ${index + 1}\" [ref=e${index + 1}] clickable [onclick]`,
+				`- generic "Persisted snapshot row ${index + 1}" [ref=e${index + 1}] clickable [onclick]`,
 		).join("\n");
 
 		try {
@@ -177,14 +176,18 @@ test(
 				true,
 			);
 			await cleanupSecureTempArtifacts();
-			assert.match(await readFile(String(spillPath), "utf8"), /Persisted snapshot row 120/);
-			const spillStats = await lstat(String(spillPath));
-			const spillDirStats = await lstat(dirname(String(spillPath)));
+			assert.match(await readFile(spillPath, "utf8"), /Persisted snapshot row 120/);
+			const spillStats = await lstat(spillPath);
+			const spillDirStats = await lstat(dirname(spillPath));
 			assert.equal(spillStats.isFile(), true);
 			assert.equal(spillDirStats.isDirectory(), true);
 			// NTFS access is governed by ACLs, not the POSIX permission bits exposed by stat.
 			if (process.platform !== "win32") {
+				// Windows has no POSIX mode-bit contract; native POSIX variants assert owner-only file/directory permissions.
+				// oxlint-disable-next-line node-test/no-conditional-assertion
 				assert.equal(spillStats.mode & 0o777, 0o600);
+				// Windows has no POSIX mode-bit contract; native POSIX variants assert owner-only file/directory permissions.
+				// oxlint-disable-next-line node-test/no-conditional-assertion
 				assert.equal(spillDirStats.mode & 0o777, 0o700);
 			}
 		} finally {
@@ -215,7 +218,7 @@ test(
 			snapshot: Array.from(
 				{ length: 120 },
 				(_, index) =>
-					`- generic \"${label} snapshot row ${index + 1}\" [ref=e${index + 1}] clickable [onclick]`,
+					`- generic "${label} snapshot row ${index + 1}" [ref=e${index + 1}] clickable [onclick]`,
 			).join("\n"),
 		});
 		const firstData = buildData("first");
@@ -258,9 +261,9 @@ test(
 						/second snapshot row 120/,
 					);
 					assert.equal(secondPresentation.artifactManifest?.liveCount, 1);
-					assert.equal(secondPresentation.artifactManifest?.evictedCount, 1);
+					assert.equal(secondPresentation.artifactManifest.evictedCount, 1);
 					assert.equal(
-						secondPresentation.artifactManifest?.entries.some(
+						secondPresentation.artifactManifest.entries.some(
 							(entry) =>
 								entry.path === firstPresentation.fullOutputPath &&
 								entry.retentionState === "evicted",
@@ -268,7 +271,7 @@ test(
 						true,
 					);
 					assert.equal(
-						secondPresentation.artifactManifest?.entries.some(
+						secondPresentation.artifactManifest.entries.some(
 							(entry) =>
 								entry.path === secondPresentation.fullOutputPath && entry.retentionState === "live",
 						),
@@ -276,7 +279,7 @@ test(
 					);
 					assert.match(secondPresentation.artifactRetentionSummary ?? "", /1 live, 1 evicted/);
 					assert.match(
-						(secondPresentation.content[0] as { text: string }).text,
+						readString(readRecord(secondPresentation.content[0]).text),
 						/Session artifacts: 1 live, 1 evicted/,
 					);
 				},
@@ -309,7 +312,7 @@ test(
 			snapshot: Array.from(
 				{ length: 120 },
 				(_, index) =>
-					`- generic \"${label} batch snapshot row ${index + 1}\" [ref=e${index + 1}] clickable [onclick]`,
+					`- generic "${label} batch snapshot row ${index + 1}" [ref=e${index + 1}] clickable [onclick]`,
 			).join("\n"),
 		});
 		const firstData = buildSnapshotData("first");
@@ -412,16 +415,16 @@ test("buildToolPresentation prefers main content sections over top-of-page chrom
 		},
 	});
 
-	const text = (presentation.content[0] as { text: string }).text;
+	const text = readString(readRecord(presentation.content[0]).text);
 	assert.match(text, /Primary content:/);
 	assert.match(text, /heading "JavaScript"/);
 	assert.match(text, /Additional sections:/);
 	assert.match(text, /region "Beginner's tutorials"/);
 	assert.doesNotMatch(text, /Skip to main content/);
 	assert.doesNotMatch(text, /^- AD$/m);
-	assert.equal((presentation.data as { previewMode?: string }).previewMode, "structured");
+	assert.equal(readRecord(presentation.data).previewMode, "structured");
 
-	if (presentation.fullOutputPath) {
+	if (presentation.fullOutputPath !== undefined && presentation.fullOutputPath !== "") {
 		await rm(presentation.fullOutputPath, { force: true });
 	}
 });
@@ -473,19 +476,27 @@ test("buildToolPresentation surfaces omitted high-value controls in compact snap
 		},
 	});
 
-	const text = (presentation.content[0] as { text: string }).text;
+	const text = readString(readRecord(presentation.content[0]).text);
 	assert.match(text, /Other refs:/);
 	assert.match(text, /e3 searchbox "Search docs"/);
 	assert.match(text, /e2 button "Search"/);
 	assert.match(text, /Omitted high-value controls:/);
 	assert.match(text, /e6 tab "Package tab 6"/);
 	assert.match(text, /e9 tab "Package tab 9"/);
-	assert.deepEqual(
-		(presentation.data as { highValueControlRefIds?: string[] }).highValueControlRefIds,
-		["e6", "e17", "e7", "e8", "e18", "e19", "e20", "e21", "e22", "e9"],
-	);
+	assert.deepEqual(readArray(readRecord(presentation.data).highValueControlRefIds), [
+		"e6",
+		"e17",
+		"e7",
+		"e8",
+		"e18",
+		"e19",
+		"e20",
+		"e21",
+		"e22",
+		"e9",
+	]);
 
-	if (presentation.fullOutputPath) {
+	if (presentation.fullOutputPath !== undefined && presentation.fullOutputPath !== "") {
 		await rm(presentation.fullOutputPath, { force: true });
 	}
 });
@@ -527,16 +538,12 @@ test("buildToolPresentation surfaces dense repository result links as high-value
 		},
 	});
 
-	const text = (presentation.content[0] as { text: string }).text;
+	const text = readString(readRecord(presentation.content[0]).text);
 	assert.match(text, /Omitted high-value controls:/);
 	assert.match(text, /e70 link "vercel-labs\/agent-browser"/);
-	assert.ok(
-		(presentation.data as { highValueControlRefIds?: string[] }).highValueControlRefIds?.includes(
-			"e70",
-		),
-	);
+	assert.ok(readArray(readRecord(presentation.data).highValueControlRefIds).includes("e70"));
 
-	if (presentation.fullOutputPath) {
+	if (presentation.fullOutputPath !== undefined && presentation.fullOutputPath !== "") {
 		await rm(presentation.fullOutputPath, { force: true });
 	}
 });
@@ -616,7 +623,7 @@ test("buildToolPresentation keeps dense desktop host high-value controls discove
 		},
 	});
 
-	const text = (presentation.content[0] as { text: string }).text;
+	const text = readString(readRecord(presentation.content[0]).text);
 	assert.match(text, /Compact snapshot view/);
 	assert.match(text, /e130 searchbox "Search workspace"/);
 	assert.match(text, /e131 textbox "Composer"/);
@@ -629,17 +636,20 @@ test("buildToolPresentation keeps dense desktop host high-value controls discove
 	assert.match(text, /e161 button "Run task"/);
 	assert.match(text, /e162 button "Save"/);
 
-	const highValueControlRefIds =
-		(presentation.data as { highValueControlRefIds?: string[] }).highValueControlRefIds ?? [];
+	const highValueControlRefIds = readArray(
+		readRecord(presentation.data).highValueControlRefIds ?? [],
+	);
 	assert.ok(highValueControlRefIds.length <= 10);
 	for (const expectedRef of ["e140", "e141", "e142", "e160", "e161", "e162"]) {
+		// The fixed expected-ref list is nonempty, so every required surfaced ref must be asserted.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.ok(
 			highValueControlRefIds.includes(expectedRef),
 			`${expectedRef} should remain surfaced in high-value refs`,
 		);
 	}
 
-	if (presentation.fullOutputPath) {
+	if (presentation.fullOutputPath !== undefined && presentation.fullOutputPath !== "") {
 		await rm(presentation.fullOutputPath, { force: true });
 	}
 });
@@ -698,17 +708,20 @@ test("buildToolPresentation round-robins omitted high-value control categories i
 		},
 	});
 
-	const highValueControlRefIds =
-		(presentation.data as { highValueControlRefIds?: string[] }).highValueControlRefIds ?? [];
+	const highValueControlRefIds = readArray(
+		readRecord(presentation.data).highValueControlRefIds ?? [],
+	);
 	assert.ok(highValueControlRefIds.length <= 10);
 	for (const expectedRef of ["e130", "e131", "e132", "e133"]) {
+		// The fixed expected-ref list is nonempty, so every required surfaced ref must be asserted.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.ok(
 			highValueControlRefIds.includes(expectedRef),
 			`${expectedRef} should not be starved by editable controls`,
 		);
 	}
 
-	if (presentation.fullOutputPath) {
+	if (presentation.fullOutputPath !== undefined && presentation.fullOutputPath !== "") {
 		await rm(presentation.fullOutputPath, { force: true });
 	}
 });
@@ -784,21 +797,24 @@ test("buildToolPresentation keeps lower high-value categories visible on saturat
 		envelope: { success: true, data: { origin: "app://desktop", refs, snapshot } },
 	});
 
-	const text = (presentation.content[0] as { text: string }).text;
+	const text = readString(readRecord(presentation.content[0]).text);
 	assert.match(text, /e160 textbox "Editor 160"/);
 	assert.match(text, /e164 tab "Canvas"/);
 	assert.match(text, /e167 button "Send"/);
-	const highValueControlRefIds =
-		(presentation.data as { highValueControlRefIds?: string[] }).highValueControlRefIds ?? [];
+	const highValueControlRefIds = readArray(
+		readRecord(presentation.data).highValueControlRefIds ?? [],
+	);
 	assert.ok(highValueControlRefIds.length <= 10);
 	for (const expectedRef of ["e170", "e171", "e172", "e173"]) {
+		// The fixed expected-ref list is nonempty, so every required surfaced ref must be asserted.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.ok(
 			highValueControlRefIds.includes(expectedRef),
 			`${expectedRef} should stay visible in saturated compact high-value refs`,
 		);
 	}
 
-	if (presentation.fullOutputPath) {
+	if (presentation.fullOutputPath !== undefined && presentation.fullOutputPath !== "") {
 		await rm(presentation.fullOutputPath, { force: true });
 	}
 });
@@ -870,27 +886,24 @@ test("buildToolPresentation does not promote false editable markers in compact s
 		},
 	});
 
-	const text = (presentation.content[0] as { text: string }).text;
+	const text = readString(readRecord(presentation.content[0]).text);
 	assert.match(text, /Compact snapshot view/);
 	assert.match(text, /e102 textbox "Composer"/);
 	assert.doesNotMatch(text, /e100 textbox "Read-only composer"/);
 	assert.doesNotMatch(text, /e101 textbox "Disabled editor"/);
 	assert.doesNotMatch(text, /e103 textbox "Editable settings"/);
 	assert.doesNotMatch(text, /e104 textbox "contenteditable demo"/);
-	const data = presentation.data as {
-		highValueControlRefIds?: string[];
-		roleCounts?: Record<string, number>;
-	};
-	assert.equal(data.roleCounts?.textbox, 2);
-	assert.equal(data.highValueControlRefIds?.includes("e100"), false);
-	assert.equal(data.highValueControlRefIds?.includes("e101"), false);
-	assert.equal(data.highValueControlRefIds?.includes("e103"), false);
-	assert.equal(data.highValueControlRefIds?.includes("e104"), false);
-	assert.equal(data.highValueControlRefIds?.includes("e105"), false);
-	assert.equal(data.highValueControlRefIds?.includes("e106"), false);
-	assert.equal(data.highValueControlRefIds?.includes("e107"), false);
+	const data = readRecord(presentation.data);
+	assert.equal(readRecord(data.roleCounts).textbox, 2);
+	assert.equal(readArray(data.highValueControlRefIds).includes("e100"), false);
+	assert.equal(readArray(data.highValueControlRefIds).includes("e101"), false);
+	assert.equal(readArray(data.highValueControlRefIds).includes("e103"), false);
+	assert.equal(readArray(data.highValueControlRefIds).includes("e104"), false);
+	assert.equal(readArray(data.highValueControlRefIds).includes("e105"), false);
+	assert.equal(readArray(data.highValueControlRefIds).includes("e106"), false);
+	assert.equal(readArray(data.highValueControlRefIds).includes("e107"), false);
 
-	if (presentation.fullOutputPath) {
+	if (presentation.fullOutputPath !== undefined && presentation.fullOutputPath !== "") {
 		await rm(presentation.fullOutputPath, { force: true });
 	}
 });
@@ -920,15 +933,15 @@ test("buildToolPresentation falls back to an outline when the raw snapshot forma
 		},
 	});
 
-	const text = (presentation.content[0] as { text: string }).text;
+	const text = readString(readRecord(presentation.content[0]).text);
 	assert.match(text, /Compact outline:/);
 	assert.doesNotMatch(text, /Primary content:/);
 	assert.match(text, /node e1: Action 1 -> click target/);
 	assert.match(text, /Key refs:/);
 	assert.match(text, /Action 1/);
-	assert.equal((presentation.data as { previewMode?: string }).previewMode, "outline");
+	assert.equal(readRecord(presentation.data).previewMode, "outline");
 
-	if (presentation.fullOutputPath) {
+	if (presentation.fullOutputPath !== undefined && presentation.fullOutputPath !== "") {
 		await rm(presentation.fullOutputPath, { force: true });
 	}
 });
@@ -966,11 +979,11 @@ test(
 
 				assert.equal(presentation.fullOutputPath, undefined);
 				assert.match(
-					(presentation.content[0] as { text: string }).text,
+					readString(readRecord(presentation.content[0]).text),
 					/Full redacted snapshot unavailable:/,
 				);
 				assert.match(
-					(presentation.content[0] as { text: string }).text,
+					readString(readRecord(presentation.content[0]).text),
 					/temp spill budget exceeded/i,
 				);
 			});
@@ -1016,16 +1029,13 @@ test("compact snapshots count ordinary omitted refs separately from high-value c
 		},
 	});
 
-	const text = (presentation.content[0] as { text: string }).text;
+	const text = readString(readRecord(presentation.content[0]).text);
 	assert.match(text, /Omitted high-value controls:/);
 	assert.doesNotMatch(text, /\d+ additional refs omitted/);
 	assert.match(text, /79 additional high-value controls omitted/);
-	assert.equal(
-		(presentation.data as { highValueControlRefIds?: string[] }).highValueControlRefIds?.length,
-		10,
-	);
+	assert.equal(readArray(readRecord(presentation.data).highValueControlRefIds).length, 10);
 
-	if (presentation.fullOutputPath) {
+	if (presentation.fullOutputPath !== undefined && presentation.fullOutputPath !== "") {
 		await rm(presentation.fullOutputPath, { force: true });
 	}
 });
@@ -1091,16 +1101,12 @@ test("compact snapshots surface named row-action links as high-value controls", 
 		envelope: { success: true, data: { origin: "https://news.ycombinator.com/", refs, snapshot } },
 	});
 
-	const text = (presentation.content[0] as { text: string }).text;
+	const text = readString(readRecord(presentation.content[0]).text);
 	assert.match(text, /Omitted high-value controls:/);
 	assert.match(text, /e13 link "15 comments"/);
-	assert.ok(
-		(presentation.data as { highValueControlRefIds?: string[] }).highValueControlRefIds?.includes(
-			"e13",
-		),
-	);
+	assert.ok(readArray(readRecord(presentation.data).highValueControlRefIds).includes("e13"));
 
-	if (presentation.fullOutputPath) {
+	if (presentation.fullOutputPath !== undefined && presentation.fullOutputPath !== "") {
 		await rm(presentation.fullOutputPath, { force: true });
 	}
 });

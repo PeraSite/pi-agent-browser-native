@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readRecord, readArray, readString } from "./helpers/assertions.js";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
@@ -25,11 +26,13 @@ import {
 async function withRecorder(
 	mode: string,
 	run: (options: {
-		root: string;
-		logPath: string;
-		harness: ReturnType<typeof createExtensionHarness>;
-		prefix: string[];
-		reload: () => Promise<ReturnType<typeof createExtensionHarness>>;
+		readonly root: string;
+		readonly logPath: string;
+		readonly harness: Readonly<Pick<ReturnType<typeof createExtensionHarness>, "tool" | "ctx">>;
+		readonly prefix: readonly string[];
+		readonly reload: () => Promise<
+			Readonly<Pick<ReturnType<typeof createExtensionHarness>, "tool" | "ctx">>
+		>;
 	}) => Promise<void>,
 ): Promise<void> {
 	const root = await mkdtemp(join(tmpdir(), "piab-recovery-"));
@@ -184,16 +187,17 @@ test("code-mode recording recovery retains receipt data without rendering", asyn
 				recordingId: "new-take",
 			},
 		});
-		assert.equal(result?.recovery.healed, true);
+		assert.ok(result);
+		assert.equal(result.recovery.healed, true);
 		assert.deepEqual(result.presentation.content, []);
 		assert.equal(result.presentation.fullOutputPath, undefined);
-		assert.equal((result.presentation.data as { recordingId: string }).recordingId, "new-take");
+		assert.equal(readRecord(result.presentation.data).recordingId, "new-take");
 	});
 });
 
 for (const outputPrefix of ["", "@"]) {
 	test(
-		`record stop rejects recording outputPath alias: ${outputPrefix || "exact"}`,
+		`record stop rejects recording outputPath alias: ${outputPrefix.length === 0 ? "exact" : outputPrefix}`,
 		{ concurrency: false },
 		async () => {
 			await withRecorder("no-recording", async ({ root, logPath, harness, prefix }) => {
@@ -213,7 +217,7 @@ for (const outputPrefix of ["", "@"]) {
 				assert.match(result.content[0]?.text ?? "", /reserved by an active recording/);
 				assert.deepEqual(await readInvocationLog(logPath), []);
 				assert.equal(await readFile(path, "utf8"), media);
-				assert.equal(result.details?.outputFile, undefined);
+				assert.equal(readRecord(result.details).outputFile, undefined);
 			});
 		},
 	);
@@ -235,15 +239,19 @@ for (const mode of [
 	"encode-failed",
 ]) {
 	test(`record stop receipt recovery: ${mode}`, { concurrency: false }, async () => {
-		await withRecorder(mode, async ({ root, logPath, harness, prefix, reload }) => {
+		await withRecorder(mode, async ({ root, logPath, harness: initialHarness, prefix, reload }) => {
+			let harness = initialHarness;
 			const started = await executeRegisteredTool(harness.tool, harness.ctx, {
 				args: [...prefix, "record", "start", join(root, "capture.webm")],
 			});
 			assert.equal(started.isError, false, started.content[0]?.text);
 			if (mode === "old-receipt") {
-				harness.ctx.sessionManager
-					.getBranch()
-					.push(createToolBranchEntry({ details: started.details!, isError: started.isError }));
+				harness.ctx.sessionManager.getBranch().push(
+					createToolBranchEntry({
+						details: readRecord(started.details),
+						isError: started.isError,
+					}),
+				);
 				harness = await reload();
 			}
 			await writeFile(logPath, "");
@@ -254,19 +262,26 @@ for (const mode of [
 				outputPath,
 			});
 			const healed = ["timeout", "no-recording", "old-receipt"].includes(mode);
-			assert.equal(result.isError, !healed, result.content[0]?.text);
-			const visible = JSON.parse(result.content[0]?.text ?? "");
+			const text = readString(readRecord(result.content[0]).text);
+			assert.equal(result.isError, !healed, text);
+			const visible = readRecord(JSON.parse(text));
 			assert.equal(visible.success, healed);
-			const exported = JSON.parse(await readFile(outputPath, "utf8"));
+			const exported = readRecord(JSON.parse(await readFile(outputPath, "utf8")));
 			assert.equal(exported.success, healed);
-			assert.equal(exported.attempt.success, false);
-			assert.equal(exported.artifacts[0].exists, true);
+			assert.equal(readRecord(exported.attempt).success, false);
+			assert.equal(readRecord(readArray(exported.artifacts)[0]).exists, true);
 			const recovery = exported.recordingRecovery;
+			const artifact = readRecord(readArray(exported.artifacts)[0]);
+			const verification = readRecord(exported.artifactVerification);
 			if (mode !== "encode-failed") {
-				assert.equal(recovery.healed, healed);
+				// All timeout-recovery variants require this receipt; common outcomes are asserted above.
+				// oxlint-disable-next-line node-test/no-conditional-assertion
+				assert.equal(readRecord(recovery).healed, healed);
 				const calls = (await readInvocationLog(logPath)).map((row) =>
 					extractUpstreamCommandTokens(row.args),
 				);
+				// Every timeout-recovery variant must perform exactly one bounded recovery lookup.
+				// oxlint-disable-next-line node-test/no-conditional-assertion
 				assert.deepEqual(
 					calls,
 					[
@@ -278,19 +293,33 @@ for (const mode of [
 				);
 			}
 			if (healed) {
-				assert.equal(exported.artifactVerification.verified, true);
-				assert.equal(exported.artifacts[0].recording.recordingId, "new-take");
-				assert.equal(exported.artifacts[0].recording.capture.averageFps, 1);
+				// The healed fixture must verify its matched receipt; other variants assert failure below.
+				// oxlint-disable-next-line node-test/no-conditional-assertion
+				assert.equal(verification.verified, true);
+				// This declared recovery variant must retain the new take's identity.
+				// oxlint-disable-next-line node-test/no-conditional-assertion
+				assert.equal(readRecord(artifact.recording).recordingId, "new-take");
+				// The healed fixture must retain independently supplied native capture measurements.
+				// oxlint-disable-next-line node-test/no-conditional-assertion
+				assert.equal(readRecord(readRecord(artifact.recording).capture).averageFps, 1);
 			}
 			if (mode === "pending-reused-path") {
-				assert.equal(recovery.status, "pending");
-				assert.equal(exported.artifacts[0].recording.recordingId, "new-take");
+				// The pending reused-path fixture must not attribute the last receipt to this take.
+				// oxlint-disable-next-line node-test/no-conditional-assertion
+				assert.equal(readRecord(recovery).status, "pending");
+				// This declared recovery variant must retain the new take's identity.
+				// oxlint-disable-next-line node-test/no-conditional-assertion
+				assert.equal(readRecord(artifact.recording).recordingId, "new-take");
+				// The pending reused-path fixture must retain zero new-take frames.
+				// oxlint-disable-next-line node-test/no-conditional-assertion
 				assert.equal(
-					exported.artifacts[0].recording.capturedFrames,
+					readRecord(artifact.recording).capturedFrames,
 					0,
 					"last receipt's frames cannot be attributed to the new take at the same path",
 				);
-				assert.equal(exported.artifactVerification.pendingCount, 1);
+				// The pending reused-path fixture must remain pending, not verified.
+				// oxlint-disable-next-line node-test/no-conditional-assertion
+				assert.equal(verification.pendingCount, 1);
 			}
 			if (
 				[
@@ -301,27 +330,45 @@ for (const mode of [
 					"query-failed",
 				].includes(mode)
 			) {
-				assert.equal(exported.artifactVerification.verified, false);
-				assert.equal(recovery.receipt, undefined);
-				assert.equal(result.details?.failureCategory, "timeout");
+				// Each declared mismatched-receipt variant must remain unverified.
+				// oxlint-disable-next-line node-test/no-conditional-assertion
+				assert.equal(verification.verified, false);
+				// Each declared missing/mismatched identity variant must reject the unrelated receipt.
+				// oxlint-disable-next-line node-test/no-conditional-assertion
+				assert.equal(readRecord(recovery).receipt, undefined);
+				// Each mismatched-receipt fixture must retain the original timeout failure.
+				// oxlint-disable-next-line node-test/no-conditional-assertion
+				assert.equal(readRecord(result.details).failureCategory, "timeout");
 			}
 			if (mode === "no-recording-no-receipt") {
-				assert.equal(exported.artifacts[0].status, "unverified");
-				assert.equal(exported.artifacts[0].recording.success, null);
-				const manifest = result.details?.artifactManifest as {
-					entries: Array<{ path: string; exists?: boolean; status?: string }>;
-				};
+				// The no-recording/no-receipt fixture cannot prove an existing file is a valid take.
+				// oxlint-disable-next-line node-test/no-conditional-assertion
+				assert.equal(artifact.status, "unverified");
+				// The no-receipt fixture must retain its explicitly unknown encoder outcome.
+				// oxlint-disable-next-line node-test/no-conditional-assertion
+				assert.equal(readRecord(artifact.recording).success, null);
+				const manifest = readRecord(readRecord(result.details).artifactManifest);
+				// The no-receipt fixture still records on-disk presence without claiming verification.
+				// oxlint-disable-next-line node-test/no-conditional-assertion
 				assert.equal(
-					manifest.entries.find((entry) => entry.path.endsWith("capture.webm"))?.exists,
+					readArray(manifest.entries)
+						.map(readRecord)
+						.find((entry) => readString(entry.path).endsWith("capture.webm"))?.exists,
 					true,
 				);
 			}
 			if (mode === "file-mismatch") {
-				assert.equal(recovery.status, "unverified");
-				assert.equal(exported.artifactVerification.verified, false);
+				// The file-mismatch fixture must reject the receipt's incompatible artifact evidence.
+				// oxlint-disable-next-line node-test/no-conditional-assertion
+				assert.equal(readRecord(recovery).status, "unverified");
+				// Each declared mismatched-receipt variant must remain unverified.
+				// oxlint-disable-next-line node-test/no-conditional-assertion
+				assert.equal(verification.verified, false);
 			}
 			if (["encode-failed", "timeout-native-failed"].includes(mode)) {
-				assert.equal(exported.artifacts[0].recording.success, false);
+				// Both explicitly failed-encoder variants must retain native failure evidence.
+				// oxlint-disable-next-line node-test/no-conditional-assertion
+				assert.equal(readRecord(artifact.recording).success, false);
 			}
 		});
 	});
@@ -346,7 +393,11 @@ test(
 			});
 			assert.equal(followup.isError, false, followup.content[0]?.text);
 			for (const result of [stopped, followup]) {
+				// Both fixed stop/follow-up results must redact the credential canary.
+				// oxlint-disable-next-line node-test/no-conditional-assertion
 				assert.equal(JSON.stringify(result).includes("RECORDING_AUTH_SECRET"), false);
+				// Both fixed stop/follow-up results must redact the auth-state canary.
+				// oxlint-disable-next-line node-test/no-conditional-assertion
 				assert.equal(JSON.stringify(result).includes("RECORDING_STATE_SECRET"), false);
 			}
 			assert.equal(
@@ -359,17 +410,35 @@ test(
 				retained = applyArtifactChanges(retained, getBrowserRecord(entry)?.event.artifacts);
 			}
 			for (const manifest of [
-				stopped.details?.artifactManifest as SessionArtifactManifest,
-				retained!,
+				readRecord(stopped.details?.artifactManifest),
+				readRecord(retained),
 			]) {
+				// Both live and replayed manifests must redact the same credential canary.
+				// oxlint-disable-next-line node-test/no-conditional-assertion
 				assert.equal(JSON.stringify(manifest).includes("RECORDING_AUTH_SECRET"), false);
+				// Both live and replayed manifests must redact the same auth-state canary.
+				// oxlint-disable-next-line node-test/no-conditional-assertion
 				assert.equal(JSON.stringify(manifest).includes("RECORDING_STATE_SECRET"), false);
-				const artifact = manifest.entries.find((entry) => entry.absolutePath === path);
-				assert.equal(artifact?.recording?.recordingId, "new-take");
-				assert.equal(artifact?.recording?.path, path);
-				assert.equal(artifact?.exists, true);
+				const artifact = readArray(manifest.entries)
+					.map(readRecord)
+					.find((entry) => entry.absolutePath === path);
+				// Both fixed manifest variants must contain the captured artifact before payload checks.
+				// oxlint-disable-next-line node-test/no-conditional-assertion
+				assert.ok(artifact);
+				const recording = readRecord(artifact.recording);
+				// Both live and replayed manifests must retain the exact take identity.
+				// oxlint-disable-next-line node-test/no-conditional-assertion
+				assert.equal(recording.recordingId, "new-take");
+				// Both live and replayed manifests must retain the exact artifact path.
+				// oxlint-disable-next-line node-test/no-conditional-assertion
+				assert.equal(recording.path, path);
+				// Both live and replayed manifests must retain independently checked file presence.
+				// oxlint-disable-next-line node-test/no-conditional-assertion
+				assert.equal(artifact.exists, true);
+				// Both fixed manifest variants must preserve the useful error with secrets redacted.
+				// oxlint-disable-next-line node-test/no-conditional-assertion
 				assert.equal(
-					decodeURIComponent(artifact?.recording?.error ?? ""),
+					decodeURIComponent(readString(recording.error)),
 					"Encoder failed: https://recording.test/?authorization_session_id=[REDACTED]&state=[REDACTED]",
 				);
 			}
@@ -400,15 +469,15 @@ test(
 				]),
 			});
 			assert.equal(result.isError, true);
-			assert.equal(result.details?.failureCategory, "stale-ref");
-			assert.equal((result.details?.recordingRecovery as { status: string }).status, "recovered");
-			assert.equal((result.details?.recordingRecovery as { healed: boolean }).healed, false);
+			assert.equal(readRecord(result.details).failureCategory, "stale-ref");
+			assert.equal(readRecord(readRecord(result.details).recordingRecovery).status, "recovered");
+			assert.equal(readRecord(readRecord(result.details).recordingRecovery).healed, false);
 			assert.ok(
-				(result.details?.nextActions as Array<{ id: string }>).some(
-					(action) => action.id === "refresh-interactive-refs",
-				),
+				readArray(readRecord(result.details).nextActions)
+					.map(readRecord)
+					.some((action) => action.id === "refresh-interactive-refs"),
 			);
-			assert.equal((result.details?.batchSteps as Array<{ success: boolean }>)[2].success, true);
+			assert.equal(readRecord(readArray(readRecord(result.details).batchSteps)[2]).success, true);
 		});
 	},
 );
@@ -424,12 +493,12 @@ test(
 				outputPath,
 			});
 			assert.equal(result.isError, true);
-			const payload = JSON.parse(await readFile(outputPath, "utf8"));
+			const payload = readRecord(JSON.parse(await readFile(outputPath, "utf8")));
 			assert.equal(payload.success, false);
 			assert.equal(payload.data, null);
-			assert.equal(payload.recordingRecovery.receipt, undefined);
-			assert.equal(payload.recordingRecovery.healed, false);
-			assert.equal(JSON.parse(result.content[0]?.text ?? "").success, false);
+			assert.equal(readRecord(payload.recordingRecovery).receipt, undefined);
+			assert.equal(readRecord(payload.recordingRecovery).healed, false);
+			assert.equal(readRecord(JSON.parse(result.content[0]?.text ?? "")).success, false);
 		});
 	},
 );
@@ -457,14 +526,17 @@ for (const mode of ["timeout", "stale-batch"]) {
 					"a recording receipt cannot prove all timed-out batch steps succeeded",
 				);
 				assert.equal(
-					(result.details?.outputFile as { status?: string } | undefined)?.status,
+					readRecord(readRecord(result.details).outputFile).status,
 					"saved",
 					JSON.stringify(result),
 				);
-				const exported = JSON.parse(await readFile(outputPath, "utf8"));
-				assert.equal(exported.recordingRecovery.expected.absolutePath, path);
-				assert.equal(exported.recordingRecovery.healed, false);
-				assert.equal(exported.artifactVerification.verified, mode === "timeout");
+				const exported = readRecord(JSON.parse(await readFile(outputPath, "utf8")));
+				assert.equal(
+					readRecord(readRecord(exported.recordingRecovery).expected).absolutePath,
+					path,
+				);
+				assert.equal(readRecord(exported.recordingRecovery).healed, false);
+				assert.equal(readRecord(exported.artifactVerification).verified, mode === "timeout");
 				assert.equal(
 					(await readInvocationLog(logPath)).filter(
 						(row) => extractUpstreamCommandTokens(row.args)[0] === "session",

@@ -20,7 +20,11 @@ test(
 	{ skip: !sdkPath && !required, timeout: 240_000 },
 	async (t) => {
 		if (required) {
+			// Exhaustive fixture variant (required): this selected path must satisfy its own contract.
+			// oxlint-disable-next-line node-test/no-conditional-assertion
 			assert.ok(sdkPath, "PI_NATIVE_LIFECYCLE_REQUIRED=1 requires PI_NATIVE_LIFECYCLE_SDK");
+			// Exhaustive fixture variant (required): this selected path must satisfy its own contract.
+			// oxlint-disable-next-line node-test/no-conditional-assertion
 			assert.notEqual(
 				process.getuid?.(),
 				0,
@@ -98,7 +102,9 @@ test(
 							handler: async (args) => {
 								const params = JSON.parse(args);
 								const toolName = params.code === undefined ? "agent_browser" : "agent_browser_code";
-								const tool = session.agent.state.tools.find((tool) => tool.name === toolName);
+								const tool = session.agent.state.tools.find(
+									(candidate) => candidate.name === toolName,
+								);
 								assert.ok(tool);
 								const id = `lifecycle-call-${++callId}`;
 								result = await tool.execute(id, params, callController?.signal);
@@ -180,6 +186,8 @@ test(
 			// Observe that exit independently before reusing or deleting its socket root.
 			if (params.args?.at(-1) === "close") {
 				const name = value.details.sessionName;
+				// Exhaustive fixture variant (params.args?.at(-1) === "close"): this selected path must satisfy its own contract.
+				// oxlint-disable-next-line node-test/no-conditional-assertion
 				assert.ok(name);
 				let status;
 				for (let i = 0; i < 100; i++) {
@@ -202,6 +210,8 @@ test(
 					}
 					await delay(50);
 				}
+				// Exhaustive fixture variant (params.args?.at(-1) === "close"): this selected path must satisfy its own contract.
+				// oxlint-disable-next-line node-test/no-conditional-assertion
 				assert.equal(status.data.active, false, JSON.stringify(status));
 			}
 			return value;
@@ -225,7 +235,9 @@ test(
 			});
 			await t.test("detached SDK code cancels and releases its execution lease", async () => {
 				const controller = new AbortController();
-				const tool = session.agent.state.tools.find((tool) => tool.name === "agent_browser_code");
+				const tool = session.agent.state.tools.find(
+					(candidate) => candidate.name === "agent_browser_code",
+				);
 				const running = tool.execute(
 					"detached-code",
 					{ code: "await new Promise(() => {});", timeoutMs: 10_000 },
@@ -432,7 +444,9 @@ test(
 								),
 						);
 						let settled = false;
-						const tool = session.agent.state.tools.find((tool) => tool.name === "agent_browser");
+						const tool = session.agent.state.tools.find(
+							(candidate) => candidate.name === "agent_browser",
+						);
 						queued = tool
 							.execute("queued-during-code", { args: ["get", "title"] })
 							.then((value) => {
@@ -648,13 +662,19 @@ test(
 				},
 			);
 		} finally {
-			await chmod(sm.getSessionFile(), 0o600).catch(() => {});
+			await chmod(sm.getSessionFile(), 0o600).catch(() => {
+				// A journal fault must not prevent the independent native-session cleanup below.
+			});
 			beforeResult = undefined;
 			callController?.abort();
 			if (rootName) {
-				await call({ args: ["--session", rootName, "close"] }).catch(() => {});
+				await call({ args: ["--session", rootName, "close"] }).catch(() => {
+					// Replay failure is tolerated here; every recorded identity is closed natively below.
+				});
 			}
-			await session.reload().catch(() => {});
+			await session.reload().catch(() => {
+				// Faulted reload cannot own cleanup; native identities are independently closed below.
+			});
 			session.dispose();
 			// Cleanup must not depend on extension replay succeeding after a journal fault.
 			for (const { name, socketDir, namespace } of nativeSessions.values()) {
@@ -675,6 +695,8 @@ test(
 					}
 					await delay(50);
 				}
+				// Exhaustive fixture variant (nativeSessions.values()): this selected path must satisfy its own contract.
+				// oxlint-disable-next-line node-test/no-conditional-assertion
 				assert.equal(status.data.active, false, JSON.stringify(status));
 			}
 			await new Promise((done) => server.close(done));
@@ -692,7 +714,9 @@ test(
 			console.log(`Native lifecycle transcripts: ${artifactsDir}`);
 			await rm(root, { recursive: true, force: true });
 			for (const key of Object.keys(process.env)) {
-				if (!(key in originalEnv)) delete process.env[key];
+				if (!(key in originalEnv)) {
+					delete process.env[key];
+				}
 			}
 			Object.assign(process.env, originalEnv);
 		}

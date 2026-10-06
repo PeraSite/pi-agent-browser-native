@@ -1,3 +1,4 @@
+import { readArray, readRecord, readString } from "./helpers/assertions.js";
 /**
  * Purpose: Verify extension tab recovery and focus-drift behavior.
  * Responsibilities: Assert restored-tab selection, pinned follow-up commands, about:blank recovery, and overlapping explicit-session target ordering.
@@ -23,19 +24,25 @@ import {
 } from "./helpers/agent-browser-harness.js";
 
 function delay(ms: number): Promise<void> {
-	return new Promise((resolve) => setTimeout(resolve, ms));
+	return new Promise((resolve) => {
+		setTimeout(resolve, ms);
+	});
 }
 
 async function waitForInvocation(
 	logPath: string,
-	predicate: (entry: Awaited<ReturnType<typeof readInvocationLog>>[number]) => boolean,
+	predicate: (entry: { readonly args: readonly string[] }) => boolean,
 	timeoutMs = 15_000,
 ): Promise<void> {
 	const deadline = Date.now() + timeoutMs;
 	while (Date.now() < deadline) {
+		// Read this shared invocation log before issuing the next command or polling retry.
+		// oxlint-disable-next-line no-await-in-loop
 		if ((await readInvocationLog(logPath)).some(predicate)) {
 			return;
 		}
+		// Read this shared invocation log before issuing the next command or polling retry.
+		// oxlint-disable-next-line no-await-in-loop
 		await delay(5);
 	}
 	assert.fail(`Timed out waiting for invocation in ${logPath}`);
@@ -73,8 +80,9 @@ if (args.includes("tab") && args.includes("list")) {
 				const result = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: ["--session", "named", "--profile", "Default", "open", "https://example.com"],
 				});
+				const resultDetails = readRecord(result.details);
 				assert.equal(result.isError, false);
-				assert.deepEqual(result.details?.openResultTabCorrection, {
+				assert.deepEqual(resultDetails.openResultTabCorrection, {
 					selectedTab: "t1",
 					selectionKind: "tabId",
 					targetTitle: "Example Domain",
@@ -169,13 +177,14 @@ if (args.includes("click")) {
 				const result = await executeRegisteredTool(resumedHarness.tool, resumedHarness.ctx, {
 					args: ["--session", "named", "click", "@e9"],
 				});
+				const resultDetails = readRecord(result.details);
 				assert.equal(result.isError, false, JSON.stringify(result));
 				assert.match(
-					(result.content[0] as { text: string }).text,
+					readString(readRecord(result.content[0]).text),
 					/^Warning: agent_browser detected that this session returned about:blank/,
 				);
-				assert.match((result.content[0] as { text: string }).text, /https:\/\/example\.com\//);
-				assert.deepEqual(result.details?.aboutBlankSessionMismatch, {
+				assert.match(readString(readRecord(result.content[0]).text), /https:\/\/example\.com\//);
+				assert.deepEqual(resultDetails.aboutBlankSessionMismatch, {
 					activeUrl: "about:blank",
 					recoveryApplied: true,
 					recoveryHint:
@@ -183,25 +192,23 @@ if (args.includes("click")) {
 					targetTitle: "Example Domain",
 					targetUrl: "https://example.com/",
 				});
-				assert.deepEqual(result.details?.sessionTabCorrection, {
+				assert.deepEqual(resultDetails.sessionTabCorrection, {
 					selectedTab: "t1",
 					selectionKind: "tabId",
 					targetTitle: "Example Domain",
 					targetUrl: "https://example.com/",
 				});
-				const aboutBlankRecoveryActions = (
-					result.details?.nextActions as
-						| Array<{ id: string; params?: { args?: string[] } }>
-						| undefined
-				)?.filter((action) =>
-					[
-						"list-tabs-for-about-blank-recovery",
-						"select-intended-tab-after-drift",
-						"snapshot-after-tab-recovery",
-					].includes(action.id),
-				);
+				const aboutBlankRecoveryActions = readArray(resultDetails.nextActions ?? [])
+					.map((value) => readRecord(value))
+					.filter((action) =>
+						[
+							"list-tabs-for-about-blank-recovery",
+							"select-intended-tab-after-drift",
+							"snapshot-after-tab-recovery",
+						].includes(readString(action.id)),
+					);
 				assert.deepEqual(
-					aboutBlankRecoveryActions?.map((action) => action.id),
+					aboutBlankRecoveryActions.map((action) => action.id),
 					[
 						"list-tabs-for-about-blank-recovery",
 						"select-intended-tab-after-drift",
@@ -209,14 +216,14 @@ if (args.includes("click")) {
 					],
 				);
 				assert.deepEqual(
-					aboutBlankRecoveryActions?.map((action) => action.params?.args),
+					aboutBlankRecoveryActions.map((action) => readRecord(action.params).args),
 					[
 						["--session", "named", "tab", "list"],
 						["--session", "named", "tab", "t1"],
 						["--session", "named", "snapshot", "-i"],
 					],
 				);
-				assert.deepEqual(result.details?.sessionTabTarget, {
+				assert.deepEqual(resultDetails.sessionTabTarget, {
 					title: "Example Domain",
 					url: "https://example.com/",
 				});
@@ -286,6 +293,7 @@ if (args.includes("click")) {
 				const capture = await executeRegisteredTool(seed.tool, seed.ctx, {
 					args: ["--session", "named", "snapshot", "-i"],
 				});
+				const captureDetails = readRecord(capture.details);
 				assert.equal(capture.isError, false, JSON.stringify(capture));
 				await writeFile(statePath, JSON.stringify({ targetGone: false, active: false }));
 				await writeFile(logPath, "");
@@ -305,7 +313,7 @@ if (args.includes("click")) {
 								args: ["--session", "named", "snapshot", "-i"],
 								command: "snapshot",
 								refSnapshot: {
-									...(capture.details?.refSnapshot as object),
+									...readRecord(captureDetails.refSnapshot),
 									refIds: ["e9"],
 									refs: { e9: { role: "link", name: "Existing" } },
 									target: { title: "Example Domain", url: "https://example.com/" },
@@ -328,67 +336,72 @@ if (args.includes("click")) {
 				const result = await executeRegisteredTool(resumedHarness.tool, resumedHarness.ctx, {
 					args: ["--session", "named", "click", "@e9"],
 				});
+				const resultDetails = readRecord(result.details);
 				assert.equal(result.isError, false, JSON.stringify(result));
 				assert.match(
-					(result.content[0] as { text: string }).text,
+					readString(readRecord(result.content[0]).text),
 					/No matching tab could be re-selected/,
 				);
-				assert.match((result.content[0] as { text: string }).text, /sessionMode=fresh/);
+				assert.match(readString(readRecord(result.content[0]).text), /sessionMode=fresh/);
 				assert.equal(
-					(result.details?.aboutBlankSessionMismatch as { recoveryApplied?: boolean } | undefined)
-						?.recoveryApplied,
+					readRecord(resultDetails.aboutBlankSessionMismatch ?? {}).recoveryApplied,
 					false,
 				);
-				assert.deepEqual(result.details?.sessionTabCorrection, {
+				assert.deepEqual(resultDetails.sessionTabCorrection, {
 					selectedTab: "t1",
 					selectionKind: "tabId",
 					targetTitle: "Example Domain",
 					targetUrl: "https://example.com/",
 				});
-				assert.deepEqual(result.details?.sessionTabTarget, {
+				assert.deepEqual(resultDetails.sessionTabTarget, {
 					title: undefined,
 					url: "about:blank",
 				});
-				const nextActions = result.details?.nextActions as
-					| Array<{ id: string; params?: { args?: string[]; stdin?: string } }>
-					| undefined;
-				const recoveryActions = nextActions?.filter((action) =>
+				const nextActions = readArray(resultDetails.nextActions ?? []).map((value) =>
+					readRecord(value),
+				);
+				const recoveryActions = nextActions.filter((action) =>
 					[
 						"list-tabs-for-about-blank-recovery",
 						"select-intended-tab-after-drift",
 						"snapshot-after-tab-recovery",
-					].includes(action.id),
+					].includes(readString(action.id)),
 				);
 				assert.deepEqual(
-					recoveryActions?.map((action) => action.id),
+					recoveryActions.map((action) => action.id),
 					["list-tabs-for-about-blank-recovery"],
 				);
-				assert.deepEqual(recoveryActions?.[0]?.params?.args, ["--session", "named", "tab", "list"]);
+				assert.deepEqual(readRecord(recoveryActions[0].params).args, [
+					"--session",
+					"named",
+					"tab",
+					"list",
+				]);
 				assert.equal(
-					nextActions?.some(
+					nextActions.some(
 						(action) =>
 							action.id === "inspect-after-mutation" ||
-							(action.params?.args?.at(-2) === "snapshot" && action.params?.stdin === undefined),
+							(readArray(readRecord(action.params).args ?? []).at(-2) === "snapshot" &&
+								readRecord(action.params).stdin === undefined),
 					),
 					false,
 				);
-				const pageChangeSummary = result.details?.pageChangeSummary as
-					| { nextActionIds?: string[] }
-					| undefined;
-				assert.equal(pageChangeSummary?.nextActionIds, undefined);
+				const pageChangeSummary = readRecord(resultDetails.pageChangeSummary ?? {});
+				assert.equal(pageChangeSummary.nextActionIds, undefined);
 
 				const staleRefRetry = await executeRegisteredTool(resumedHarness.tool, resumedHarness.ctx, {
 					args: ["--session", "named", "click", "@e9"],
 				});
+				const staleRefRetryDetails = readRecord(staleRefRetry.details);
 				assert.equal(staleRefRetry.isError, true, JSON.stringify(staleRefRetry));
-				assert.equal(staleRefRetry.details?.failureCategory, "stale-ref");
+				assert.equal(staleRefRetryDetails.failureCategory, "stale-ref");
 				assert.match(
-					(staleRefRetry.content[0] as { text: string }).text,
+					readString(readRecord(staleRefRetry.content[0]).text),
 					/current session target is about:blank/,
 				);
-				assert.equal(staleRefRetry.details?.refSnapshot, undefined);
+				assert.equal(staleRefRetryDetails.refSnapshot, undefined);
 				assert.match(
-					String((staleRefRetry.details?.refSnapshotInvalidation as { summary?: string })?.summary),
+					readString(readRecord(staleRefRetryDetails.refSnapshotInvalidation).summary),
 					/snapshot for https:\/\/example\.com\/.*target is about:blank/,
 				);
 
@@ -452,8 +465,9 @@ if (args.includes("batch")) {
 				const opened = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: ["open", "https://example.com"],
 				});
+				const openedDetails = readRecord(opened.details);
 				assert.equal(opened.isError, false, JSON.stringify(opened));
-				assert.deepEqual(opened.details?.sessionTabTarget, {
+				assert.deepEqual(openedDetails.sessionTabTarget, {
 					title: "Example Domain",
 					url: "https://example.com/",
 				});
@@ -462,22 +476,24 @@ if (args.includes("batch")) {
 					args: ["batch"],
 					stdin: JSON.stringify([["close"], ["record", "stop"]]),
 				});
+				const resultDetails = readRecord(result.details);
 				assert.equal(result.isError, false, JSON.stringify(result));
-				assert.equal(result.details?.aboutBlankSessionMismatch, undefined);
-				assert.equal(result.details?.sessionTabCorrection, undefined);
-				assert.equal(result.details?.sessionTabTarget, undefined);
-				assert.doesNotMatch((result.content[0] as { text: string }).text, /^Warning:/);
+				assert.equal(resultDetails.aboutBlankSessionMismatch, undefined);
+				assert.equal(resultDetails.sessionTabCorrection, undefined);
+				assert.equal(resultDetails.sessionTabTarget, undefined);
+				assert.doesNotMatch(readString(readRecord(result.content[0]).text), /^Warning:/);
 
 				const getUrl = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: ["get", "url"],
 				});
+				const getUrlDetails = readRecord(getUrl.details);
 				assert.equal(getUrl.isError, false, JSON.stringify(getUrl));
-				assert.equal(getUrl.details?.aboutBlankSessionMismatch, undefined);
-				assert.deepEqual(getUrl.details?.sessionTabTarget, {
+				assert.equal(getUrlDetails.aboutBlankSessionMismatch, undefined);
+				assert.deepEqual(getUrlDetails.sessionTabTarget, {
 					title: undefined,
 					url: "about:blank",
 				});
-				assert.doesNotMatch((getUrl.content[0] as { text: string }).text, /^Warning:/);
+				assert.doesNotMatch(readString(readRecord(getUrl.content[0]).text), /^Warning:/);
 			});
 		} finally {
 			await rm(tempDir, { force: true, recursive: true });
@@ -528,6 +544,7 @@ process.stdout.write(JSON.stringify({ success: true, data }));`,
 					args: ["open", "https://example.com/old"],
 					sessionMode: "fresh",
 				});
+				const openedDetails = readRecord(opened.details);
 				assert.equal(opened.isError, false, JSON.stringify(opened));
 				await rm(statePath);
 				const resumed = createExtensionHarness({
@@ -551,11 +568,24 @@ process.stdout.write(JSON.stringify({ success: true, data }));`,
 						]),
 					},
 				]) {
+					// Read this shared invocation log before issuing the next command or polling retry.
+					// oxlint-disable-next-line no-await-in-loop
 					const before = (await readInvocationLog(logPath)).length;
+					// Read this shared invocation log before issuing the next command or polling retry.
+					// oxlint-disable-next-line no-await-in-loop
 					const blocked = await executeRegisteredTool(resumed.tool, resumed.ctx, params);
+					const blockedDetails = readRecord(blocked.details);
+					// QA, snapshot and batch variants each must fail the same unknown-target recovery guard.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
 					assert.equal(blocked.isError, true, JSON.stringify(blocked));
-					assert.equal(blocked.details?.failureCategory, "tab-drift");
+					// QA, snapshot and batch variants each must fail the same unknown-target recovery guard.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
+					assert.equal(blockedDetails.failureCategory, "tab-drift");
+					// QA, snapshot and batch variants each must fail the same unknown-target recovery guard.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
 					assert.deepEqual(
+						// Read this shared invocation log before issuing the next command or polling retry.
+						// oxlint-disable-next-line no-await-in-loop
 						(await readInvocationLog(logPath)).slice(before).map((entry) => entry.args.slice(-2)),
 						[["tab", "list"]],
 					);
@@ -564,14 +594,15 @@ process.stdout.write(JSON.stringify({ success: true, data }));`,
 				const qa = await executeRegisteredTool(resumed.tool, resumed.ctx, {
 					qa: { url: targetUrl },
 				});
+				const qaDetails = readRecord(qa.details);
 				assert.equal(qa.isError, false, JSON.stringify(qa));
-				assert.equal(qa.details?.resultCategory, "success");
-				assert.equal(qa.details?.sessionName, opened.details?.sessionName);
-				assert.equal(qa.details?.usedImplicitSession, true);
-				assert.deepEqual(qa.details?.sessionTabTarget, { title: "QA page", url: targetUrl });
+				assert.equal(qaDetails.resultCategory, "success");
+				assert.equal(qaDetails.sessionName, openedDetails.sessionName);
+				assert.equal(qaDetails.usedImplicitSession, true);
+				assert.deepEqual(qaDetails.sessionTabTarget, { title: "QA page", url: targetUrl });
 				const invocations = (await readInvocationLog(logPath)).slice(beforeQa);
 				assert.deepEqual(invocations[0]?.args.slice(-2), ["batch", "--bail"]);
-				assert.deepEqual(JSON.parse(invocations[0]!.stdin!), [
+				assert.deepEqual(readArray(JSON.parse(readString(invocations[0].stdin))), [
 					["network", "requests", "--clear"],
 					["console", "--clear"],
 					["errors", "--clear"],
@@ -640,24 +671,25 @@ if (args.includes("tab") && args.includes("list")) {
 				const result = await executeRegisteredTool(resumedHarness.tool, resumedHarness.ctx, {
 					args: ["--session", "named", "open", "about:blank"],
 				});
+				const resultDetails = readRecord(result.details);
 				assert.equal(result.isError, false, JSON.stringify(result));
-				assert.equal(result.details?.aboutBlankSessionMismatch, undefined);
-				assert.equal(result.details?.sessionTabCorrection, undefined);
-				assert.deepEqual(result.details?.sessionTabTarget, {
+				assert.equal(resultDetails.aboutBlankSessionMismatch, undefined);
+				assert.equal(resultDetails.sessionTabCorrection, undefined);
+				assert.deepEqual(resultDetails.sessionTabTarget, {
 					title: undefined,
 					url: "about:blank",
 				});
-				assert.doesNotMatch((result.content[0] as { text: string }).text, /^Warning:/);
-				const explicitAboutBlankActionIds = (
-					(result.details?.nextActions as Array<{ id: string }> | undefined) ?? []
-				).map((action) => action.id);
+				assert.doesNotMatch(readString(readRecord(result.content[0]).text), /^Warning:/);
+				const explicitAboutBlankActionIds = readArray(resultDetails.nextActions ?? [])
+					.map((value) => readRecord(value))
+					.map((action) => action.id);
 				assert.equal(
 					explicitAboutBlankActionIds.some((id) =>
 						[
 							"list-tabs-for-about-blank-recovery",
 							"select-intended-tab-after-drift",
 							"snapshot-after-tab-recovery",
-						].includes(id),
+						].includes(readString(id)),
 					),
 					false,
 				);
@@ -665,24 +697,25 @@ if (args.includes("tab") && args.includes("list")) {
 				const snapshot = await executeRegisteredTool(resumedHarness.tool, resumedHarness.ctx, {
 					args: ["--session", "named", "snapshot", "-i"],
 				});
+				const snapshotDetails = readRecord(snapshot.details);
 				assert.equal(snapshot.isError, false, JSON.stringify(snapshot));
-				assert.equal(snapshot.details?.aboutBlankSessionMismatch, undefined);
-				assert.equal(snapshot.details?.sessionTabCorrection, undefined);
-				assert.deepEqual(snapshot.details?.sessionTabTarget, {
+				assert.equal(snapshotDetails.aboutBlankSessionMismatch, undefined);
+				assert.equal(snapshotDetails.sessionTabCorrection, undefined);
+				assert.deepEqual(snapshotDetails.sessionTabTarget, {
 					title: undefined,
 					url: "about:blank",
 				});
-				assert.doesNotMatch((snapshot.content[0] as { text: string }).text, /^Warning:/);
-				const snapshotActionIds = (
-					(snapshot.details?.nextActions as Array<{ id: string }> | undefined) ?? []
-				).map((action) => action.id);
+				assert.doesNotMatch(readString(readRecord(snapshot.content[0]).text), /^Warning:/);
+				const snapshotActionIds = readArray(snapshotDetails.nextActions ?? [])
+					.map((value) => readRecord(value))
+					.map((action) => action.id);
 				assert.equal(
 					snapshotActionIds.some((id) =>
 						[
 							"list-tabs-for-about-blank-recovery",
 							"select-intended-tab-after-drift",
 							"snapshot-after-tab-recovery",
-						].includes(id),
+						].includes(readString(id)),
 					),
 					false,
 				);
@@ -785,7 +818,7 @@ if (args.includes("https://example.com/slow-first")) {
 					title: "Fast Second",
 					url: "https://example.com/fast-second",
 				});
-				assert.equal(fastOpen.details?.sessionTabTargetUnknown, undefined);
+				assert.equal(fastOpen.details.sessionTabTargetUnknown, undefined);
 
 				const invocations = await readInvocationLog(logPath);
 				assert.equal(invocations.length, 4);
@@ -861,7 +894,7 @@ if (args.includes("https://example.com/slow")) {
 					args: ["--session", "named", "snapshot", "-i"],
 				});
 				assert.equal(snapshot.isError, true, JSON.stringify(snapshot));
-				assert.match(snapshot.content[0]?.text ?? "", /active page became unverified/);
+				assert.match(readString(snapshot.content[0].text ?? ""), /active page became unverified/);
 				assert.doesNotMatch(JSON.stringify(snapshot), /SECRET UNVERIFIED CONTENT/);
 				assert.equal((await readInvocationLog(logPath)).length, invocationCount);
 			});
@@ -914,11 +947,11 @@ if (args.includes("open")) {
 				const harness = createExtensionHarness({ cwd: tempDir });
 				await runExtensionEvent(harness.handlers, "session_start", { reason: "new" }, harness.ctx);
 				const runAliasRace = async (
-					readIdentityArgs: string[],
-					writeIdentityArgs: string[],
+					readIdentityArgs: readonly string[],
+					writeIdentityArgs: readonly string[],
 					label: string,
 				): Promise<void> => {
-					const session = readIdentityArgs[readIdentityArgs.indexOf("--session") + 1]!;
+					const session = readIdentityArgs[readIdentityArgs.indexOf("--session") + 1];
 					const nextUrl = `https://example.com/${label}-secret`;
 					const opened = await executeRegisteredTool(harness.tool, harness.ctx, {
 						args: [...readIdentityArgs, "open", "https://example.com/"],
@@ -1006,9 +1039,10 @@ if (args.includes("get") && args.includes("url")) {
 				);
 				controller.abort(new Error("caller cancelled"));
 				const cancelled = await snapshot;
+				const cancelledDetails = readRecord(cancelled.details);
 				assert.equal(cancelled.isError, true);
-				assert.equal(cancelled.details?.failureCategory, "aborted");
-				assert.match(cancelled.content[0]?.text ?? "", /caller cancelled/);
+				assert.equal(cancelledDetails.failureCategory, "aborted");
+				assert.match(readString(cancelled.content[0].text ?? ""), /caller cancelled/);
 
 				const reopened = await executeRegisteredTool(harness.tool, harness.ctx, {
 					args: ["--session", "named", "open", "https://example.com/"],
@@ -1104,8 +1138,9 @@ if (args.includes("tab") && args.includes("list")) {
 						args: ["--session", "named", "click", "@e9"],
 					},
 				);
+				const clickedSelectorDetails = readRecord(clickedSelector.details);
 				assert.equal(clickedSelector.isError, false, JSON.stringify(clickedSelector));
-				assert.deepEqual(clickedSelector.details?.sessionTabCorrection, {
+				assert.deepEqual(clickedSelectorDetails.sessionTabCorrection, {
 					selectedTab: "t1",
 					selectionKind: "tabId",
 					targetTitle: "Example Domain",

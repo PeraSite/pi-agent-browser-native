@@ -9,24 +9,16 @@ import type { FileArtifactMetadata } from "./results/contracts.js";
 
 export const RECORDING_RESERVATION_ENTRY_TYPE = "agent-browser-recording-reservation";
 
-export interface ActiveRecordingReservation {
-	absolutePath: string;
-	contactSheetPath?: string;
-	cwd: string;
-	namespace?: string;
-	path: string;
-	recordingId?: string;
-	startedAtMs?: number;
-	sessionName: string;
-}
+import type { ActiveRecordingReservation } from "./results/evidence-contracts.js";
+export type { ActiveRecordingReservation } from "./results/evidence-contracts.js";
 
 export interface RecordingReservationTransition {
-	reservation: ActiveRecordingReservation;
-	state: "active" | "closed";
+	readonly reservation: ActiveRecordingReservation;
+	readonly state: "active" | "closed";
 }
 
 function getReservationKey(
-	reservation: Pick<ActiveRecordingReservation, "namespace" | "sessionName">,
+	reservation: Readonly<Pick<ActiveRecordingReservation, "namespace" | "sessionName">>,
 ): string {
 	return getAgentBrowserSessionIdentityKey(reservation.sessionName, reservation.namespace);
 }
@@ -34,7 +26,12 @@ function getReservationKey(
 function getArtifactReservation(
 	artifact: FileArtifactMetadata,
 ): ActiveRecordingReservation | undefined {
-	if (!artifact.session || artifact.command !== "record" || artifact.kind !== "video") {
+	if (
+		artifact.session === undefined ||
+		artifact.session.length === 0 ||
+		artifact.command !== "record" ||
+		artifact.kind !== "video"
+	) {
 		return undefined;
 	}
 	return {
@@ -42,7 +39,10 @@ function getArtifactReservation(
 		cwd: artifact.cwd ?? process.cwd(),
 		namespace: artifact.namespace,
 		path: artifact.path,
-		...(artifact.recording?.recordingId ? { recordingId: artifact.recording.recordingId } : {}),
+		...(typeof artifact.recording?.recordingId === "string" &&
+		artifact.recording.recordingId.length > 0
+			? { recordingId: artifact.recording.recordingId }
+			: {}),
 		...(artifact.recordingStartedAtMs !== undefined
 			? { startedAtMs: artifact.recordingStartedAtMs }
 			: {}),
@@ -50,14 +50,14 @@ function getArtifactReservation(
 	};
 }
 
-export function applyRecordingArtifactsToReservations(
-	reservations: Map<string, ActiveRecordingReservation>,
-	artifacts: readonly FileArtifactMetadata[],
-): RecordingReservationTransition[] {
+function artifactReservations(artifacts: readonly FileArtifactMetadata[]): {
+	readonly pendingBySession: Map<string, ActiveRecordingReservation>;
+	readonly terminalBySession: Map<string, ActiveRecordingReservation>;
+} {
 	const pendingBySession = new Map<string, ActiveRecordingReservation>();
 	const terminalBySession = new Map<string, ActiveRecordingReservation>();
 	for (const artifact of artifacts) {
-		const reservation = getArtifactReservation(artifact);
+		let reservation = getArtifactReservation(artifact);
 		if (!reservation) {
 			continue;
 		}
@@ -70,7 +70,7 @@ export function applyRecordingArtifactsToReservations(
 				isPendingRecordingArtifact(candidate),
 		);
 		if (sheet) {
-			reservation.contactSheetPath = sheet.absolutePath;
+			reservation = { ...reservation, contactSheetPath: sheet.absolutePath };
 		}
 		const key = getReservationKey(reservation);
 		if (isPendingRecordingArtifact(artifact)) {
@@ -79,6 +79,28 @@ export function applyRecordingArtifactsToReservations(
 			terminalBySession.set(key, reservation);
 		}
 	}
+	return { pendingBySession, terminalBySession };
+}
+function reservationChanged(
+	existing: ActiveRecordingReservation | undefined,
+	pending: ActiveRecordingReservation,
+): boolean {
+	return (
+		!existing ||
+		existing.absolutePath !== pending.absolutePath ||
+		existing.cwd !== pending.cwd ||
+		existing.recordingId !== pending.recordingId ||
+		existing.startedAtMs !== pending.startedAtMs ||
+		existing.contactSheetPath !== pending.contactSheetPath
+	);
+}
+export function applyRecordingArtifactsToReservations(
+	// This mutator owns changes to the namespace/session reservation index, not to reservation values.
+	// oxlint-disable-next-line typescript/prefer-readonly-parameter-types
+	reservations: Map<string, ActiveRecordingReservation>,
+	artifacts: readonly FileArtifactMetadata[],
+): RecordingReservationTransition[] {
+	const { pendingBySession, terminalBySession } = artifactReservations(artifacts);
 	const transitions: RecordingReservationTransition[] = [];
 	for (const key of terminalBySession.keys()) {
 		if (pendingBySession.has(key)) {
@@ -94,14 +116,7 @@ export function applyRecordingArtifactsToReservations(
 	for (const [key, pending] of pendingBySession) {
 		const existing = reservations.get(key);
 		reservations.set(key, pending);
-		if (
-			!existing ||
-			existing.absolutePath !== pending.absolutePath ||
-			existing.cwd !== pending.cwd ||
-			existing.recordingId !== pending.recordingId ||
-			existing.startedAtMs !== pending.startedAtMs ||
-			existing.contactSheetPath !== pending.contactSheetPath
-		) {
+		if (reservationChanged(existing, pending)) {
 			transitions.push({ reservation: pending, state: "active" });
 		}
 	}
@@ -109,6 +124,8 @@ export function applyRecordingArtifactsToReservations(
 }
 
 export function retireRecordingReservation(
+	// This mutator owns changes to the namespace/session reservation index, not to reservation values.
+	// oxlint-disable-next-line typescript/prefer-readonly-parameter-types
 	reservations: Map<string, ActiveRecordingReservation>,
 	sessionName: string,
 	namespace?: string,
@@ -122,7 +139,7 @@ export function retireRecordingReservation(
 }
 
 export function appendRecordingReservationTransition(
-	pi: ExtensionAPI,
+	pi: Pick<ExtensionAPI, "appendEntry">,
 	transition: RecordingReservationTransition,
 ): void {
 	const { reservation, state } = transition;
@@ -140,6 +157,64 @@ export function appendRecordingReservationTransition(
 	});
 }
 
+function optionalReservationMetadata(data: Readonly<Record<string, unknown>>): boolean {
+	if (
+		data.contactSheetPath !== undefined &&
+		(typeof data.contactSheetPath !== "string" || !isAbsolute(data.contactSheetPath))
+	) {
+		return false;
+	}
+	if (
+		data.recordingId !== undefined &&
+		(typeof data.recordingId !== "string" || data.recordingId.length === 0)
+	) {
+		return false;
+	}
+	return (
+		data.startedAtMs === undefined ||
+		(typeof data.startedAtMs === "number" && Number.isFinite(data.startedAtMs))
+	);
+}
+function parseActiveReservation(
+	data: Readonly<Record<string, unknown>>,
+	identity: { readonly sessionName: string; readonly namespace?: string },
+): ActiveRecordingReservation | undefined {
+	if (!optionalReservationMetadata(data)) {
+		return undefined;
+	}
+	if (
+		typeof data.absolutePath !== "string" ||
+		!isAbsolute(data.absolutePath) ||
+		typeof data.cwd !== "string" ||
+		!isAbsolute(data.cwd) ||
+		typeof data.path !== "string"
+	) {
+		return undefined;
+	}
+	return {
+		...identity,
+		absolutePath: data.absolutePath,
+		cwd: data.cwd,
+		path: data.path,
+		...(typeof data.contactSheetPath === "string"
+			? { contactSheetPath: data.contactSheetPath }
+			: {}),
+		...(typeof data.recordingId === "string" ? { recordingId: data.recordingId } : {}),
+		...(typeof data.startedAtMs === "number" ? { startedAtMs: data.startedAtMs } : {}),
+	};
+}
+function hasReservationIdentity(data: Readonly<Record<string, unknown>>): data is Readonly<
+	Record<string, unknown>
+> & {
+	readonly sessionName: string;
+	readonly namespace?: string;
+} {
+	return (
+		typeof data.sessionName === "string" &&
+		data.sessionName.length > 0 &&
+		(data.namespace === undefined || typeof data.namespace === "string")
+	);
+}
 function parseReservationTransition(data: unknown): RecordingReservationTransition | undefined {
 	if (
 		!isRecord(data) ||
@@ -148,10 +223,7 @@ function parseReservationTransition(data: unknown): RecordingReservationTransiti
 	) {
 		return undefined;
 	}
-	if (typeof data.sessionName !== "string" || data.sessionName.length === 0) {
-		return undefined;
-	}
-	if (data.namespace !== undefined && typeof data.namespace !== "string") {
+	if (!hasReservationIdentity(data)) {
 		return undefined;
 	}
 	if (data.state === "closed") {
@@ -166,48 +238,11 @@ function parseReservationTransition(data: unknown): RecordingReservationTransiti
 			state: "closed",
 		};
 	}
-	if (
-		data.contactSheetPath !== undefined &&
-		(typeof data.contactSheetPath !== "string" || !isAbsolute(data.contactSheetPath))
-	) {
-		return undefined;
-	}
-	if (
-		data.recordingId !== undefined &&
-		(typeof data.recordingId !== "string" || !data.recordingId)
-	) {
-		return undefined;
-	}
-	if (
-		data.startedAtMs !== undefined &&
-		(typeof data.startedAtMs !== "number" || !Number.isFinite(data.startedAtMs))
-	) {
-		return undefined;
-	}
-	if (
-		typeof data.absolutePath !== "string" ||
-		!isAbsolute(data.absolutePath) ||
-		typeof data.cwd !== "string" ||
-		!isAbsolute(data.cwd) ||
-		typeof data.path !== "string"
-	) {
-		return undefined;
-	}
-	return {
-		reservation: {
-			absolutePath: data.absolutePath,
-			...(typeof data.contactSheetPath === "string"
-				? { contactSheetPath: data.contactSheetPath }
-				: {}),
-			cwd: data.cwd,
-			namespace: data.namespace,
-			path: data.path,
-			...(typeof data.recordingId === "string" ? { recordingId: data.recordingId } : {}),
-			...(typeof data.startedAtMs === "number" ? { startedAtMs: data.startedAtMs } : {}),
-			sessionName: data.sessionName,
-		},
-		state: "active",
-	};
+	const reservation = parseActiveReservation(data, {
+		sessionName: data.sessionName,
+		namespace: data.namespace,
+	});
+	return reservation ? { reservation, state: "active" } : undefined;
 }
 
 export interface RecordingReservationBranchState {
@@ -216,7 +251,7 @@ export interface RecordingReservationBranchState {
 }
 
 export function restoreRecordingReservationStateFromBranch(
-	branch: unknown[],
+	branch: readonly unknown[],
 ): RecordingReservationBranchState {
 	const reservations = new Map<string, ActiveRecordingReservation>();
 	const terminal = new Map<string, ActiveRecordingReservation>();

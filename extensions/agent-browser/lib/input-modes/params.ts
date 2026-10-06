@@ -1,4 +1,4 @@
-import { JsonSchema, type JsonSchemaBuilder } from "../json-schema.js";
+import { JsonSchema, type JsonSchemaBuilder, type TSchema, type TUnsafe } from "../json-schema.js";
 import { StringEnum as localStringEnum, type StringEnumBuilder } from "../string-enum-schema.js";
 import {
 	ELECTRON_DISCOVERY_DEFAULT_MAX_RESULTS,
@@ -93,7 +93,7 @@ export interface AgentBrowserToolsParams {
 	enable?: AgentBrowserAdvancedTool[];
 }
 
-function outputProperties(Type: JsonSchemaBuilder) {
+function outputProperties(Type: JsonSchemaBuilder): { outputPath: TSchema; timeoutMs: TSchema } {
 	return {
 		outputPath: Type.Optional(
 			Type.String({
@@ -107,7 +107,7 @@ function outputProperties(Type: JsonSchemaBuilder) {
 	};
 }
 
-function sessionModeProperty(Type: JsonSchemaBuilder, StringEnum: StringEnumBuilder) {
+function sessionModeProperty(Type: JsonSchemaBuilder, StringEnum: StringEnumBuilder): TSchema {
 	return Type.Optional(
 		StringEnum(["auto", "fresh"] as const, {
 			description:
@@ -121,7 +121,7 @@ function sessionModeProperty(Type: JsonSchemaBuilder, StringEnum: StringEnumBuil
 export function createAgentBrowserParamsSchema(
 	Type: JsonSchemaBuilder = JsonSchema,
 	StringEnum: StringEnumBuilder = localStringEnum,
-) {
+): TUnsafe<AgentBrowserParams> {
 	return Type.Unsafe<AgentBrowserParams>(
 		Type.Object(
 			{
@@ -144,7 +144,9 @@ export function createAgentBrowserParamsSchema(
 	);
 }
 
-export function createAgentBrowserCodeParamsSchema(Type: JsonSchemaBuilder = JsonSchema) {
+export function createAgentBrowserCodeParamsSchema(
+	Type: JsonSchemaBuilder = JsonSchema,
+): TUnsafe<AgentBrowserCodeParams> {
 	return Type.Unsafe<AgentBrowserCodeParams>(
 		Type.Object(
 			{
@@ -178,7 +180,7 @@ export function createAgentBrowserCodeParamsSchema(Type: JsonSchemaBuilder = Jso
 export function createAgentBrowserActionParamsSchema(
 	Type: JsonSchemaBuilder = JsonSchema,
 	StringEnum: StringEnumBuilder = localStringEnum,
-) {
+): TUnsafe<AgentBrowserActionParams> {
 	return Type.Unsafe<AgentBrowserActionParams>(
 		Type.Object(
 			{
@@ -232,7 +234,7 @@ export function createAgentBrowserActionParamsSchema(
 export function createAgentBrowserQaParamsSchema(
 	Type: JsonSchemaBuilder = JsonSchema,
 	StringEnum: StringEnumBuilder = localStringEnum,
-) {
+): TUnsafe<AgentBrowserQaParams> {
 	return Type.Unsafe<AgentBrowserQaParams>(
 		Type.Object(
 			{
@@ -268,7 +270,7 @@ export function createAgentBrowserQaParamsSchema(
 export function createAgentBrowserElectronParamsSchema(
 	Type: JsonSchemaBuilder = JsonSchema,
 	StringEnum: StringEnumBuilder = localStringEnum,
-) {
+): TUnsafe<AgentBrowserElectronParams> {
 	const common = { outputPath: outputProperties(Type).outputPath };
 	const timeoutMs = Type.Optional(Type.Integer({ minimum: 1 }));
 	const list = {
@@ -337,7 +339,7 @@ export function createAgentBrowserElectronParamsSchema(
 export function createAgentBrowserSourceParamsSchema(
 	Type: JsonSchemaBuilder = JsonSchema,
 	StringEnum: StringEnumBuilder = localStringEnum,
-) {
+): TUnsafe<AgentBrowserSourceParams> {
 	return Type.Unsafe<AgentBrowserSourceParams>(
 		Type.Object(
 			{
@@ -369,7 +371,7 @@ export function createAgentBrowserSourceParamsSchema(
 export function createAgentBrowserNetworkSourceParamsSchema(
 	Type: JsonSchemaBuilder = JsonSchema,
 	StringEnum: StringEnumBuilder = localStringEnum,
-) {
+): TUnsafe<AgentBrowserNetworkSourceParams> {
 	return Type.Unsafe<AgentBrowserNetworkSourceParams>(
 		Type.Object(
 			{
@@ -396,7 +398,7 @@ export function createAgentBrowserNetworkSourceParamsSchema(
 export function createAgentBrowserToolsParamsSchema(
 	Type: JsonSchemaBuilder = JsonSchema,
 	StringEnum: StringEnumBuilder = localStringEnum,
-) {
+): TUnsafe<AgentBrowserToolsParams> {
 	return Type.Unsafe<AgentBrowserToolsParams>(
 		Type.Object(
 			{

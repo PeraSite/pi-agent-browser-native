@@ -4,17 +4,18 @@
  * Scope: Test-only helpers for agent-browser extension validation.
  */
 
+import assert from "node:assert/strict";
 import { constants } from "node:fs";
 import { chmod, copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { Theme } from "@earendil-works/pi-coding-agent";
+import { Type, type Static } from "typebox";
+import { Check } from "typebox/value";
+import { hasErrorCode } from "./assertions.js";
 
 import type { ElectronAppDiscovery } from "../../extensions/agent-browser/lib/electron/discovery.js";
-import type {
-	AgentBrowserToolParams,
-	AgentBrowserToolRenderContext,
-} from "./agent-browser-harness.js";
+import type { AgentBrowserToolRenderContext } from "./agent-browser-harness.js";
 
 type RenderThemeColor = Parameters<Theme["fg"]>[0];
 type RenderThemeBg = Parameters<Theme["bg"]>[0];
@@ -120,10 +121,10 @@ class PlainRenderTheme extends Theme {
 export const PLAIN_RENDER_THEME = new PlainRenderTheme();
 
 export function createRenderContext(options: {
-	args: AgentBrowserToolParams;
-	expanded?: boolean;
-	isError?: boolean;
-	lastComponent?: AgentBrowserToolRenderContext["lastComponent"];
+	readonly args: unknown;
+	readonly expanded?: boolean;
+	readonly isError?: boolean;
+	readonly lastComponent?: AgentBrowserToolRenderContext["lastComponent"];
 }): AgentBrowserToolRenderContext {
 	return {
 		args: options.args,
@@ -131,7 +132,9 @@ export function createRenderContext(options: {
 		cwd: process.cwd(),
 		executionStarted: true,
 		expanded: options.expanded ?? false,
-		invalidate: () => undefined,
+		invalidate: () => {
+			/* Rendering fixtures do not schedule redraws. */
+		},
 		isError: options.isError ?? false,
 		isPartial: false,
 		lastComponent: options.lastComponent,
@@ -142,10 +145,10 @@ export function createRenderContext(options: {
 }
 
 export async function writeFakeMacElectronApp(options: {
-	applicationsDir: string;
-	bundleId: string;
-	executableName?: string;
-	name: string;
+	readonly applicationsDir: string;
+	readonly bundleId: string;
+	readonly executableName?: string;
+	readonly name: string;
 }): Promise<{ appPath: string; executablePath: string }> {
 	const executableName = options.executableName ?? options.name;
 	const appPath = join(options.applicationsDir, `${options.name}.app`);
@@ -186,12 +189,24 @@ export async function writeFakeLinuxElectronBinary(root: string, appName: string
 	return executablePath;
 }
 
-export function electronAppNames(apps: ElectronAppDiscovery[]): string[] {
-	return apps.map((app) => app.name).sort();
+export function electronAppNames(
+	apps: readonly Readonly<Pick<ElectronAppDiscovery, "name">>[],
+): string[] {
+	return apps
+		.map((app) => app.name)
+		.sort((a, b) => {
+			if (a < b) {
+				return -1;
+			}
+			if (a > b) {
+				return 1;
+			}
+			return 0;
+		});
 }
 
 export function isTestPidAlive(pid: number | undefined): boolean {
-	if (!pid) {
+	if (pid === undefined || pid === 0) {
 		return false;
 	}
 	try {
@@ -203,7 +218,9 @@ export function isTestPidAlive(pid: number | undefined): boolean {
 }
 
 export function sleepMs(ms: number): Promise<void> {
-	return new Promise((resolve) => setTimeout(resolve, ms));
+	return new Promise((resolve) => {
+		setTimeout(resolve, ms);
+	});
 }
 
 export async function waitForTestPidExit(
@@ -215,13 +232,15 @@ export async function waitForTestPidExit(
 		if (!isTestPidAlive(pid)) {
 			return true;
 		}
+		// Poll only after the previous liveness check and delay have completed.
+		// oxlint-disable-next-line no-await-in-loop
 		await sleepMs(50);
 	}
 	return !isTestPidAlive(pid);
 }
 
 export async function stopTestPid(pid: number | undefined): Promise<void> {
-	if (!pid || !isTestPidAlive(pid)) {
+	if (pid === undefined || pid === 0 || !isTestPidAlive(pid)) {
 		return;
 	}
 	try {
@@ -240,12 +259,21 @@ export async function stopTestPid(pid: number | undefined): Promise<void> {
 	await waitForTestPidExit(pid, 1_000);
 }
 
-interface FakeElectronLaunchLogEntry {
-	args: string[];
-	mode: "invalid-cdp" | "no-port-file" | "normal";
-	pid: number;
-	port?: number;
-	userDataDir: string;
+const FAKE_ELECTRON_LAUNCH_LOG_ENTRY = Type.Object({
+	args: Type.Array(Type.String()),
+	mode: Type.Union([
+		Type.Literal("invalid-cdp"),
+		Type.Literal("no-port-file"),
+		Type.Literal("normal"),
+	]),
+	pid: Type.Number(),
+	port: Type.Optional(Type.Number()),
+	userDataDir: Type.String(),
+});
+type FakeElectronLaunchLogEntry = Static<typeof FAKE_ELECTRON_LAUNCH_LOG_ENTRY>;
+function parseLaunchLogEntry(value: unknown): FakeElectronLaunchLogEntry {
+	assert.ok(Check(FAKE_ELECTRON_LAUNCH_LOG_ENTRY, value), "invalid fake Electron launch log entry");
+	return value;
 }
 
 export async function readOptionalFakeElectronLaunchLog(
@@ -254,10 +282,10 @@ export async function readOptionalFakeElectronLaunchLog(
 	try {
 		const text = (await readFile(path, "utf8")).trim();
 		return text.length > 0
-			? text.split("\n").map((line) => JSON.parse(line) as FakeElectronLaunchLogEntry)
+			? text.split("\n").map((line) => parseLaunchLogEntry(JSON.parse(line)))
 			: [];
 	} catch (error) {
-		if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+		if (hasErrorCode(error, "ENOENT")) {
 			return [];
 		}
 		throw error;
@@ -268,9 +296,9 @@ export async function readOptionalFakeElectronLaunchLog(
 // argv, PID, stdio and cleanup boundaries on Windows too. The Electron evidence
 // is synthetic just as in the discovery fixtures; production validation is unchanged.
 export async function writeFakeElectronProcessApp(options: {
-	applicationsDir: string;
-	bundleId: string;
-	name: string;
+	readonly applicationsDir: string;
+	readonly bundleId: string;
+	readonly name: string;
 }): Promise<{ appPath: string; executablePath: string; scriptPath: string; appArgs: string[] }> {
 	let app: { appPath: string; executablePath: string };
 	if (process.platform === "win32") {
@@ -289,13 +317,13 @@ export async function writeFakeElectronProcessApp(options: {
 }
 
 export async function writeFakeLaunchableElectronApp(options: {
-	applicationsDir: string;
-	bundleId: string;
-	includeWebview?: boolean;
-	launchLogPath: string;
-	mode?: "invalid-cdp" | "no-port-file" | "normal";
-	name: string;
-	writeLaunchLog?: boolean;
+	readonly applicationsDir: string;
+	readonly bundleId: string;
+	readonly includeWebview?: boolean;
+	readonly launchLogPath: string;
+	readonly mode?: "invalid-cdp" | "no-port-file" | "normal";
+	readonly name: string;
+	readonly writeLaunchLog?: boolean;
 }): Promise<Awaited<ReturnType<typeof writeFakeElectronProcessApp>>> {
 	const app = await writeFakeElectronProcessApp(options);
 	const mode = options.mode ?? "normal";
@@ -359,12 +387,12 @@ process.on("SIGINT", shutdown);
 export function fakeAgentBrowserLifecycleScript(
 	logPath: string,
 	options: {
-		sessionTitle?: string;
-		sessionUrl?: string;
-		snapshotTitle?: string;
-		snapshotUrl?: string;
-		tabTitle?: string;
-		tabUrl?: string;
+		readonly sessionTitle?: string;
+		readonly sessionUrl?: string;
+		readonly snapshotTitle?: string;
+		readonly snapshotUrl?: string;
+		readonly tabTitle?: string;
+		readonly tabUrl?: string;
 	} = {},
 ): string {
 	const sessionTitle = options.sessionTitle ?? "Demo Electron";
@@ -395,7 +423,7 @@ else if (command === "get" && subcommand === "title") data = { result: ${JSON.st
 else if (command === "get" && subcommand === "url") data = { result: ${JSON.stringify(sessionUrl)}, url: ${JSON.stringify(sessionUrl)} };
 else if (command === "eval") data = { result: { focusedElement: { id: "run-button", name: "Run", role: "button", tagName: "button" } } };
 else if (command === "tab" && subcommand === "list") data = { tabs: [{ active: true, index: 0, tabId: "page-1", title: ${JSON.stringify(tabTitle)}, type: "page", url: ${JSON.stringify(tabUrl)} }] };
-else if (command === "snapshot") data = { origin: ${JSON.stringify(snapshotUrl)}, title: ${JSON.stringify(snapshotTitle)}, url: ${JSON.stringify(snapshotUrl)}, refs: { e1: { role: "button", name: "Run" } }, snapshot: "- button \\\"Run\\\" [ref=e1]" };
+else if (command === "snapshot") data = { origin: ${JSON.stringify(snapshotUrl)}, title: ${JSON.stringify(snapshotTitle)}, url: ${JSON.stringify(snapshotUrl)}, refs: { e1: { role: "button", name: "Run" } }, snapshot: "- button \\"Run\\" [ref=e1]" };
 else if (command === "record") data = { path: args[commandIndex + 2] };
 else if (command === "pdf") data = { path: args[commandIndex + 1] };
 else if (command === "close") data = { closed: true };

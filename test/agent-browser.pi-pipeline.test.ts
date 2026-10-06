@@ -5,6 +5,7 @@
  */
 
 import assert from "node:assert/strict";
+import { readRecord, readString, readArray, readBoolean } from "./helpers/assertions.js";
 import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -23,7 +24,7 @@ import {
 	type Context,
 	type Model,
 	type SimpleStreamOptions,
-	type ToolResultMessage,
+	type Api,
 	type ToolCall,
 } from "@earendil-works/pi-ai/compat";
 import {
@@ -71,18 +72,24 @@ test("failure finalization adds the Pi failure notice to prose despite --json ar
 	);
 	assert.equal(proseJsonArgsFinalized.isError, true);
 	assert.match(
-		(proseJsonArgsFinalized.content[0] as { text: string }).text,
+		readString(readRecord(proseJsonArgsFinalized.content[0]).text),
 		/Result category: failure; failureCategory: validation-error; Pi tool isError: true\./,
 	);
 });
 
 const PIPELINE_PROVIDER = "piab-pipeline";
 const PIPELINE_MODEL_ID = "tool-pipeline";
+const nativeInstructionGroups: unknown = readRecord(Pi).instructionGroupsExtension;
 const NATIVE_DISCOVERY_ENABLED =
 	process.env.PI_AGENT_BROWSER_NATIVE_DISCOVERY === "1" ||
-	("instructionGroupsExtension" in Pi && typeof Pi.instructionGroupsExtension === "function");
+	("instructionGroupsExtension" in Pi && typeof nativeInstructionGroups === "function");
 
-type PipelineToolResult = ToolResultMessage;
+type PipelineToolResult = {
+	readonly content: readonly { readonly type: string; readonly text?: string }[];
+	readonly details: unknown;
+	readonly isError: boolean;
+	readonly toolName: string;
+};
 
 type PipelinePromptResult = {
 	inMemoryResult: PipelineToolResult;
@@ -91,14 +98,37 @@ type PipelinePromptResult = {
 	sessionFile: string;
 };
 
-function isAgentBrowserToolResult(message: unknown): message is PipelineToolResult {
+function isAgentBrowserToolResult(message: unknown): boolean {
+	if (
+		typeof message !== "object" ||
+		message === null ||
+		!("role" in message) ||
+		!("toolName" in message)
+	) {
+		return false;
+	}
 	return (
-		typeof message === "object" &&
-		message !== null &&
-		(message as { role?: unknown }).role === "toolResult" &&
-		typeof (message as { toolName?: unknown }).toolName === "string" &&
-		(message as { toolName: string }).toolName.startsWith("agent_browser")
+		message.role === "toolResult" &&
+		typeof message.toolName === "string" &&
+		message.toolName.startsWith("agent_browser")
 	);
+}
+
+function readPipelineToolResult(value: unknown): PipelineToolResult {
+	const result = readRecord(value);
+	assert.ok(isAgentBrowserToolResult(result));
+	return {
+		content: readArray(result.content).map((item) => {
+			const content = readRecord(item);
+			return {
+				type: readString(content.type),
+				text: content.text === undefined ? undefined : readString(content.text),
+			};
+		}),
+		details: result.details,
+		isError: readBoolean(result.isError),
+		toolName: readString(result.toolName),
+	};
 }
 
 function usage() {
@@ -113,7 +143,7 @@ function usage() {
 }
 
 function createAssistantMessage(
-	model: Model<any>,
+	model: Model<Api>,
 	stopReason: AssistantMessage["stopReason"],
 ): AssistantMessage {
 	return {
@@ -128,14 +158,14 @@ function createAssistantMessage(
 	};
 }
 
-function streamTextResponse(model: Model<any>, text: string) {
+function streamTextResponse(model: Model<Api>, text: string) {
 	const stream = createAssistantMessageEventStream();
 	queueMicrotask(() => {
 		const output = createAssistantMessage(model, "stop");
 		stream.push({ type: "start", partial: output });
 		output.content.push({ type: "text", text: "" });
 		stream.push({ type: "text_start", contentIndex: 0, partial: output });
-		const block = output.content[0];
+		const block = output.content.at(0);
 		if (block?.type === "text") {
 			block.text = text;
 		}
@@ -148,12 +178,12 @@ function streamTextResponse(model: Model<any>, text: string) {
 }
 
 function createToolCallingStream(
-	toolArguments: ToolCall["arguments"],
-	priorCalls: ToolCall[] = [],
+	toolArguments: Readonly<ToolCall["arguments"]>,
+	priorCalls: readonly ToolCall[] = [],
 	toolName = "agent_browser",
 	toolCallId = "call_agent_browser_pipeline",
 ) {
-	return (model: Model<any>, context: Context, _options?: SimpleStreamOptions) => {
+	return (model: Model<Api>, context: Context, _options?: SimpleStreamOptions) => {
 		const hasToolResult = context.messages.some(
 			(message) => message.role === "toolResult" && message.toolName === toolName,
 		);
@@ -190,10 +220,8 @@ function createToolCallingStream(
 	};
 }
 
-function isSessionMessageEntry(value: unknown): value is { message?: unknown; type?: string } {
-	return (
-		typeof value === "object" && value !== null && (value as { type?: unknown }).type === "message"
-	);
+function isSessionMessageEntry(value: unknown): boolean {
+	return typeof value === "object" && value !== null && "type" in value && value.type === "message";
 }
 
 async function listFilesRecursive(directory: string): Promise<string[]> {
@@ -202,6 +230,8 @@ async function listFilesRecursive(directory: string): Promise<string[]> {
 	for (const entry of entries) {
 		const path = join(directory, entry.name);
 		if (entry.isDirectory()) {
+			// Complete each directory traversal before selecting the persisted transcript.
+			// oxlint-disable-next-line no-await-in-loop
 			files.push(...(await listFilesRecursive(path)));
 		} else {
 			files.push(path);
@@ -224,10 +254,14 @@ async function readPersistedAgentBrowserResult(
 	const sessionFile = sessionFiles[0];
 	const lines = (await readFile(sessionFile, "utf8")).trim().split("\n").filter(Boolean);
 	const results = lines
-		.map((line) => JSON.parse(line) as unknown)
+		.map((line) => {
+			const value: unknown = JSON.parse(line);
+			return value;
+		})
 		.filter(isSessionMessageEntry)
-		.map((entry) => entry.message)
-		.filter(isAgentBrowserToolResult);
+		.map((entry) => readRecord(entry).message)
+		.filter(isAgentBrowserToolResult)
+		.map(readPipelineToolResult);
 	const result = results.at(-1);
 	assert.ok(result, "persisted session JSONL should include an agent_browser tool result");
 	return { result, sessionFile };
@@ -235,11 +269,11 @@ async function readPersistedAgentBrowserResult(
 
 function registerPipelineProvider(
 	modelRuntime: ModelRuntime,
-	toolArguments: ToolCall["arguments"],
-	priorCalls?: ToolCall[],
+	toolArguments: Readonly<ToolCall["arguments"]>,
+	priorCalls?: readonly ToolCall[],
 	toolName?: string,
 	discoveryStream?: ReturnType<typeof createToolCallingStream>,
-): Model<any> {
+): Model<Api> {
 	modelRuntime.registerProvider(PIPELINE_PROVIDER, {
 		api: "openai-completions",
 		apiKey: "piab-pipeline-key",
@@ -268,13 +302,13 @@ function registerPipelineProvider(
 }
 
 async function runPipelinePrompt(options: {
-	fakeScript: string;
-	discoveryStream?: ReturnType<typeof createToolCallingStream>;
-	toolArguments: ToolCall["arguments"];
-	toolName?: string;
-	extensionFactory?: ExtensionFactory;
-	priorCalls?: ToolCall[];
-	runPrompt?: (session: AgentSession) => Promise<void>;
+	readonly fakeScript: string;
+	readonly discoveryStream?: ReturnType<typeof createToolCallingStream>;
+	readonly toolArguments: Readonly<ToolCall["arguments"]>;
+	readonly toolName?: string;
+	readonly extensionFactory?: ExtensionFactory;
+	readonly priorCalls?: readonly ToolCall[];
+	readonly runPrompt?: (session: AgentSession) => Promise<void>;
 }): Promise<PipelinePromptResult> {
 	const tempDir = await mkdtemp(join(tmpdir(), "pi-agent-browser-pipeline-"));
 	// Keep real Pi transcripts outside the disposable executable/workspace fixture.
@@ -309,9 +343,11 @@ async function runPipelinePrompt(options: {
 				if (
 					options.discoveryStream &&
 					"instructionGroupsExtension" in Pi &&
-					typeof Pi.instructionGroupsExtension === "function"
+					typeof nativeInstructionGroups === "function"
 				) {
-					instructionGroups.push(Pi.instructionGroupsExtension as ExtensionFactory);
+					instructionGroups.push(async (api) => {
+						await Reflect.apply(nativeInstructionGroups, undefined, [api]);
+					});
 				}
 				const resourceLoader = new DefaultResourceLoader({
 					agentDir: tempDir,
@@ -366,11 +402,18 @@ async function runPipelinePrompt(options: {
 					} else {
 						await session.prompt("Use agent_browser once.");
 					}
-					const inMemoryResult = session.messages.find(isAgentBrowserToolResult);
+					const inMemoryMessage = session.messages.find(isAgentBrowserToolResult);
+					const inMemoryResult =
+						inMemoryMessage === undefined ? undefined : readPipelineToolResult(inMemoryMessage);
 					assert.ok(
 						inMemoryResult,
 						`agent_browser tool result should be recorded by Pi: ${session.messages
-							.filter((message) => message.role === "assistant" && message.errorMessage)
+							.filter(
+								(message) =>
+									message.role === "assistant" &&
+									message.errorMessage !== undefined &&
+									message.errorMessage !== "",
+							)
 							.map((message) => (message.role === "assistant" ? message.errorMessage : ""))
 							.join("; ")}`,
 					);
@@ -397,7 +440,7 @@ for (const webSearch of ["absent", "startup", "late"] as const) {
 		{ skip: !NATIVE_DISCOVERY_ENABLED },
 		async () => {
 			assert.ok(
-				"instructionGroupsExtension" in Pi && typeof Pi.instructionGroupsExtension === "function",
+				"instructionGroupsExtension" in Pi && typeof nativeInstructionGroups === "function",
 				"candidate must export its public instruction groups factory",
 			);
 			let hookCalls = 0;
@@ -437,7 +480,11 @@ for (const webSearch of ["absent", "startup", "late"] as const) {
 							const names = getCurrentTools(context.messages).map((tool) => tool.name);
 							const prompt = getCurrentSystemPrompt(context.messages);
 							if (requests === 1) {
+								// Final request-count checks require this first discovery-only phase.
+								// oxlint-disable-next-line node-test/no-conditional-assertion
 								assert.deepEqual(names, ["discover_tools"]);
+								// This required first phase must not eagerly include browser instructions.
+								// oxlint-disable-next-line node-test/no-conditional-assertion
 								assert.ok(!prompt.includes(PROJECT_RULE_PROMPT));
 								return createToolCallingStream(
 									{ enable: ["browser"] },
@@ -468,6 +515,8 @@ for (const webSearch of ["absent", "startup", "late"] as const) {
 								...SHARED_BROWSER_PLAYBOOK_GUIDELINES,
 								...Object.values(ADVANCED_TOOL_PROMPT_GUIDELINES).flat(),
 							]) {
+								// Every guideline in the complete fixed inventory must reach the model.
+								// oxlint-disable-next-line node-test/no-conditional-assertion
 								assert.ok(instructions.includes(guideline), guideline);
 							}
 							assert.ok(names.includes("agent_browser"));
@@ -480,6 +529,8 @@ for (const webSearch of ["absent", "startup", "late"] as const) {
 							);
 							assert.equal(hookCalls, 1, "activation must not rerun before_agent_start");
 							if (requests === 2) {
+								// Final request counts require this post-discovery/pre-execution phase.
+								// oxlint-disable-next-line node-test/no-conditional-assertion
 								assert.equal(executionCalls, 0, "instructions precede first execution");
 							}
 							return createToolCallingStream({ args: ["--help"] })(model, context, options);
@@ -506,7 +557,7 @@ test(
 	{ skip: !NATIVE_DISCOVERY_ENABLED },
 	async () => {
 		assert.ok(
-			"instructionGroupsExtension" in Pi && typeof Pi.instructionGroupsExtension === "function",
+			"instructionGroupsExtension" in Pi && typeof nativeInstructionGroups === "function",
 			"candidate must export its public instruction groups factory",
 		);
 		let requests = 0;
@@ -534,6 +585,7 @@ test(
 				}
 				const result = context.messages
 					.filter(isAgentBrowserToolResult)
+					.map(readPipelineToolResult)
 					.find((message) => message.toolName === "agent_browser");
 				assert.equal(result?.isError, true);
 				assert.match(JSON.stringify(result), /prior turn/);
@@ -566,7 +618,7 @@ test("Pi pipeline captures the owner cwd before an awaited browser policy withou
 			});
 			pi.events.on("pi-change-working-dir:resolve-execution-cwd", (request) => {
 				resolutions++;
-				Object.assign(request as object, { result: { cwd: selected } });
+				Object.assign(readRecord(request), { result: { cwd: selected } });
 			});
 			agentBrowserExtension(pi, {
 				async beforeExecute(_id, ctx) {
@@ -593,8 +645,12 @@ process.stdout.write(JSON.stringify({ success: true, data }));`,
 		false,
 		JSON.stringify(pipeline.persistedResult.content),
 	);
-	const details = pipeline.persistedResult.details as { outputFile: { absolutePath: string } };
-	assert.ok(details.outputFile.absolutePath.endsWith(join("operation", "receipt.json")));
+	const details = readRecord(pipeline.persistedResult.details);
+	assert.ok(
+		readString(readRecord(details.outputFile).absolutePath).endsWith(
+			join("operation", "receipt.json"),
+		),
+	);
 });
 
 test("Pi pipeline awaits beforeExecute after earlier sibling writes and before browser effects", async () => {
@@ -661,6 +717,8 @@ test("Pi pipeline captures code-created files before the next inner dispatch usi
 					signals.push(ctx.signal);
 					if (capturedIds.length === 2) {
 						const report = await readFile(join(ctx.cwd, "report.txt"), "utf8");
+						// Final captured-ID checks require both hooks; the second must see the download.
+						// oxlint-disable-next-line node-test/no-conditional-assertion
 						assert.equal(report, "downloaded report");
 						await writeFile(join(ctx.cwd, "captured-report.txt"), report);
 					}
@@ -680,9 +738,9 @@ process.stdout.write(JSON.stringify({ success: true, data: { path: "report.txt",
 		false,
 		JSON.stringify(pipeline.inMemoryResult.content),
 	);
-	const details = pipeline.persistedResult.details as { data: Array<{ success: boolean }> };
+	const details = readRecord(pipeline.persistedResult.details);
 	assert.deepEqual(
-		details.data.map((result) => result.success),
+		readArray(details.data).map((result) => readRecord(result).success),
 		[true, true],
 	);
 	assert.equal(pipeline.invocations.filter(({ args }) => args.includes("download")).length, 1);
@@ -696,8 +754,8 @@ for (const code of [false, true]) {
 		{ timeout: 15_000 },
 		async () => {
 			let notifyEntered!: () => void;
-			const entered = new Promise<void>((resolve) => {
-				notifyEntered = resolve;
+			const entered = new Promise<void>((resolveEntered) => {
+				notifyEntered = resolveEntered;
 			});
 			let hookSignal: AbortSignal | undefined;
 			const pipeline = await runPipelinePrompt({
@@ -774,7 +832,7 @@ test("Pi pipeline keeps unconfigured browser scheduling and ordinary execution u
 	assert.equal(pipeline.invocations.filter(({ args }) => args.includes("open")).length, 1);
 });
 
-test("Pi pipeline patches persisted QA reclassification failures to isError with model-visible prose", async () => {
+test("Pi pipeline patches persisted QA reclassification failures to isError with model-visible prose", async (t) => {
 	const pipeline = await runPipelinePrompt({
 		toolName: "agent_browser_qa",
 		toolArguments: {
@@ -803,129 +861,166 @@ const results = steps.map((step) => {
 process.stdout.write(JSON.stringify(results));`,
 	});
 
-	for (const result of [pipeline.inMemoryResult, pipeline.persistedResult]) {
-		assert.equal(result.isError, true);
-		assert.equal(
-			(result.details as { failureCategory?: string; resultCategory?: string } | undefined)
-				?.resultCategory,
-			"failure",
-		);
-		assert.equal(
-			(result.details as { failureCategory?: string } | undefined)?.failureCategory,
-			"qa-failure",
-		);
-		const text = result.content.find((item) => item.type === "text")?.text ?? "";
-		assert.match(
-			text,
-			/Result category: failure; failureCategory: qa-failure; Pi tool isError: true\./,
-		);
+	for (const [surface, result] of Object.entries({
+		"in-memory": pipeline.inMemoryResult,
+		persisted: pipeline.persistedResult,
+	})) {
+		// Own the independently reported live and persisted result contracts before ending this scenario.
+		// oxlint-disable-next-line no-await-in-loop
+		await t.test(surface, () => {
+			assert.equal(result.isError, true);
+			assert.equal(readRecord(result.details).resultCategory, "failure");
+			assert.equal(readRecord(result.details).failureCategory, "qa-failure");
+			const text = result.content.find((item) => item.type === "text")?.text ?? "";
+			assert.match(
+				text,
+				/Result category: failure; failureCategory: qa-failure; Pi tool isError: true\./,
+			);
+		});
 	}
 	assert.match(pipeline.sessionFile, /\.jsonl$/);
 });
 
-test("Pi pipeline persists covered-click recovery without retrying the blocked action", async () => {
+test("Pi pipeline persists covered-click recovery without retrying the blocked action", async (t) => {
 	const error =
 		"Element '#continue' is covered by <div role=dialog> at its click point, so the input would land on that element instead.";
 	for (const originalError of [error, undefined, null, "  "]) {
-		const json = originalError !== error;
-		const pipeline = await withPatchedEnv({ AGENT_BROWSER_NAMESPACE: "ambient" }, () =>
-			runPipelinePrompt({
-				toolArguments: {
-					args: [
-						"--namespace",
-						"",
-						"--session",
-						"overlay-recovery",
-						...(json ? ["--json", "find", "nth", "0", "#continue"] : ["click", "#continue"]),
-					],
-				},
-				fakeScript: `const args = process.argv.slice(2);
+		// Each model-free session owns separate fixtures; finish it before changing the global environment.
+		// oxlint-disable-next-line no-await-in-loop
+		await t.test(
+			originalError === undefined ? "undefined error" : JSON.stringify(originalError),
+			async (scenarioContext) => {
+				const json = originalError !== error;
+				const pipeline = await withPatchedEnv({ AGENT_BROWSER_NAMESPACE: "ambient" }, () =>
+					runPipelinePrompt({
+						toolArguments: {
+							args: [
+								"--namespace",
+								"",
+								"--session",
+								"overlay-recovery",
+								...(json ? ["--json", "find", "nth", "0", "#continue"] : ["click", "#continue"]),
+							],
+						},
+						fakeScript: `const args = process.argv.slice(2);
 if (args.includes("click") || args.includes("find")) {
   process.stdout.write(JSON.stringify(${JSON.stringify({ success: false, error: originalError, ...(json ? { data: { error } } : {}) })}));
   process.exitCode = 1;
 } else {
   process.stdout.write(JSON.stringify({ success: true, data: { url: "https://overlay.example.test/", title: "Overlay fixture" } }));
 }`,
-			}),
-		);
+					}),
+				);
 
-		for (const result of [pipeline.inMemoryResult, pipeline.persistedResult]) {
-			assert.equal(result.isError, true);
-			const details = result.details as {
-				failureCategory?: string;
-				nextActions?: Array<{ id: string; params?: { args?: string[] }; safety?: string }>;
-			};
-			assert.equal(details.failureCategory, "upstream-error");
-			assert.deepEqual(
-				details.nextActions?.map((action) => action.id),
-				["inspect-overlay-state"],
-			);
-			assert.deepEqual(details.nextActions?.[0]?.params?.args, [
-				"--namespace",
-				"",
-				"--session",
-				"overlay-recovery",
-				"snapshot",
-				"-i",
-			]);
-			const text = result.content.find((item) => item.type === "text")?.text ?? "";
-			if (json) {
-				const visible = JSON.parse(text);
-				assert.equal(visible.success, false);
-				assert.equal(visible.resultCategory, "failure");
-				assert.equal(visible.failureCategory, "upstream-error");
-				assert.equal(visible.error, error);
-				assert.deepEqual(visible.data, { error });
-				assert.deepEqual(visible.nextActions, details.nextActions);
-			} else {
-				assert.match(text, /inspect-overlay-state/);
-			}
-			assert.match(details.nextActions?.[0]?.safety ?? "", /do not blindly retry/i);
-		}
-		assert.equal(
-			pipeline.invocations.filter(({ args }) => args.includes("click") || args.includes("find"))
-				.length,
-			1,
+				for (const [surface, result] of Object.entries({
+					"in-memory": pipeline.inMemoryResult,
+					persisted: pipeline.persistedResult,
+				})) {
+					// Own the independently reported live and persisted result contracts before ending this scenario.
+					// oxlint-disable-next-line no-await-in-loop
+					await scenarioContext.test(surface, () => {
+						assert.equal(result.isError, true);
+						const details = readRecord(result.details);
+						const nextActions = readArray(details.nextActions).map(readRecord);
+						assert.equal(details.failureCategory, "upstream-error");
+						assert.deepEqual(
+							nextActions.map((action) => action.id),
+							["inspect-overlay-state"],
+						);
+						assert.deepEqual(readRecord(nextActions[0].params).args, [
+							"--namespace",
+							"",
+							"--session",
+							"overlay-recovery",
+							"snapshot",
+							"-i",
+						]);
+						const text = result.content.find((item) => item.type === "text")?.text ?? "";
+						if (json) {
+							const visible = readRecord(JSON.parse(text));
+							// The fixed JSON variant must retain its parseable native failure envelope.
+							// oxlint-disable-next-line node-test/no-conditional-assertion
+							assert.equal(visible.success, false);
+							// The JSON variant must retain the same failure category as its details.
+							// oxlint-disable-next-line node-test/no-conditional-assertion
+							assert.equal(visible.resultCategory, "failure");
+							// The JSON variant must retain the upstream failure classifier.
+							// oxlint-disable-next-line node-test/no-conditional-assertion
+							assert.equal(visible.failureCategory, "upstream-error");
+							// The JSON variant must retain the recovered upstream error.
+							// oxlint-disable-next-line node-test/no-conditional-assertion
+							assert.equal(visible.error, error);
+							// The JSON variant must retain its structured error payload.
+							// oxlint-disable-next-line node-test/no-conditional-assertion
+							assert.deepEqual(visible.data, { error });
+							// The JSON variant must expose the same executable recovery as its details.
+							// oxlint-disable-next-line node-test/no-conditional-assertion
+							assert.deepEqual(visible.nextActions, details.nextActions);
+						} else {
+							// The fixed prose variant must instead render the recovery identifier.
+							// oxlint-disable-next-line node-test/no-conditional-assertion
+							assert.match(text, /inspect-overlay-state/);
+						}
+						assert.match(readString(nextActions[0].safety), /do not blindly retry/i);
+					});
+				}
+				assert.equal(
+					pipeline.invocations.filter(({ args }) => args.includes("click") || args.includes("find"))
+						.length,
+					1,
+				);
+			},
 		);
 	}
 });
 
-test("Pi pipeline rejects unsupported public schema fields before spawning upstream", async () => {
+test("Pi pipeline rejects unsupported public schema fields before spawning upstream", async (t) => {
 	const pipeline = await runPipelinePrompt({
 		toolArguments: { args: ["get", "url"], unsupportedRootField: true },
 		fakeScript: `process.stdout.write(JSON.stringify({ success: true, data: "unexpected" }));`,
 	});
 
-	for (const result of [pipeline.inMemoryResult, pipeline.persistedResult]) {
-		assert.equal(result.isError, true);
-		const text = result.content.find((item) => item.type === "text")?.text ?? "";
-		assert.match(text, /unsupportedRootField|additional/i);
+	for (const [surface, result] of Object.entries({
+		"in-memory": pipeline.inMemoryResult,
+		persisted: pipeline.persistedResult,
+	})) {
+		// Own the independently reported live and persisted result contracts before ending this scenario.
+		// oxlint-disable-next-line no-await-in-loop
+		await t.test(surface, () => {
+			assert.equal(result.isError, true);
+			const text = result.content.find((item) => item.type === "text")?.text ?? "";
+			assert.match(text, /unsupportedRootField|additional/i);
+		});
 	}
 	assert.deepEqual(pipeline.invocations, []);
 });
 
-test("Pi pipeline preserves persisted parseable JSON content while patching isError", async () => {
+test("Pi pipeline preserves persisted parseable JSON content while patching isError", async (t) => {
 	const pipeline = await runPipelinePrompt({
 		toolArguments: { args: ["--json", "get", "url"] },
 		fakeScript: `process.stdout.write(JSON.stringify({ success: false, error: "json boom", data: { code: "boom" } }));`,
 	});
 
-	for (const result of [pipeline.inMemoryResult, pipeline.persistedResult]) {
-		assert.equal(result.isError, true);
-		assert.equal(
-			(result.details as { resultCategory?: string } | undefined)?.resultCategory,
-			"failure",
-		);
-		const text = result.content.find((item) => item.type === "text")?.text ?? "";
-		assert.doesNotMatch(text, /Pi tool isError/);
-		// summary is dropped when byte-identical to error so bounded observations do not double-count failure text.
-		assert.deepEqual(JSON.parse(text), {
-			error: "json boom",
-			data: { code: "boom" },
-			success: false,
-			resultCategory: "failure",
-			failureCategory: "upstream-error",
-			sessionName: (result.details as { sessionName: string }).sessionName,
+	for (const [surface, result] of Object.entries({
+		"in-memory": pipeline.inMemoryResult,
+		persisted: pipeline.persistedResult,
+	})) {
+		// Own the independently reported live and persisted result contracts before ending this scenario.
+		// oxlint-disable-next-line no-await-in-loop
+		await t.test(surface, () => {
+			assert.equal(result.isError, true);
+			assert.equal(readRecord(result.details).resultCategory, "failure");
+			const text = result.content.find((item) => item.type === "text")?.text ?? "";
+			assert.doesNotMatch(text, /Pi tool isError/);
+			// summary is dropped when byte-identical to error so bounded observations do not double-count failure text.
+			assert.deepEqual(JSON.parse(text), {
+				error: "json boom",
+				data: { code: "boom" },
+				success: false,
+				resultCategory: "failure",
+				failureCategory: "upstream-error",
+				sessionName: readRecord(result.details).sessionName,
+			});
 		});
 	}
 });

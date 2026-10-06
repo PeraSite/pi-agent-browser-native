@@ -84,31 +84,36 @@ const SNAPSHOT_CHROME_SECTION_PATTERNS = [
 ];
 
 export interface SnapshotLine extends SnapshotLineRefInfo {
-	depth: number;
-	headingLevel?: number;
-	index: number;
-	name: string;
-	raw: string;
-	ref?: string;
-	role: string;
+	readonly depth: number;
+	readonly headingLevel?: number;
+	readonly index: number;
+	readonly name: string;
+	readonly raw: string;
+	readonly ref?: string;
+	readonly role: string;
 }
 
 export interface SnapshotSegment {
-	endIndexExclusive: number;
-	lines: SnapshotLine[];
-	root: SnapshotLine;
-	score: number;
-	startIndex: number;
+	readonly endIndexExclusive: number;
+	readonly lines: readonly SnapshotLine[];
+	readonly root: SnapshotLine;
+	readonly score: number;
+	readonly startIndex: number;
 }
 
 export interface SnapshotPreview {
-	omittedCount: number;
-	refIds: string[];
-	lines: string[];
+	readonly omittedCount: number;
+	readonly refIds: readonly string[];
+	readonly lines: readonly string[];
 }
 
 export function getSnapshotRolePriority(role: string): number {
 	return SNAPSHOT_ROLE_PRIORITY[role] ?? 50;
+}
+
+function parseSnapshotHeadingLevel(text: string): number | undefined {
+	const level = text.match(/\blevel=(\d+)/)?.[1];
+	return level !== undefined && level.length > 0 ? Number(level) : undefined;
 }
 
 export function parseSnapshotLines(snapshot: string): SnapshotLine[] {
@@ -117,14 +122,13 @@ export function parseSnapshotLines(snapshot: string): SnapshotLine[] {
 		.filter((line) => line.length > 0)
 		.map((raw, index) => {
 			const trimmed = raw.trimStart();
-			const depth = Math.floor(((raw.match(/^\s*/) ?? [""])[0].length ?? 0) / 2);
+			const depth = Math.floor((raw.match(/^\s*/)?.[0].length ?? 0) / 2);
 			const role = trimmed.match(/^[-*]\s+([^\s"]+)/)?.[1] ?? "unknown";
 			const name = normalizeWhitespace(trimmed.match(/"([^"]*)"/)?.[1] ?? "");
 			const ref = trimmed.match(/\bref=([^,\]\s]+)/)?.[1];
-			const headingLevel = trimmed.match(/\blevel=(\d+)/)?.[1];
 			return {
 				depth,
-				headingLevel: headingLevel ? Number(headingLevel) : undefined,
+				headingLevel: parseSnapshotHeadingLevel(trimmed),
 				index,
 				name,
 				raw,
@@ -166,9 +170,28 @@ function isPotentialSegmentRootLine(line: SnapshotLine): boolean {
 	return true;
 }
 
+function getHeadingPriorityScore(level: number | undefined): number {
+	switch (level) {
+		case 1:
+			return 40;
+		case 2:
+			return 22;
+		case 3:
+			return 12;
+		case undefined:
+			return 0;
+		default:
+			return 0;
+	}
+}
+
 function scoreSegment(segment: SnapshotSegment): number {
 	const { root } = segment;
-	const distinctRefs = new Set(segment.lines.flatMap((line) => (line.ref ? [line.ref] : []))).size;
+	const distinctRefs = new Set(
+		segment.lines.flatMap((line) =>
+			line.ref !== undefined && line.ref.length > 0 ? [line.ref] : [],
+		),
+	).size;
 	let score = 0;
 
 	score += 120 - getSnapshotRolePriority(root.role) * 8;
@@ -178,13 +201,7 @@ function scoreSegment(segment: SnapshotSegment): number {
 	score -= root.depth * 6;
 
 	if (root.role === "heading") {
-		if (root.headingLevel === 1) {
-			score += 40;
-		} else if (root.headingLevel === 2) {
-			score += 22;
-		} else if (root.headingLevel === 3) {
-			score += 12;
-		}
+		score += getHeadingPriorityScore(root.headingLevel);
 	}
 	if (root.name.length > 0) {
 		score += 10;
@@ -201,29 +218,32 @@ function scoreSegment(segment: SnapshotSegment): number {
 	return score;
 }
 
-export function buildSnapshotSegments(snapshotLines: SnapshotLine[]): SnapshotSegment[] {
+function hasDuplicateSegmentAncestor(line: SnapshotLine, stack: readonly SnapshotLine[]): boolean {
+	const name = normalizeWhitespace(line.name.toLowerCase());
+	if (name.length === 0) {
+		return false;
+	}
+	for (let index = stack.length - 1; index >= 0; index -= 1) {
+		const ancestor = stack.at(index);
+		if (
+			ancestor &&
+			normalizeWhitespace(ancestor.name.toLowerCase()) === name &&
+			SNAPSHOT_SEGMENT_ROOT_ROLES.has(ancestor.role)
+		) {
+			return true;
+		}
+	}
+	return false;
+}
+
+export function buildSnapshotSegments(snapshotLines: readonly SnapshotLine[]): SnapshotSegment[] {
 	const roots: SnapshotLine[] = [];
 	const stack: SnapshotLine[] = [];
 
 	for (const line of snapshotLines) {
 		stack.length = line.depth;
-		if (isPotentialSegmentRootLine(line)) {
-			const normalizedName = normalizeWhitespace(line.name.toLowerCase());
-			let duplicateAncestor: SnapshotLine | undefined;
-			for (let index = stack.length - 1; index >= 0; index -= 1) {
-				const ancestor = stack[index];
-				if (
-					normalizedName.length > 0 &&
-					normalizeWhitespace(ancestor.name.toLowerCase()) === normalizedName &&
-					SNAPSHOT_SEGMENT_ROOT_ROLES.has(ancestor.role)
-				) {
-					duplicateAncestor = ancestor;
-					break;
-				}
-			}
-			if (!duplicateAncestor) {
-				roots.push(line);
-			}
+		if (isPotentialSegmentRootLine(line) && !hasDuplicateSegmentAncestor(line, stack)) {
+			roots.push(line);
 		}
 		stack[line.depth] = line;
 	}
@@ -245,12 +265,13 @@ export function buildSnapshotSegments(snapshotLines: SnapshotLine[]): SnapshotSe
 			score: 0,
 			startIndex: root.index,
 		};
-		segment.score = scoreSegment(segment);
-		return segment;
+		return Object.assign({}, segment, { score: scoreSegment(segment) });
 	});
 }
 
-export function choosePrimarySegment(segments: SnapshotSegment[]): SnapshotSegment | undefined {
+export function choosePrimarySegment(
+	segments: readonly SnapshotSegment[],
+): SnapshotSegment | undefined {
 	if (segments.length === 0) {
 		return undefined;
 	}
@@ -260,14 +281,24 @@ export function choosePrimarySegment(segments: SnapshotSegment[]): SnapshotSegme
 			(segment) => segment.root.role === "heading" && segment.root.headingLevel === 1,
 		) ??
 		segments.find((segment) => segment.score >= 90) ??
-		[...segments].sort(
-			(left, right) => right.score - left.score || left.startIndex - right.startIndex,
-		)[0]
+		[...segments].sort((left, right) => {
+			const difference = right.score - left.score;
+			return difference !== 0 && !Number.isNaN(difference)
+				? difference
+				: left.startIndex - right.startIndex;
+		})[0]
+	);
+}
+
+function isChromePreviewSegment(segment: SnapshotSegment): boolean {
+	return (
+		isChromeSectionName(segment.root.name) ||
+		(segment.root.role === "heading" && segment.root.name.length <= 2)
 	);
 }
 
 export function chooseAdditionalSegments(
-	segments: SnapshotSegment[],
+	segments: readonly SnapshotSegment[],
 	primary: SnapshotSegment | undefined,
 ): SnapshotSegment[] {
 	if (!primary) {
@@ -294,18 +325,15 @@ export function chooseAdditionalSegments(
 		if (chosen.length >= SNAPSHOT_MAX_ADDITIONAL_SECTIONS) {
 			break;
 		}
-		if (isChromeSectionName(segment.root.name)) {
-			continue;
-		}
-		if (segment.root.role === "heading" && segment.root.name.length <= 2) {
+		if (isChromePreviewSegment(segment)) {
 			continue;
 		}
 		const nameKey = normalizeWhitespace(segment.root.name.toLowerCase());
-		if (nameKey && seenNames.has(nameKey)) {
+		if (nameKey.length > 0 && seenNames.has(nameKey)) {
 			continue;
 		}
 		chosen.push(segment);
-		if (nameKey) {
+		if (nameKey.length > 0) {
 			seenNames.add(nameKey);
 		}
 	}
@@ -318,7 +346,7 @@ export function getMeaningfulSegmentLines(segment: SnapshotSegment): SnapshotLin
 		if (isNoiseSnapshotLine(line)) {
 			return false;
 		}
-		if (line.role === "generic" && !line.ref && line.name.length === 0) {
+		if (line.role === "generic" && (line.ref ?? "") === "" && line.name.length === 0) {
 			return false;
 		}
 		if (line.role === "link" && line.name.length === 0) {
@@ -332,6 +360,18 @@ function formatPreviewLine(line: SnapshotLine, baseDepth: number): string {
 	const leadingWhitespace = (line.raw.match(/^\s*/) ?? [""])[0].length;
 	const stripChars = Math.min(leadingWhitespace, Math.max(0, baseDepth) * 2);
 	return truncateText(line.raw.slice(stripChars), SNAPSHOT_LINE_MAX_CHARS);
+}
+
+function isRedundantPreviewLine(line: SnapshotLine, root: SnapshotLine): boolean {
+	if (line === root) {
+		return false;
+	}
+	return (
+		(root.role !== "heading" && line.depth - root.depth > 2) ||
+		(root.name.length > 0 &&
+			line.name === root.name &&
+			(line.role === "heading" || line.role === "link"))
+	);
 }
 
 export function buildSegmentPreview(segment: SnapshotSegment, maxLines: number): SnapshotPreview {
@@ -349,18 +389,8 @@ export function buildSegmentPreview(segment: SnapshotSegment, maxLines: number):
 		if (previewLines.length >= maxLines) {
 			break;
 		}
-		if (line !== segment.root) {
-			const relativeDepth = line.depth - rootDepth;
-			if (segment.root.role !== "heading" && relativeDepth > 2) {
-				continue;
-			}
-			if (
-				segment.root.name.length > 0 &&
-				line.name === segment.root.name &&
-				(line.role === "heading" || line.role === "link")
-			) {
-				continue;
-			}
+		if (isRedundantPreviewLine(line, segment.root)) {
+			continue;
 		}
 
 		const key = `${line.role}:${line.name}:${line.ref ?? ""}:${line.depth}`;
@@ -369,7 +399,7 @@ export function buildSegmentPreview(segment: SnapshotSegment, maxLines: number):
 		}
 		seenPreviewKeys.add(key);
 		previewLines.push(line);
-		if (line.ref) {
+		if (line.ref !== undefined && line.ref.length > 0) {
 			previewRefIds.add(line.ref);
 		}
 	}
@@ -381,7 +411,15 @@ export function buildSegmentPreview(segment: SnapshotSegment, maxLines: number):
 	};
 }
 
-export function buildFallbackSnapshotOutline(snapshotLines: SnapshotLine[]): SnapshotPreview {
+function hasSnapshotSignal(line: SnapshotLine): boolean {
+	return (
+		SNAPSHOT_SIGNAL_ROLES.has(line.role) || (line.ref ?? "").length > 0 || line.name.length > 0
+	);
+}
+
+export function buildFallbackSnapshotOutline(
+	snapshotLines: readonly SnapshotLine[],
+): SnapshotPreview {
 	const selected = new Set<number>();
 	for (let index = 0; index < snapshotLines.length && selected.size < 4; index += 1) {
 		if (!isNoiseSnapshotLine(snapshotLines[index])) {
@@ -397,7 +435,7 @@ export function buildFallbackSnapshotOutline(snapshotLines: SnapshotLine[]): Sna
 		if (isNoiseSnapshotLine(line)) {
 			continue;
 		}
-		if (SNAPSHOT_SIGNAL_ROLES.has(line.role) || line.ref || line.name.length > 0) {
+		if (hasSnapshotSignal(line)) {
 			selected.add(index);
 		}
 	}
@@ -407,15 +445,17 @@ export function buildFallbackSnapshotOutline(snapshotLines: SnapshotLine[]): Sna
 		.map((index) => snapshotLines[index]);
 	return {
 		omittedCount: Math.max(0, snapshotLines.length - chosenLines.length),
-		refIds: chosenLines.flatMap((line) => (line.ref ? [line.ref] : [])),
+		refIds: chosenLines.flatMap((line) =>
+			line.ref !== undefined && line.ref.length > 0 ? [line.ref] : [],
+		),
 		lines: chosenLines.map((line) => truncateText(line.raw, SNAPSHOT_LINE_MAX_CHARS)),
 	};
 }
 
-export function buildRefLineOrderMap(snapshotLines: SnapshotLine[]): Map<string, number> {
+export function buildRefLineOrderMap(snapshotLines: readonly SnapshotLine[]): Map<string, number> {
 	const map = new Map<string, number>();
 	for (const line of snapshotLines) {
-		if (!line.ref || map.has(line.ref)) {
+		if (line.ref === undefined || line.ref.length === 0 || map.has(line.ref)) {
 			continue;
 		}
 		map.set(line.ref, line.index);
@@ -424,15 +464,19 @@ export function buildRefLineOrderMap(snapshotLines: SnapshotLine[]): Map<string,
 }
 
 export function canUseStructuredSnapshotPreview(
-	snapshotLines: SnapshotLine[],
-	refEntries: SnapshotRefEntry[],
+	snapshotLines: readonly SnapshotLine[],
+	refEntries: readonly SnapshotRefEntry[],
 ): boolean {
 	if (snapshotLines.length === 0) {
 		return false;
 	}
 	const linesWithRecognizedRoles = snapshotLines.filter((line) => line.role !== "unknown").length;
 	const linesWithNames = snapshotLines.filter((line) => line.name.length > 0).length;
-	const parsedRefIds = new Set(snapshotLines.flatMap((line) => (line.ref ? [line.ref] : [])));
+	const parsedRefIds = new Set(
+		snapshotLines.flatMap((line) =>
+			line.ref !== undefined && line.ref.length > 0 ? [line.ref] : [],
+		),
+	);
 	return (
 		linesWithRecognizedRoles >= Math.min(snapshotLines.length, 3) ||
 		linesWithNames >= Math.min(snapshotLines.length, 3) ||

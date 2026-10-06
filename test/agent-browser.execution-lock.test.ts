@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readRecord, readString, readArray } from "./helpers/assertions.js";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
@@ -18,15 +19,19 @@ import { resolveAgentBrowserSocketDir } from "../extensions/agent-browser/lib/pr
 import { withAgentBrowserProcessEnvironment } from "../extensions/agent-browser/lib/process-environment.js";
 
 type WorkerOptions = {
-	identities?: Array<{ socketDir: string; namespace?: string; sessionName?: string }>;
-	socketDir: string;
-	namespace?: string;
-	sessionName?: string;
-	mode: string;
-	statePath?: string;
-	logPath?: string;
-	timeoutMs?: number;
-	ablate?: boolean;
+	readonly identities?: readonly {
+		readonly socketDir: string;
+		readonly namespace?: string;
+		readonly sessionName?: string;
+	}[];
+	readonly socketDir: string;
+	readonly namespace?: string;
+	readonly sessionName?: string;
+	readonly mode: string;
+	readonly statePath?: string;
+	readonly logPath?: string;
+	readonly timeoutMs?: number;
+	readonly ablate?: boolean;
 };
 const workerCleanups = new WeakMap<TestContext, Array<() => Promise<void>>>();
 function worker(t: TestContext, options: WorkerOptions) {
@@ -42,11 +47,14 @@ function worker(t: TestContext, options: WorkerOptions) {
 	);
 	const messages: Array<{ event: string; data?: unknown }> = [];
 	let stderr = "";
-	child.stderr!.on("data", (chunk) => {
-		stderr += chunk;
+	assert.ok(child.stderr);
+	child.stderr.on("data", (chunk: unknown) => {
+		assert.ok(Buffer.isBuffer(chunk));
+		stderr += chunk.toString("utf8");
 	});
 	child.on("message", (message) => {
-		messages.push(message as (typeof messages)[number]);
+		const record = readRecord(message);
+		messages.push({ event: readString(record.event), data: record.data });
 	});
 	const exit = once(child, "exit");
 	const identities = Promise.all(
@@ -66,8 +74,12 @@ function worker(t: TestContext, options: WorkerOptions) {
 		await exit;
 		for (const identity of await identities) {
 			const base = getBrowserExecutionLockPath(identity);
+			// Task-owned claim cleanup must finish before the next identity's cleanup.
+			// oxlint-disable-next-line no-await-in-loop
 			for (const name of await readdir(dirname(base))) {
 				if (name.startsWith(`${basename(base)}.claim-`)) {
+					// Task-owned native claims must be removed before fixture teardown.
+					// oxlint-disable-next-line no-await-in-loop
 					await rm(join(dirname(base), name), { recursive: true, force: true });
 				}
 			}
@@ -84,18 +96,24 @@ function worker(t: TestContext, options: WorkerOptions) {
 				() => messages.some((message) => message.event === event),
 				() => `waiting for ${event}: ${JSON.stringify(messages)} ${stderr}`,
 			);
-			return messages.find((message) => message.event === event)!;
+			const found = messages.find((message) => message.event === event);
+			assert.ok(found);
+			return found;
 		},
 		async done() {
-			const [code] = await exit;
+			const [code] = readArray(await exit);
 			assert.equal(code, 0, stderr);
 		},
 	};
 }
 async function until(check: () => boolean | Promise<boolean>, diagnostic: () => string) {
 	const deadline = Date.now() + 15_000;
+	// Poll completion before each deadline-limited retry.
+	// oxlint-disable-next-line no-await-in-loop
 	while (!(await check())) {
 		assert.ok(Date.now() < deadline, diagnostic());
+		// The next poll must wait for its bounded retry delay.
+		// oxlint-disable-next-line no-await-in-loop
 		await delay(10);
 	}
 }
@@ -117,6 +135,8 @@ async function fixture(t: TestContext) {
 		// Reap every worker before removing fixtures or abandoned claims.
 		await Promise.all(cleanups.map((cleanup) => cleanup()));
 		for (const name of await claims()) {
+			// Remove task-owned claims after all child cleanup has completed.
+			// oxlint-disable-next-line no-await-in-loop
 			await rm(join(dirname(base), name), { force: true, recursive: true });
 		}
 		await rm(root, { recursive: true, force: true });
@@ -210,6 +230,8 @@ for (const ablate of [true, false]) {
 					async () => (await f.claims()).length === 2,
 					() => "B never published its waiting claim",
 				);
+				// The lock-enabled control checks blocked navigation before releasing the gate.
+				// oxlint-disable-next-line node-test/no-conditional-assertion
 				assert.ok(!b.messages.some((message) => message.event === "navigated"));
 			}
 			a.send("release");
@@ -239,11 +261,15 @@ test(
 			const second = await fixture(t);
 			const c = worker(t, second.options);
 			await c.event("acquired");
+			// These native claim-file counts apply to the POSIX lock transport.
+			// oxlint-disable-next-line node-test/no-conditional-assertion
 			assert.equal(
 				(await second.claims()).length,
 				1,
 				"C must hold its claim on the second socket root",
 			);
+			// The same POSIX control must leave both first-root claims present.
+			// oxlint-disable-next-line node-test/no-conditional-assertion
 			assert.equal(
 				(await f.claims()).length,
 				2,
@@ -358,7 +384,7 @@ test(
 			() => "first context was not acquired",
 		);
 		waiting.send("abort");
-		assert.equal(((await waiting.event("failed")).data as { name: string }).name, "AbortError");
+		assert.equal(readRecord((await waiting.event("failed")).data).name, "AbortError");
 		await waiting.done();
 		assert.deepEqual(await f.claims(), []);
 		const next = worker(t, f.options);
@@ -384,10 +410,10 @@ test(
 			() => "waiter claim missing",
 		);
 		waiter.send("abort");
-		assert.equal(((await waiter.event("failed")).data as { name: string }).name, "AbortError");
+		assert.equal(readRecord((await waiter.event("failed")).data).name, "AbortError");
 		await waiter.done();
 		const expired = worker(t, { ...f.options, timeoutMs: 100 });
-		assert.equal(((await expired.event("failed")).data as { name: string }).name, "TimeoutError");
+		assert.equal(readRecord((await expired.event("failed")).data).name, "TimeoutError");
 		await expired.done();
 		assert.equal((await f.claims()).length, 1);
 		owner.send("abort");
@@ -450,13 +476,19 @@ test("nested siblings serialize, throws release, and scope upgrades or escaped c
 			await assert.rejects(
 				withBrowserExecutionLock(
 					{ ...options, identity: { socketContext: f.identity.socketContext } },
-					async () => undefined,
+					async () => {
+						// Admission is the tested operation; no lock work is needed.
+					},
 				),
 				/change or upgrade/,
 			);
 			// AsyncResource captures the scope like a deferred IPC callback would.
 			const { AsyncResource } = await import("node:async_hooks");
-			escaped = AsyncResource.bind(() => withBrowserExecutionLock(options, async () => undefined));
+			escaped = AsyncResource.bind(() =>
+				withBrowserExecutionLock(options, async () => {
+					// Escaped work is empty; admission itself must fail.
+				}),
+			);
 			throw new Error("callback failure");
 		}),
 		/callback failure/,
@@ -469,7 +501,9 @@ test("nested siblings serialize, throws release, and scope upgrades or escaped c
 			await withBrowserExecutionLock(options, async () => {
 				await withBrowserExecutionLock(
 					{ ...options, identity: { ...f.identity, sessionName: "two" } },
-					async () => undefined,
+					async () => {
+						// Admission is the tested operation; no lock work is needed.
+					},
 				);
 			});
 		},
@@ -484,8 +518,9 @@ test("nested siblings serialize, throws release, and scope upgrades or escaped c
 	const entered = new Promise<void>((resolve) => {
 		started = resolve;
 	});
+	let inner: Promise<void> | undefined;
 	const outer = withBrowserExecutionLock(options, async () => {
-		void withBrowserExecutionLock(options, async () => {
+		inner = withBrowserExecutionLock(options, async () => {
 			started();
 			await pending;
 		});
@@ -493,7 +528,8 @@ test("nested siblings serialize, throws release, and scope upgrades or escaped c
 	await entered;
 	assert.equal((await f.claims()).length, 1);
 	release();
-	await outer;
+	assert.ok(inner);
+	await Promise.all([outer, inner]);
 	await assert.rejects(
 		withBrowserExecutionLock(
 			{ ...options, identity: { ...f.identity, sessionName: "x".repeat(1_048_576) } },
@@ -545,6 +581,8 @@ test("execution identity shares process socket precedence and native namespace/p
 			namespace: f.namespace,
 			sessionName: "ONE",
 		});
+		// macOS /tmp aliases must resolve to the same native lock identity.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.deepEqual(tmpAlias, f.identity);
 	}
 });

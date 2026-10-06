@@ -25,11 +25,11 @@ export type AgentBrowserExecutor = ToolDefinition<TUnsafe<AgentBrowserExecutePar
 export type AgentBrowserCodeExecutor = ToolDefinition<TUnsafe<AgentBrowserCodeParams>>["execute"];
 
 export interface AgentBrowserToolSurfaceOptions {
-	execute: AgentBrowserExecutor;
-	executeCode: AgentBrowserCodeExecutor;
-	executionMode?: ToolDefinition["executionMode"];
-	renderCall?: ToolDefinition<typeof AGENT_BROWSER_PARAMS>["renderCall"];
-	renderResult?: ToolDefinition<TUnsafe<unknown>>["renderResult"];
+	readonly execute: AgentBrowserExecutor;
+	readonly executeCode: AgentBrowserCodeExecutor;
+	readonly executionMode?: ToolDefinition["executionMode"];
+	readonly renderCall?: ToolDefinition<typeof AGENT_BROWSER_PARAMS>["renderCall"];
+	readonly renderResult?: ToolDefinition<TUnsafe>["renderResult"];
 }
 
 export const AGENT_BROWSER_TOOL_INVENTORY = {
@@ -68,20 +68,16 @@ const advancedNames = new Set<string>(
 	Object.values(AGENT_BROWSER_TOOL_INVENTORY).map(({ name }) => name),
 );
 
-/** Register once; advanced calls adapt only their input shape and reuse the ordinary executor. */
-export function registerAgentBrowserToolSurface(
+const nativeOutput = {
+	namespace: AGENT_BROWSER_NAMESPACE,
+	outputSchema: AGENT_BROWSER_OUTPUT_SCHEMA,
+};
+
+function registerCoreTools(
 	pi: ExtensionAPI,
 	options: AgentBrowserToolSurfaceOptions,
+	execute: AgentBrowserExecutor,
 ): void {
-	const execute: AgentBrowserExecutor = async (id, params, signal, onUpdate, ctx) =>
-		finalizeAgentBrowserNativeResult(
-			await options.execute(id, params, signal, onUpdate, ctx),
-			params,
-		);
-	const nativeOutput = {
-		namespace: AGENT_BROWSER_NAMESPACE,
-		outputSchema: AGENT_BROWSER_OUTPUT_SCHEMA,
-	};
 	pi.registerTool({
 		name: "agent_browser",
 		...nativeOutput,
@@ -118,7 +114,13 @@ export function registerAgentBrowserToolSurface(
 		},
 		renderResult: options.renderResult,
 	});
+}
 
+function registerActionTool(
+	pi: ExtensionAPI,
+	options: AgentBrowserToolSurfaceOptions,
+	execute: AgentBrowserExecutor,
+): void {
 	pi.registerTool({
 		...AGENT_BROWSER_TOOL_INVENTORY.action,
 		...nativeOutput,
@@ -131,6 +133,13 @@ export function registerAgentBrowserToolSurface(
 			return execute(id, { semanticAction, outputPath, timeoutMs }, signal, onUpdate, ctx);
 		},
 	});
+}
+
+function registerQaTool(
+	pi: ExtensionAPI,
+	options: AgentBrowserToolSurfaceOptions,
+	execute: AgentBrowserExecutor,
+): void {
 	pi.registerTool({
 		...AGENT_BROWSER_TOOL_INVENTORY.qa,
 		...nativeOutput,
@@ -143,6 +152,13 @@ export function registerAgentBrowserToolSurface(
 			return execute(id, { qa, outputPath, timeoutMs, sessionMode }, signal, onUpdate, ctx);
 		},
 	});
+}
+
+function registerElectronTool(
+	pi: ExtensionAPI,
+	options: AgentBrowserToolSurfaceOptions,
+	execute: AgentBrowserExecutor,
+): void {
 	pi.registerTool({
 		...AGENT_BROWSER_TOOL_INVENTORY.electron,
 		...nativeOutput,
@@ -155,6 +171,13 @@ export function registerAgentBrowserToolSurface(
 			return execute(id, { electron, outputPath }, signal, onUpdate, ctx);
 		},
 	});
+}
+
+function registerSourceTools(
+	pi: ExtensionAPI,
+	options: AgentBrowserToolSurfaceOptions,
+	execute: AgentBrowserExecutor,
+): void {
 	pi.registerTool({
 		...AGENT_BROWSER_TOOL_INVENTORY.source,
 		...nativeOutput,
@@ -197,6 +220,16 @@ export function registerAgentBrowserToolSurface(
 			);
 		},
 	});
+}
+
+function toolStatus(available: boolean, active: boolean): string {
+	if (!available) {
+		return "unavailable in this Pi tool selection";
+	}
+	return active ? "active" : "inactive";
+}
+
+function registerToolLoader(pi: ExtensionAPI): void {
 	pi.registerTool({
 		name: "agent_browser_tools",
 		namespace: AGENT_BROWSER_NAMESPACE,
@@ -230,7 +263,8 @@ export function registerAgentBrowserToolSurface(
 			const current = new Set(pi.getActiveTools());
 			const inventory = Object.entries(AGENT_BROWSER_TOOL_INVENTORY).map(([key, tool]) => ({
 				key,
-				...tool,
+				name: tool.name,
+				description: tool.description,
 				available: available.has(tool.name),
 				active: current.has(tool.name),
 			}));
@@ -241,7 +275,7 @@ export function registerAgentBrowserToolSurface(
 						text: inventory
 							.map(
 								(tool) =>
-									`${tool.key}: ${tool.name} (${!tool.available ? "unavailable in this Pi tool selection" : tool.active ? "active" : "inactive"}) — ${tool.description}`,
+									`${tool.key}: ${tool.name} (${toolStatus(tool.available, tool.active)}) — ${tool.description}`,
 							)
 							.join("\n"),
 					},
@@ -251,17 +285,21 @@ export function registerAgentBrowserToolSurface(
 			};
 		},
 	});
+}
 
+function hasExplicitToolSelection(): boolean {
+	const argv = process.argv.slice(2);
+	const delimiter = argv.indexOf("--");
+	return (delimiter < 0 ? argv : argv.slice(0, delimiter)).some(
+		(arg) => arg === "--tools" || arg === "-t",
+	);
+}
+
+function registerAdvancedToolReplay(pi: ExtensionAPI): void {
 	pi.on("session_start", async (_event, ctx) => {
 		// ponytail: official 1.0 SDK supplies initialActiveToolNames on resume, bypassing
 		// native transcript restoration. Remove this additive fallback once the supported SDK restores it.
-		const argv = process.argv.slice(2);
-		const delimiter = argv.indexOf("--");
-		if (
-			(delimiter < 0 ? argv : argv.slice(0, delimiter)).some(
-				(arg) => arg === "--tools" || arg === "-t",
-			)
-		) {
+		if (hasExplicitToolSelection()) {
 			return;
 		}
 		// A host-filtered catalog is an explicit selection, not our default surface.
@@ -295,4 +333,23 @@ export function registerAgentBrowserToolSurface(
 			pi.setActiveTools([...active, ...added]);
 		}
 	});
+}
+
+/** Register once; adapters retain native execution, output, activation, and replay contracts. */
+export function registerAgentBrowserToolSurface(
+	pi: ExtensionAPI,
+	options: AgentBrowserToolSurfaceOptions,
+): void {
+	const execute: AgentBrowserExecutor = async (id, params, signal, onUpdate, ctx) =>
+		finalizeAgentBrowserNativeResult(
+			await options.execute(id, params, signal, onUpdate, ctx),
+			params,
+		);
+	registerCoreTools(pi, options, execute);
+	registerActionTool(pi, options, execute);
+	registerQaTool(pi, options, execute);
+	registerElectronTool(pi, options, execute);
+	registerSourceTools(pi, options, execute);
+	registerToolLoader(pi);
+	registerAdvancedToolReplay(pi);
 }

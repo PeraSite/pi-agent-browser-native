@@ -9,15 +9,19 @@ import {
 } from "./input-modes/lookups.js";
 import { compileAgentBrowserSemanticAction } from "./input-modes/semantic-action.js";
 import { isRecord } from "./parsing.js";
-import { redactInvocationArgs } from "./runtime.js";
+import { redactInvocationArgs } from "./runtime-redaction.js";
 import { isBooleanFlagEnabled } from "./argv-grammar.js";
 
 const TUI_INVOCATION_PREVIEW_MAX_CHARS = 160;
 const TUI_COLLAPSED_OUTPUT_MAX_LINES = 12;
 const ANSI_CONTROL_SEQUENCE_PATTERN =
+	// Strip terminal escape/control sequences from untrusted browser text, not printable content.
+	// oxlint-disable-next-line no-control-regex
 	/\x1B(?:\][^\x07\x1B\r\n\u2028\u2029]*(?:\x07|\x1B\\)|\[[0-?]*[ -/]*[@-~]|P[^\x1B\r\n\u2028\u2029]*(?:\x1B\\)|_[^\x1B\r\n\u2028\u2029]*(?:\x1B\\)|\^[^\x1B\r\n\u2028\u2029]*(?:\x1B\\)|[@-Z\\-_])/g;
 const JSON_TOKEN_PATTERN =
-	/"(?:\\.|[^"\\])*"(?=\s*:)|"(?:\\.|[^"\\])*"|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|true|false|null|[{}\[\],:]/g;
+	/"(?:\\.|[^"\\])*"(?=\s*:)|"(?:\\.|[^"\\])*"|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|true|false|null|[{}[\],:]/g;
+// Replace C0/C1 display controls so browser text cannot execute terminal controls.
+// oxlint-disable-next-line no-control-regex
 const UNSAFE_DISPLAY_CONTROL_PATTERN = /[\x00-\x08\x0B\x0C\x0E-\x1F\x7F\x80-\x9F]/g;
 const UNSAFE_DISPLAY_DIRECTIONAL_PATTERN = /[\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]/g;
 const UNSAFE_DISPLAY_ZERO_WIDTH_PATTERN = /[\u200B-\u200D\u2060\uFEFF]/g;
@@ -40,7 +44,7 @@ function replaceTabsForDisplay(value: string): string {
 	return value.replaceAll("\t", "    ");
 }
 
-function trimTrailingBlankLines(lines: string[]): string[] {
+function trimTrailingBlankLines(lines: readonly string[]): string[] {
 	let end = lines.length;
 	while (end > 0 && lines[end - 1].trim().length === 0) {
 		end -= 1;
@@ -61,24 +65,23 @@ function isJsonDocumentText(value: string): boolean {
 	}
 }
 
+function jsonTokenColor(token: string, remainder: string): Parameters<Theme["fg"]>[0] {
+	if (token.startsWith('"')) {
+		return /"\s*$/.test(token) && remainder.trimStart().startsWith(":")
+			? "syntaxVariable"
+			: "syntaxString";
+	}
+	return /^[{}[\],:]$/.test(token) ? "syntaxPunctuation" : "syntaxType";
+}
+
 function colorizeJsonLine(line: string, theme: Theme): string {
 	let output = "";
 	let cursor = 0;
 	for (const match of line.matchAll(JSON_TOKEN_PATTERN)) {
 		const token = match[0];
-		const index = match.index ?? 0;
+		const index = match.index;
 		output += line.slice(cursor, index);
-		const color = token.startsWith('"')
-			? /"\s*$/.test(token) &&
-				line
-					.slice(index + token.length)
-					.trimStart()
-					.startsWith(":")
-				? "syntaxVariable"
-				: "syntaxString"
-			: /^[{}\[\],:]$/.test(token)
-				? "syntaxPunctuation"
-				: "syntaxType";
+		const color = jsonTokenColor(token, line.slice(index + token.length));
 		output += theme.fg(color, token);
 		cursor = index + token.length;
 	}
@@ -129,37 +132,44 @@ function formatVisualTruncationNotice(
 	return truncateToWidth(notice, Math.max(0, width));
 }
 
-function getStructuredModeInvocation(input: Record<string, unknown>): {
-	mode?: string;
-	rawArgs: string[];
-	scriptSource?: string;
+function compiledArgs(result: {
+	readonly compiled?: { readonly args: readonly string[] };
+}): readonly string[] {
+	return result.compiled?.args ?? [];
+}
+
+function getStructuredModeInvocation(input: Readonly<Record<string, unknown>>): {
+	readonly mode?: string;
+	readonly rawArgs: readonly string[];
+	readonly scriptSource?: string;
 } {
 	if (typeof input.code === "string") {
 		return { mode: "code", rawArgs: [], scriptSource: input.code };
 	}
 	if (Array.isArray(input.args)) {
-		return { rawArgs: input.args.filter((value): value is string => typeof value === "string") };
+		return {
+			rawArgs: input.args.filter((value: unknown): value is string => typeof value === "string"),
+		};
 	}
 	if (input.semanticAction !== undefined) {
 		return {
 			mode: "semanticAction",
-			rawArgs: compileAgentBrowserSemanticAction(input.semanticAction).compiled?.args ?? [],
+			rawArgs: compiledArgs(compileAgentBrowserSemanticAction(input.semanticAction)),
 		};
 	}
 	if (input.qa !== undefined) {
-		return { mode: "qa", rawArgs: compileAgentBrowserQaPreset(input.qa).compiled?.args ?? [] };
+		return { mode: "qa", rawArgs: compiledArgs(compileAgentBrowserQaPreset(input.qa)) };
 	}
 	if (input.sourceLookup !== undefined) {
 		return {
 			mode: "sourceLookup",
-			rawArgs: compileAgentBrowserSourceLookup(input.sourceLookup).compiled?.args ?? [],
+			rawArgs: compiledArgs(compileAgentBrowserSourceLookup(input.sourceLookup)),
 		};
 	}
 	if (input.networkSourceLookup !== undefined) {
 		return {
 			mode: "networkSourceLookup",
-			rawArgs:
-				compileAgentBrowserNetworkSourceLookup(input.networkSourceLookup).compiled?.args ?? [],
+			rawArgs: compiledArgs(compileAgentBrowserNetworkSourceLookup(input.networkSourceLookup)),
 		};
 	}
 	if (input.electron !== undefined) {
@@ -172,7 +182,7 @@ function getStructuredModeInvocation(input: Record<string, unknown>): {
 	return { rawArgs: [] };
 }
 
-function formatInvocationPreview(rawArgs: string[]): string {
+function formatInvocationPreview(rawArgs: readonly string[]): string {
 	const redactedArgs = redactInvocationArgs(rawArgs);
 	const invocation = sanitizeDisplayText(redactedArgs.join(" ")).replace(/\s+/g, " ").trim();
 	return invocation.length > TUI_INVOCATION_PREVIEW_MAX_CHARS
@@ -191,6 +201,25 @@ function formatScriptSourceForDisplay(source: string, expanded: boolean): string
 		: preview;
 }
 
+function formatInvocationDetail(
+	mode: string | undefined,
+	preview: string,
+	expandedCode: boolean,
+	theme: Theme,
+): string {
+	let text = mode !== undefined && mode !== "code" ? ` ${theme.fg("accent", mode)}` : "";
+	if (mode !== undefined && expandedCode) {
+		return text + `\n${theme.fg("dim", "Source:")}\n${theme.fg("accent", preview)}`;
+	}
+	if (preview.length === 0) {
+		return text;
+	}
+	if (mode !== undefined) {
+		text += ` ${theme.fg("dim", "→")}`;
+	}
+	return text + ` ${theme.fg("accent", preview)}`;
+}
+
 export function formatAgentBrowserRenderCall(
 	args: unknown,
 	theme: Theme,
@@ -206,18 +235,12 @@ export function formatAgentBrowserRenderCall(
 		"toolTitle",
 		theme.bold(mode === "code" ? "agent_browser_code" : "agent_browser"),
 	);
-	if (mode) {
-		if (mode !== "code") {
-			text += ` ${theme.fg("accent", mode)}`;
-		}
-		if (scriptSource !== undefined && expanded) {
-			text += `\n${theme.fg("dim", "Source:")}\n${theme.fg("accent", invocationPreview)}`;
-		} else if (invocationPreview.length > 0) {
-			text += ` ${theme.fg("dim", "→")} ${theme.fg("accent", invocationPreview)}`;
-		}
-	} else if (invocationPreview.length > 0) {
-		text += ` ${theme.fg("accent", invocationPreview)}`;
-	}
+	text += formatInvocationDetail(
+		mode,
+		invocationPreview,
+		scriptSource !== undefined && expanded,
+		theme,
+	);
 	if (input.sessionMode === "fresh") {
 		text += theme.fg("dim", " sessionMode=fresh");
 	}
@@ -229,7 +252,7 @@ export function formatAgentBrowserRenderCall(
 
 function formatAgentBrowserRenderResult(
 	result: AgentToolResult<unknown>,
-	options: { expanded: boolean; isPartial: boolean },
+	options: { readonly expanded: boolean; readonly isPartial: boolean },
 	theme: Theme,
 	isError: boolean,
 ): string {
@@ -240,24 +263,23 @@ function formatAgentBrowserRenderResult(
 	const outputText = getPrimaryTextContent(result);
 	const failureCategoryNotice = formatModelVisibleFailureCategoryNotice(result.details);
 	const outputLines = colorizeToolOutputLines(outputText, theme, isError);
-	if (failureCategoryNotice && outputLines.length > 0) {
+	if (failureCategoryNotice !== undefined && outputLines.length > 0) {
 		outputLines.unshift(theme.fg("error", failureCategoryNotice), "");
 	}
 	if (outputLines.length === 0) {
-		const details = isRecord(result.details) ? result.details : undefined;
-		const rawSummary =
-			typeof details?.summary === "string"
-				? details.summary
-				: isError
-					? "agent-browser failed"
-					: "Done";
-		const sanitizedSummary = sanitizeDisplayText(rawSummary).trim();
-		const summary =
-			sanitizedSummary.length > 0 ? sanitizedSummary : isError ? "agent-browser failed" : "Done";
-		return isError ? theme.fg("error", summary) : theme.fg("success", summary);
+		return formatEmptyResultSummary(result.details, theme, isError);
 	}
 
 	return `\n${outputLines.join("\n")}`;
+}
+
+function formatEmptyResultSummary(details: unknown, theme: Theme, isError: boolean): string {
+	const fallback = isError ? "agent-browser failed" : "Done";
+	const rawSummary =
+		isRecord(details) && typeof details.summary === "string" ? details.summary : fallback;
+	const sanitizedSummary = sanitizeDisplayText(rawSummary).trim();
+	const summary = sanitizedSummary.length > 0 ? sanitizedSummary : fallback;
+	return isError ? theme.fg("error", summary) : theme.fg("success", summary);
 }
 
 function formatModelVisibleFailureCategoryNotice(details: unknown): string | undefined {
@@ -268,7 +290,7 @@ function formatModelVisibleFailureCategoryNotice(details: unknown): string | und
 		typeof details.failureCategory === "string" && details.failureCategory.length > 0
 			? details.failureCategory
 			: undefined;
-	return `Result category: failure${failureCategory ? `; failureCategory: ${failureCategory}` : ""}; Pi tool isError: true.`;
+	return `Result category: failure${failureCategory !== undefined ? `; failureCategory: ${failureCategory}` : ""}; Pi tool isError: true.`;
 }
 
 type AgentBrowserToolContent = AgentToolResult<unknown>["content"];
@@ -287,8 +309,8 @@ function agentBrowserToolResultRequestedJson(
 	);
 }
 
-function agentBrowserToolResultHasParseableJsonContent(content: AgentBrowserToolContent): boolean {
-	return content.some((item) => {
+function agentBrowserToolResultHasParseableJsonContent(result: AgentToolResult<unknown>): boolean {
+	return result.content.some((item) => {
 		if (item.type !== "text" || typeof item.text !== "string") {
 			return false;
 		}
@@ -306,9 +328,10 @@ function agentBrowserToolResultHasParseableJsonContent(content: AgentBrowserTool
 }
 
 function appendModelVisibleFailureCategoryNotice(
-	content: AgentBrowserToolContent,
+	result: AgentToolResult<unknown>,
 	notice: string,
 ): AgentBrowserToolContent | undefined {
+	const content = result.content;
 	const noticeContent: AgentBrowserToolContentItem = { type: "text", text: notice };
 	const textIndex = content.findIndex(
 		(item) => item.type === "text" && typeof item.text === "string",
@@ -324,9 +347,9 @@ function appendModelVisibleFailureCategoryNotice(
 	) {
 		return undefined;
 	}
-	return content.map((item, index) =>
-		index === textIndex ? { ...item, text: `${textItem.text}\n\n${notice}` } : item,
-	);
+	const updatedContent = [...content];
+	updatedContent[textIndex] = { ...textItem, text: `${textItem.text}\n\n${notice}` };
+	return updatedContent;
 }
 
 export function finalizeAgentBrowserFailure<T extends AgentToolResult<unknown>>(
@@ -338,13 +361,12 @@ export function finalizeAgentBrowserFailure<T extends AgentToolResult<unknown>>(
 		(isRecord(result.details) && result.details.resultCategory === "failure");
 	const preservesParseableJson =
 		((isRecord(input) && "code" in input) || agentBrowserToolResultRequestedJson(result, input)) &&
-		agentBrowserToolResultHasParseableJsonContent(result.content);
+		agentBrowserToolResultHasParseableJsonContent(result);
 	const notice = preservesParseableJson
 		? undefined
 		: formatModelVisibleFailureCategoryNotice(result.details);
-	const content = notice
-		? appendModelVisibleFailureCategoryNotice(result.content, notice)
-		: undefined;
+	const content =
+		notice !== undefined ? appendModelVisibleFailureCategoryNotice(result, notice) : undefined;
 	return {
 		...result,
 		content: content ?? result.content,
@@ -361,7 +383,7 @@ export class AgentBrowserResultComponent {
 
 	setResult(
 		result: AgentToolResult<unknown>,
-		options: { expanded: boolean; isPartial: boolean },
+		options: { readonly expanded: boolean; readonly isPartial: boolean },
 		theme: Theme,
 		isError: boolean,
 	): void {
@@ -376,9 +398,10 @@ export class AgentBrowserResultComponent {
 			isError,
 			theme,
 			theme.colors,
-			theme.fg,
+			Reflect.get(theme, "fg"),
 		];
-		if (!this.formatKey || key.some((value, index) => value !== this.formatKey![index])) {
+		const previousKey = this.formatKey;
+		if (!previousKey || key.some((value, index) => value !== previousKey[index])) {
 			this.formatKey = key;
 			this.setState(
 				formatAgentBrowserRenderResult(result, options, theme, isError),

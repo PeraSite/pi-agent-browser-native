@@ -117,6 +117,8 @@ test("buildPromptPolicy does not treat inbound media descriptions as requested o
 		"No need to save a screenshot at /tmp/input.png",
 		"Take this screenshot: /tmp/input.png",
 	]) {
+		// The nonempty prompt fixture matrix exhaustively verifies each case; any failed assertion fails the test.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.deepEqual(buildPromptPolicy(prompt).requestedArtifacts, []);
 	}
 });
@@ -440,6 +442,8 @@ test("buildPromptPolicy associates output intent with its path and rejects negat
 		"Take the screenshot at /tmp/baseline.png — tell me what is broken",
 		"Take the screenshot at /tmp/baseline.png (reference)",
 	]) {
+		// The nonempty prompt fixture matrix exhaustively verifies each case; any failed assertion fails the test.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.deepEqual(buildPromptPolicy(prompt).requestedArtifacts, []);
 	}
 	assert.deepEqual(

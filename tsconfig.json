@@ -1,6 +1,14 @@
 {
 	"compilerOptions": {
 		"target": "ES2022",
+		"lib": [
+			"ES2024",
+			"DOM",
+			"WebWorker.ImportScripts",
+			"ScriptHost",
+			"DOM.Iterable",
+			"DOM.AsyncIterable"
+		],
 		"module": "NodeNext",
 		"moduleResolution": "NodeNext",
 		"strict": true,
@@ -18,6 +26,9 @@
 		".pi/extensions/**/*.ts",
 		"extensions/**/*.ts",
 		"extensions/agent-browser/lib/config-policy.js",
+		"extensions/agent-browser/lib/config-providers.js",
+		"extensions/agent-browser/lib/config-validation.js",
+		"scripts/**/*.ts",
 		"test/**/*.ts"
 	]
 }

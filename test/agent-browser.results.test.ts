@@ -37,6 +37,7 @@ import {
 	extractCommandTokens,
 	validateToolArgs,
 } from "../extensions/agent-browser/lib/runtime.js";
+import { readRecord, readString } from "./helpers/assertions.js";
 
 const MISSING_SUCCESS_PARSE_ERROR =
 	"agent-browser returned an invalid JSON envelope: missing boolean success field.";
@@ -87,21 +88,21 @@ test("retirePendingRecordingManifestEntries retires only the closed session reco
 		retired.entries.map((entry) => entry.path),
 		["a.webm", "b.webm", "a.png"],
 	);
-	assert.equal(retired.entries[0]?.subcommand, "close-abandoned");
-	assert.equal(retired.entries[0]?.retentionState, "live");
-	assert.equal(retired.entries[0]?.status, "unverified");
+	assert.equal(retired.entries[0].subcommand, "close-abandoned");
+	assert.equal(retired.entries[0].retentionState, "live");
+	assert.equal(retired.entries[0].status, "unverified");
 	assert.equal(
-		retired.entries[0]?.exists,
+		retired.entries[0].exists,
 		undefined,
 		"retiring a reservation does not prove a file is missing",
 	);
 	assert.equal(
-		retired.entries[1]?.subcommand,
+		retired.entries[1].subcommand,
 		"restart",
 		"the other session's pending recording keeps its subcommand",
 	);
 	assert.equal(
-		retired.entries[1]?.status,
+		retired.entries[1].status,
 		undefined,
 		"the other session's pending recording gets no status change",
 	);
@@ -140,7 +141,7 @@ test("recording manifests keep namespace identities distinct on the same path", 
 		nowMs: 3,
 	});
 	assert.equal(manifest?.entries.length, 2);
-	const retired = retirePendingRecordingManifestEntries(manifest!, "shared", "one", 4);
+	const retired = retirePendingRecordingManifestEntries(manifest, "shared", "one", 4);
 	assert.equal(
 		retired.entries.find((entry) => entry.namespace === "one")?.subcommand,
 		"close-abandoned",
@@ -218,15 +219,15 @@ test("applyNamespaceToNextActions preserves namespaced follow-up context", () =>
 		"snapshot",
 		"-i",
 	]);
-	assert.deepEqual(namespaced?.[1]?.params, {
+	assert.deepEqual(namespaced[1].params, {
 		namespace: "review",
 		requestId: "req-1",
 		session: "work",
 	});
-	assert.deepEqual(namespaced?.[2]?.params, { action: "status", launchId: "l1" });
+	assert.deepEqual(namespaced[2].params, { action: "status", launchId: "l1" });
 	assert.deepEqual(
 		applyNamespaceToNextActions(namespaced, "review")?.[0]?.params?.args,
-		namespaced?.[0]?.params?.args,
+		namespaced[0].params.args,
 	);
 
 	const defaultNamespaced = applyNamespaceToNextActions(
@@ -254,14 +255,14 @@ test("applyNamespaceToNextActions preserves namespaced follow-up context", () =>
 		"snapshot",
 		"-i",
 	]);
-	assert.deepEqual(defaultNamespaced?.[1]?.params, {
+	assert.deepEqual(defaultNamespaced[1].params, {
 		namespace: "",
 		requestId: "req-1",
 		session: "work",
 	});
 	assert.deepEqual(
 		applyNamespaceToNextActions(defaultNamespaced, "")?.[0]?.params?.args,
-		defaultNamespaced?.[0]?.params?.args,
+		defaultNamespaced[0].params.args,
 	);
 });
 
@@ -291,7 +292,7 @@ test("applySessionToNextActions preserves session-scoped follow-up context", () 
 		"work",
 	);
 	assert.deepEqual(sessionScoped?.[0]?.params?.args, ["--session", "work", "snapshot", "-i"]);
-	assert.deepEqual(sessionScoped?.[1]?.params?.args, [
+	assert.deepEqual(sessionScoped[1].params?.args, [
 		"--namespace",
 		"review",
 		"--session",
@@ -299,17 +300,23 @@ test("applySessionToNextActions preserves session-scoped follow-up context", () 
 		"snapshot",
 		"-i",
 	]);
-	assert.deepEqual(sessionScoped?.[2]?.params, { requestId: "req-1" });
-	assert.deepEqual(sessionScoped?.[3]?.params, { action: "status", launchId: "l1" });
+	assert.deepEqual(sessionScoped[2].params, { requestId: "req-1" });
+	assert.deepEqual(sessionScoped[3].params, { action: "status", launchId: "l1" });
 	const repeated = applySessionToNextActions(sessionScoped, "work");
-	assert.deepEqual(repeated?.[0]?.params?.args, sessionScoped?.[0]?.params?.args);
-	assert.deepEqual(repeated?.[1]?.params?.args, sessionScoped?.[1]?.params?.args);
+	assert.deepEqual(repeated?.[0]?.params?.args, sessionScoped[0].params.args);
+	assert.deepEqual(repeated[1].params?.args, sessionScoped[1].params.args);
 });
 
 test("appendUniqueAgentBrowserNextActions preserves order and first-id wins", () => {
-	const action = (id: string, args?: string[], stdin?: string): AgentBrowserNextAction => ({
+	const action = (
+		id: string,
+		args?: readonly string[],
+		stdin?: string,
+	): AgentBrowserNextAction => ({
 		id,
-		params: args ? { args, ...(stdin ? { stdin } : {}) } : undefined,
+		params: args
+			? { args: [...args], ...(stdin !== undefined && stdin.length > 0 ? { stdin } : {}) }
+			: undefined,
 		reason: id,
 		tool: "agent_browser",
 	});
@@ -642,6 +649,8 @@ test("isOverlayBlockedClickError narrowly matches upstream covered-click failure
 
 test("buildAgentBrowserNextActions returns exact native-tool recommendations for common states", () => {
 	for (const command of ["open", "goto", "navigate"] as const) {
+		// The nonempty command fixture matrix exhaustively verifies each case; any failed assertion fails the test.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.deepEqual(
 			buildAgentBrowserNextActions({
 				command,
@@ -717,6 +726,9 @@ test("buildAgentBrowserNextActions returns exact native-tool recommendations for
 			{ args: ["open", "about:blank"], sessionMode: "fresh" },
 		],
 	);
+});
+
+test("buildAgentBrowserNextActions keeps failure inspection and scoped navigation recovery exact", () => {
 	assert.deepEqual(
 		buildAgentBrowserNextActions({
 			args: ["wait", "--text", "Done"],
@@ -780,7 +792,12 @@ test("buildAgentBrowserNextActions returns exact native-tool recommendations for
 		})?.[0]?.params?.args,
 		["--session", "named", "get", "url"],
 	);
+});
+
+test("buildAgentBrowserNextActions preserves mutation, confirmation and missing-tab follow-ups", () => {
 	for (const command of ["key", "keydown", "keyboard", "keyup", "scrollinto", "tap"] as const) {
+		// The nonempty command fixture matrix exhaustively verifies each case; any failed assertion fails the test.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.equal(
 			buildAgentBrowserNextActions({
 				command,
@@ -817,6 +834,9 @@ test("buildAgentBrowserNextActions returns exact native-tool recommendations for
 			{ id: AGENT_BROWSER_RECOVERY_NEXT_ACTION_IDS.tabGoneNewTab, args: ["tab", "new"] },
 		],
 	);
+});
+
+test("buildAgentBrowserNextActions keeps connected and restored tab target recovery exact", () => {
 	assert.deepEqual(
 		buildAgentBrowserNextActions({
 			recovery: { kind: "connected-session", sessionName: "named" },
@@ -932,6 +952,9 @@ test("buildAgentBrowserNextActions returns exact native-tool recommendations for
 			},
 		],
 	);
+});
+
+test("buildAgentBrowserNextActions retains tab drift and unverified download recovery", () => {
 	assert.deepEqual(
 		buildAgentBrowserNextActions({
 			failureCategory: "tab-drift",
@@ -982,6 +1005,9 @@ test("buildAgentBrowserNextActions returns exact native-tool recommendations for
 		})?.[0]?.params?.args,
 		["wait", "--download", "/tmp/export.csv"],
 	);
+});
+
+test("buildAgentBrowserNextActions preserves artifact and Electron lifecycle follow-ups", () => {
 	assert.equal(
 		buildAgentBrowserNextActions({
 			artifacts: [{ absolutePath: "/tmp/page.png", kind: "image", path: "/tmp/page.png" }],
@@ -1160,13 +1186,13 @@ test("buildToolPresentation renders stable tab ids from tab list output", async 
 		},
 	});
 
-	assert.equal(presentation.content[0]?.type, "text");
+	assert.equal(presentation.content[0].type, "text");
 	assert.match(
-		(presentation.content[0] as { text: string }).text,
+		readString(readRecord(presentation.content[0]).text),
 		/- \[t1\] label=chat target=4A0B7C4E1F2D3A4B5C6D7E8F90A1B2C3 ChatGPT — https:\/\/chatgpt\.com\//,
 	);
 	assert.match(
-		(presentation.content[0] as { text: string }).text,
+		readString(readRecord(presentation.content[0]).text),
 		/\* \[t2\] label=grok Grok — https:\/\/grok\.com\//,
 	);
 	assert.equal(presentation.summary, "Tabs: 2");
@@ -1184,34 +1210,38 @@ test("buildToolPresentation keeps covered clicks as upstream errors with inspect
 	});
 	assert.equal(extractedEnvelopeError, upstreamError);
 
-	for (const input of [
-		{ errorText: extractedEnvelopeError },
-		{ envelope: { data: upstreamError, success: false } },
-	] as const) {
-		const presentation = await buildToolPresentation({
-			commandInfo: { command: "click", subcommand: "@e1" },
-			cwd: process.cwd(),
-			sessionName: "work",
-			...input,
-		});
+	await Promise.all(
+		(
+			[
+				{ errorText: extractedEnvelopeError },
+				{ envelope: { data: upstreamError, success: false } },
+			] as const
+		).map(async (input) => {
+			const presentation = await buildToolPresentation({
+				commandInfo: { command: "click", subcommand: "@e1" },
+				cwd: process.cwd(),
+				sessionName: "work",
+				...input,
+			});
 
-		assert.equal(presentation.resultCategory, "failure");
-		assert.equal(presentation.failureCategory, "upstream-error");
-		assert.deepEqual(
-			presentation.nextActions?.map((action) => action.id),
-			["inspect-overlay-state"],
-		);
-		assert.deepEqual(presentation.nextActions?.[0]?.params?.args, [
-			"--session",
-			"work",
-			"snapshot",
-			"-i",
-		]);
-		assert.equal(
-			presentation.nextActions?.some((action) => action.params?.args?.includes("click")),
-			false,
-		);
-	}
+			assert.equal(presentation.resultCategory, "failure");
+			assert.equal(presentation.failureCategory, "upstream-error");
+			assert.deepEqual(
+				presentation.nextActions?.map((action) => action.id),
+				["inspect-overlay-state"],
+			);
+			assert.deepEqual(presentation.nextActions[0].params?.args, [
+				"--session",
+				"work",
+				"snapshot",
+				"-i",
+			]);
+			assert.equal(
+				presentation.nextActions.some((action) => action.params?.args?.includes("click") === true),
+				false,
+			);
+		}),
+	);
 });
 
 test("buildToolPresentation classifies tab_gone envelopes and recommends tab recovery", async () => {
@@ -1274,10 +1304,10 @@ test("parseAgentBrowserEnvelope accepts exact plugin list and show success envel
 
 	assert.equal(list.parseError, undefined);
 	assert.equal(list.envelope?.success, true);
-	assert.deepEqual(list.envelope?.data, { plugins: [] });
+	assert.deepEqual(list.envelope.data, { plugins: [] });
 	assert.equal(show.parseError, undefined);
 	assert.equal(show.envelope?.success, true);
-	assert.deepEqual(show.envelope?.data, {
+	assert.deepEqual(show.envelope.data, {
 		plugin: { capabilities: ["command.run"], name: "demo" },
 	});
 });
@@ -1318,7 +1348,7 @@ test("parseAgentBrowserEnvelope treats top-level success responses as data when 
 
 	assert.equal(parsed.parseError, undefined);
 	assert.equal(parsed.envelope?.success, true);
-	assert.deepEqual(parsed.envelope?.data, {
+	assert.deepEqual(parsed.envelope.data, {
 		checks: [{ message: "ok", status: "pass" }],
 		summary: { fail: 0, pass: 1 },
 	});
@@ -1368,7 +1398,11 @@ test("getAgentBrowserErrorText explains upstream IPC read timeouts", () => {
 			stderr: "",
 		});
 
+		// The nonempty upstreamError fixture matrix exhaustively verifies each case; any failed assertion fails the test.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.match(errorText ?? "", /30s IPC read timeout/);
+		// The nonempty upstreamError fixture matrix exhaustively verifies each case; any failed assertion fails the test.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.match(errorText ?? "", /daemon may still be alive/);
 	}
 });
@@ -1628,6 +1662,6 @@ test("buildQaCompactFailureText leads with the redacted cause and reports execut
 			warnings: [],
 		},
 	});
-	assert.ok(longCause.split("\n")[0]!.length <= 700);
+	assert.ok(longCause.split("\n")[0].length <= 700);
 	assert.match(longCause, /^Navigation failed: x/);
 });

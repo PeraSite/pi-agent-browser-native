@@ -10,7 +10,6 @@ import assert from "node:assert/strict";
 import { resolve } from "node:path";
 import test from "node:test";
 import { pathToFileURL } from "node:url";
-import { buildNpmShimExecOptions } from "../scripts/doctor.mjs";
 
 test("doctor exec options route npm global shims through a shell only on Windows", () => {
 	assert.deepEqual(buildNpmShimExecOptions("win32"), { shell: true });
@@ -20,50 +19,15 @@ test("doctor exec options route npm global shims through a shell only on Windows
 
 import { CAPABILITY_BASELINE } from "../scripts/agent-browser-capability-baseline.mjs";
 
-const doctorModulePath = "../scripts/doctor.mjs";
-const doctorModule = (await import(doctorModulePath)) as {
-	evaluateDoctor: (options?: {
-		agentDir?: string;
-		cwd?: string;
-		pathExists?: (path: string) => Promise<boolean>;
-		readText?: (path: string) => Promise<string | undefined>;
-		runAgentBrowser?: (args: string[]) => Promise<string>;
-		runPi?: (args: string[]) => Promise<string>;
-		settingsPaths?: string[];
-		skipSourceCheck?: boolean;
-	}) => Promise<{
-		checks: Array<{ status: string; title: string; lines?: string[] }>;
-		failures: unknown[];
-		warnings: string[];
-	}>;
-	formatDoctorReport: (report: {
-		checks: Array<{ status: string; title: string; lines?: string[] }>;
-		failures: unknown[];
-		warnings?: string[];
-	}) => string;
-	isDirectRun: (
-		metaUrl: string,
-		argv1?: string,
-		resolveRealPath?: (path: string) => string,
-	) => boolean;
-	normalizeAgentBrowserVersion: (output: string) => string;
-	normalizePiVersion: (output: string) => string;
-	parseCliArgs: (argv?: string[]) => {
-		agentDir?: string;
-		cwd?: string;
-		settingsPaths: string[];
-		showHelp: boolean;
-		skipSourceCheck: boolean;
-	};
-};
-const {
+import {
+	buildNpmShimExecOptions,
 	evaluateDoctor,
 	formatDoctorReport,
 	isDirectRun,
 	normalizeAgentBrowserVersion,
 	normalizePiVersion,
 	parseCliArgs,
-} = doctorModule;
+} from "../scripts/doctor.mjs";
 
 function passingVersion() {
 	return `agent-browser ${CAPABILITY_BASELINE.targetVersion}\n`;
@@ -107,17 +71,25 @@ test("doctor reports missing agent-browser with actionable install guidance", as
 
 test("doctor accepts the supported floor and newer stable versions", async () => {
 	for (const version of ["0.35.0", "0.35.2", "1.0.0"]) {
+		// Each injected version/source case completes and is asserted before the next begins.
+		// oxlint-disable-next-line no-await-in-loop
 		const report = await evaluateDoctorWithPi({
 			runAgentBrowser: async () => `agent-browser ${version}\n`,
 			skipSourceCheck: true,
 		});
 		const text = formatDoctorReport(report);
 
+		// All fixed version/source variants must pass; the loop has no result-based filtering.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.equal(report.failures.length, 0);
+		// Every supported-version fixture must report its exact detected version.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.match(
 			text,
 			new RegExp(`version meets supported floor: ${version.replaceAll(".", "\\.")}`),
 		);
+		// Every supported-version fixture still reports the current recommendation.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.match(text, new RegExp(`recommended ${CAPABILITY_BASELINE.targetVersion}`));
 	}
 });
@@ -186,8 +158,8 @@ test("doctor reports duplicate package and checkout sources with remediation", a
 	const report = await evaluateDoctorWithPi({
 		agentDir: "/agent",
 		cwd: "/repo",
-		pathExists: async (path) => settingsByPath.has(path),
-		readText: async (path) => settingsByPath.get(path),
+		pathExists: async (path: string) => settingsByPath.has(path),
+		readText: async (path: string) => settingsByPath.get(path),
 		runAgentBrowser: async () => passingVersion(),
 	});
 	const text = formatDoctorReport(report);
@@ -211,8 +183,8 @@ test("doctor passes the source check when exactly one configured source is activ
 	const report = await evaluateDoctorWithPi({
 		agentDir: "/agent",
 		cwd: "/repo",
-		pathExists: async (path) => settingsByPath.has(path),
-		readText: async (path) => settingsByPath.get(path),
+		pathExists: async (path: string) => settingsByPath.has(path),
+		readText: async (path: string) => settingsByPath.get(path),
 		runAgentBrowser: async () => passingVersion(),
 	});
 	const text = formatDoctorReport(report);
@@ -232,17 +204,25 @@ test("doctor resolves relative sources from their settings file directory", asyn
 		const settingsByPath = new Map([
 			[resolve("/home/user/.pi/agent/settings.json"), JSON.stringify({ [settingsKey]: [source] })],
 		]);
+		// Each injected version/source case completes and is asserted before the next begins.
+		// oxlint-disable-next-line no-await-in-loop
 		const report = await evaluateDoctorWithPi({
 			agentDir: "/home/user/.pi/agent",
 			cwd: "/home/user/Projects/AI/pi-agent-browser",
-			pathExists: async (path) => settingsByPath.has(path),
-			readText: async (path) => settingsByPath.get(path),
+			pathExists: async (path: string) => settingsByPath.has(path),
+			readText: async (path: string) => settingsByPath.get(path),
 			runAgentBrowser: async () => passingVersion(),
 		});
 		const text = formatDoctorReport(report);
 
+		// All fixed version/source variants must pass; the loop has no result-based filtering.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.equal(report.failures.length, 0);
+		// Each fixed relative source must resolve without creating duplicate installations.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.match(text, /No duplicate pi-agent-browser-native sources detected/);
+		// Each fixed relative-source variant must retain its configured spelling.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.ok(text.includes(`Detected source: ${source}`), source);
 	}
 });
@@ -273,15 +253,15 @@ test("doctor remains read-only through injected I/O", async () => {
 	const report = await evaluateDoctorWithPi({
 		agentDir: "/agent",
 		cwd: "/repo",
-		pathExists: async (path) => {
+		pathExists: async (path: string) => {
 			calls.push(`exists:${path}`);
 			return settingsByPath.has(path);
 		},
-		readText: async (path) => {
+		readText: async (path: string) => {
 			calls.push(`read:${path}`);
 			return settingsByPath.get(path);
 		},
-		runAgentBrowser: async (args) => {
+		runAgentBrowser: async (args: readonly string[]) => {
 			calls.push(`run:${args.join(" ")}`);
 			return passingVersion();
 		},

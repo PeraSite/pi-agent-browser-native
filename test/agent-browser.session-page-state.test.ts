@@ -29,11 +29,12 @@ import {
 	normalizeComparableUrl,
 	targetsMatch,
 } from "../extensions/agent-browser/lib/session-page-state.js";
+import { readString } from "./helpers/assertions.js";
 
-const restoreLegacyBranch = (entries: unknown[]) =>
-	SessionPageState.fromBranch(convertBrowserEntries(entries));
+const restoreLegacyBranch = (entries: readonly unknown[]) =>
+	SessionPageState.fromBranch(convertBrowserEntries([...entries]));
 
-function toolEntry(details: Record<string, unknown>, isError = false): unknown {
+function toolEntry(details: Readonly<Record<string, unknown>>, isError = false): unknown {
 	return {
 		type: "message",
 		message: {
@@ -225,8 +226,11 @@ test("SessionPageState.fromBranch restores tab targets, ref snapshots, invalidat
 	]);
 
 	const restoredSession = state.get("s1");
-	assert.ok(restoredSession.refSnapshot?.snapshotId);
-	const { snapshotId: _id, ...restoredSnapshot } = restoredSession.refSnapshot!;
+	assert.ok(
+		restoredSession.refSnapshot !== undefined &&
+			readString(restoredSession.refSnapshot.snapshotId).length > 0,
+	);
+	const { snapshotId: _id, ...restoredSnapshot } = restoredSession.refSnapshot;
 	assert.deepEqual(
 		{ ...restoredSession, refSnapshot: restoredSnapshot },
 		{
@@ -239,7 +243,7 @@ test("SessionPageState.fromBranch restores tab targets, ref snapshots, invalidat
 			tabTarget: { title: "Example", url: "https://example.com/page#current" },
 		},
 	);
-	assert.ok(restoredSession.refSnapshot);
+	assert.ok(Boolean(restoredSession.refSnapshot));
 	assert.equal(
 		targetsMatch(restoredSession.tabTarget, restoredSession.refSnapshot.target),
 		true,
@@ -281,6 +285,8 @@ test("SessionPageState.fromBranch clears restored page state on upstream close a
 			toolEntry({ command, sessionName: "s1" }),
 		]);
 
+		// The nonempty command fixture matrix exhaustively verifies each case; any failed assertion fails the test.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.deepEqual(
 			state.get("s1"),
 			{
@@ -524,6 +530,8 @@ test("SessionPageState rejects stale tab and ref updates after a newer token", (
 test("deriveSessionTabTarget discards stale targets after unobserved history navigation", () => {
 	const previousTarget = { url: "https://before.example/" };
 	for (const command of ["back", "connect", "forward", "reload"]) {
+		// The nonempty command fixture matrix exhaustively verifies each case; any failed assertion fails the test.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.equal(deriveSessionTabTarget({ command, data: {}, previousTarget }), undefined);
 	}
 	assert.equal(
@@ -595,7 +603,11 @@ test("batch targets discard reached failed transitions and accept later observat
 		["tab", "t2"],
 	]) {
 		const failed = { command, success: false, error: "navigation failed" };
+		// The nonempty command fixture matrix exhaustively verifies each case; any failed assertion fails the test.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.equal(extractSessionTabTargetFromBatchResults([before, failed]), undefined);
+		// The nonempty command fixture matrix exhaustively verifies each case; any failed assertion fails the test.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.deepEqual(
 			extractSessionTabTargetFromBatchResults([
 				before,
@@ -670,7 +682,7 @@ test("extractRefSnapshotFromData preserves editable evidence from snapshot text"
 		name: "Editor",
 		role: "textbox",
 	});
-	assert.deepEqual(snapshot?.refs?.e2, { isEditable: false, name: "Disabled", role: "generic" });
+	assert.deepEqual(snapshot.refs.e2, { isEditable: false, name: "Disabled", role: "generic" });
 });
 
 test("read fetch metadata does not replace the active browser tab target", () => {
@@ -840,7 +852,7 @@ test("extractLatestRefSnapshotStateFromBatchResults records empty snapshots and 
 		},
 	]);
 	assert.equal(webMcpInvalidation?.invalidation?.reason, "page-transition");
-	assert.match(webMcpInvalidation?.invalidation?.summary ?? "", /WebMCP/);
+	assert.match(webMcpInvalidation.invalidation.summary, /WebMCP/);
 	assert.equal(
 		extractLatestRefSnapshotStateFromBatchResults([
 			{

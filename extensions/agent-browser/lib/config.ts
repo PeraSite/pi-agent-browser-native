@@ -7,12 +7,10 @@ import {
 	getWebSearchProviderOrder,
 	loadAgentBrowserConfigStateSync,
 	resolveEnvInterpolations,
-} from "./config-policy.js";
-import type {
-	AgentBrowserConfigLoadOptions,
-	AgentBrowserConfigState,
-	CredentialSource,
-	WebSearchProvider,
+	type AgentBrowserConfigLoadOptions,
+	type AgentBrowserConfigState,
+	type CredentialSource,
+	type WebSearchProvider,
 } from "./config-policy.js";
 
 export {
@@ -69,11 +67,13 @@ export type {
 	WebSearchProviderDescriptor,
 } from "./config-policy.js";
 
+// Node's callback-oriented exec returns ChildProcess; promisify intentionally ignores that return.
+// oxlint-disable-next-line typescript/strict-void-return
 const exec = promisify(execCallback);
 
 export interface ResolvedCredential {
-	source: CredentialSource;
-	value: string;
+	readonly source: CredentialSource;
+	readonly value: string;
 }
 
 export function loadAgentBrowserConfigSync(
@@ -87,7 +87,7 @@ async function resolveCommandCredential(
 	signal?: AbortSignal,
 ): Promise<string | undefined> {
 	const command = rawValue.slice(1).trim();
-	if (!command) {
+	if (command.length === 0) {
 		return undefined;
 	}
 	try {
@@ -99,9 +99,11 @@ async function resolveCommandCredential(
 		const value = result.stdout.trim();
 		return value.length > 0 ? value : undefined;
 	} catch (error) {
-		if (signal?.aborted) {
+		if (signal?.aborted === true) {
 			throw error;
 		}
+		// The native exec error contains the secret command/stdout/stderr; never expose it as a cause.
+		// oxlint-disable-next-line eslint/preserve-caught-error
 		throw new Error(
 			"Credential command failed without exposing command output. Check pi-agent-browser-config web-search status and the configured secret manager command.",
 		);
@@ -110,7 +112,7 @@ async function resolveCommandCredential(
 
 async function resolveCredentialSource(
 	source: CredentialSource | undefined,
-	options: { env?: NodeJS.ProcessEnv; signal?: AbortSignal } = {},
+	options: { readonly env?: NodeJS.ProcessEnv; readonly signal?: AbortSignal } = {},
 ): Promise<ResolvedCredential | undefined> {
 	if (!source) {
 		return undefined;
@@ -123,13 +125,13 @@ async function resolveCredentialSource(
 	} else {
 		value = source.rawValue.trim();
 	}
-	return value ? { source, value } : undefined;
+	return value !== undefined && value.length > 0 ? { source, value } : undefined;
 }
 
 export async function resolveWebSearchCredential(
 	state: AgentBrowserConfigState,
 	provider: WebSearchProvider,
-	options: { env?: NodeJS.ProcessEnv; signal?: AbortSignal } = {},
+	options: { readonly env?: NodeJS.ProcessEnv; readonly signal?: AbortSignal } = {},
 ): Promise<ResolvedCredential | undefined> {
 	if (!state.webSearchEnabled || state.errors.length > 0) {
 		return undefined;
@@ -140,15 +142,19 @@ export async function resolveWebSearchCredential(
 export async function resolvePreferredWebSearchCredential(
 	state: AgentBrowserConfigState,
 	options: {
-		env?: NodeJS.ProcessEnv;
-		provider?: WebSearchProvider | "auto";
-		signal?: AbortSignal;
+		readonly env?: NodeJS.ProcessEnv;
+		readonly provider?: WebSearchProvider | "auto";
+		readonly signal?: AbortSignal;
 	} = {},
-): Promise<{ provider: WebSearchProvider; credential: ResolvedCredential } | undefined> {
+): Promise<
+	{ readonly provider: WebSearchProvider; readonly credential: ResolvedCredential } | undefined
+> {
 	if (!state.webSearchEnabled || state.errors.length > 0) {
 		return undefined;
 	}
 	for (const provider of getWebSearchProviderOrder(state, options.provider)) {
+		// Resolve in configured preference order; later secret commands must not run once a key resolves.
+		// oxlint-disable-next-line no-await-in-loop
 		const credential = await resolveWebSearchCredential(state, provider, options);
 		if (credential) {
 			return { provider, credential };

@@ -1,3 +1,4 @@
+import { readString } from "./helpers/assertions.js";
 /** Verify upstream capability pass-through and page-target correctness guards. */
 
 import assert from "node:assert/strict";
@@ -11,8 +12,12 @@ import {
 	getPageTargetValidationError,
 } from "../extensions/agent-browser/lib/page-target-validation.js";
 
-function validate(args: string[], stdin?: string, currentPageUrl?: string): string | undefined {
-	return getPageTargetValidationError({ args, currentPageUrl, stdin });
+function validate(
+	args: readonly string[],
+	stdin?: string,
+	currentPageUrl?: string,
+): string | undefined {
+	return getPageTargetValidationError({ args: [...args], currentPageUrl, stdin });
 }
 
 test("upstream state, session, config, file, and browser launch capabilities pass through", () => {
@@ -32,6 +37,8 @@ test("upstream state, session, config, file, and browser launch capabilities pas
 		["open", "file:///tmp/.agent-browser/sessions/auth.html"],
 		["screenshot", "/tmp/.agent-browser/capture.png"],
 	]) {
+		// Each caller-owned session/restore/path variant is asserted to remain available.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.equal(validate(args), undefined, args.join(" "));
 	}
 	assert.equal(
@@ -76,7 +83,9 @@ test("unverified page transitions still require a live URL before content access
 		undefined,
 	);
 	assert.match(
-		getPageTargetValidationError({ args: ["snapshot", "-i"], pageUrlUnknown: true }) ?? "",
+		readString(
+			getPageTargetValidationError({ args: ["snapshot", "-i"], pageUrlUnknown: true }) ?? "",
+		),
 		/active page became unverified/,
 	);
 	assert.equal(
@@ -86,24 +95,30 @@ test("unverified page transitions still require a live URL before content access
 		undefined,
 	);
 	assert.match(
-		getExplicitSessionPageVerificationRequirement({
-			args: ["--session", "external", "snapshot", "-i"],
-		}) ?? "",
+		readString(
+			getExplicitSessionPageVerificationRequirement({
+				args: ["--session", "external", "snapshot", "-i"],
+			}) ?? "",
+		),
 		/active page became unverified/,
 	);
 });
 
 test("WebMCP page tools require a verified target and may change it", () => {
 	assert.match(
-		getExplicitSessionPageVerificationRequirement({
-			args: ["--session", "external", "webmcp", "list"],
-		}) ?? "",
+		readString(
+			getExplicitSessionPageVerificationRequirement({
+				args: ["--session", "external", "webmcp", "list"],
+			}) ?? "",
+		),
 		/active page became unverified/,
 	);
 	assert.match(
-		getExplicitSessionPageVerificationRequirement({
-			args: ["--session", "external", "webmcp", "invoke", "set_message"],
-		}) ?? "",
+		readString(
+			getExplicitSessionPageVerificationRequirement({
+				args: ["--session", "external", "webmcp", "invoke", "set_message"],
+			}) ?? "",
+		),
 		/active page became unverified/,
 	);
 	assert.deepEqual(
@@ -146,11 +161,13 @@ test("WebMCP page tools require a verified target and may change it", () => {
 		undefined,
 	);
 	assert.match(
-		getPageTargetValidationError({
-			args: ["batch"],
-			currentPageUrl: "https://example.com/start",
-			stdin: batchStdin,
-		}) ?? "",
+		readString(
+			getPageTargetValidationError({
+				args: ["batch"],
+				currentPageUrl: "https://example.com/start",
+				stdin: batchStdin,
+			}) ?? "",
+		),
 		/--bail/,
 	);
 	assert.deepEqual(
@@ -166,14 +183,16 @@ test("WebMCP page tools require a verified target and may change it", () => {
 		},
 	);
 	assert.match(
-		getPageTargetValidationError({
-			args: ["batch", "--bail"],
-			currentPageUrl: "https://example.com/start",
-			stdin: JSON.stringify([
-				["webmcp", "invoke", "set_message"],
-				["snapshot", "-i"],
-			]),
-		}) ?? "",
+		readString(
+			getPageTargetValidationError({
+				args: ["batch", "--bail"],
+				currentPageUrl: "https://example.com/start",
+				stdin: JSON.stringify([
+					["webmcp", "invoke", "set_message"],
+					["snapshot", "-i"],
+				]),
+			}) ?? "",
+		),
 		/get url/,
 	);
 });
@@ -205,11 +224,13 @@ test("non-bail batches preserve known prior-page behavior and guard unknown targ
 		["get", "html", "body"],
 	]);
 	assert.match(
-		getPageTargetValidationError({
-			args: ["batch"],
-			currentPageUrl: "https://initial.example/start/",
-			stdin: bounded,
-		}) ?? "",
+		readString(
+			getPageTargetValidationError({
+				args: ["batch"],
+				currentPageUrl: "https://initial.example/start/",
+				stdin: bounded,
+			}) ?? "",
+		),
 		/--bail/,
 	);
 });
@@ -304,5 +325,5 @@ test("batch command strings match upstream ASCII-space and quoting rules", () =>
 		"#name",
 		"Ada Lovelace",
 	]);
-	assert.match(parseBatchCommandArgument("''").error ?? "", /empty/);
+	assert.match(readString(parseBatchCommandArgument("''").error ?? ""), /empty/);
 });

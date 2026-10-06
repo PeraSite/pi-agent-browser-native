@@ -1,3 +1,4 @@
+import { readArray, readRecord, readString } from "./helpers/assertions.js";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
@@ -18,18 +19,20 @@ import {
 	writeFakeAgentBrowserBinary,
 } from "./helpers/agent-browser-harness.js";
 
-async function cdp(url: string, method: string): Promise<any> {
+async function cdp(url: string, method: string): Promise<Record<string, unknown>> {
 	const socket = new WebSocket(url);
 	try {
-		return await new Promise((resolve, reject) => {
+		return await new Promise<Record<string, unknown>>((resolve, reject) => {
 			socket.addEventListener("open", () => socket.send(JSON.stringify({ id: 1, method })));
 			socket.addEventListener("error", reject);
 			socket.addEventListener("message", (event) => {
-				const response = JSON.parse(String(event.data));
+				const response = readRecord(JSON.parse(readString(event.data)));
 				if (response.id === 1) {
-					response.error
-						? reject(new Error(JSON.stringify(response.error)))
-						: resolve(response.result);
+					if (response.error !== undefined) {
+						reject(new Error(JSON.stringify(response.error)));
+						return;
+					}
+					resolve(readRecord(response.result));
 				}
 			});
 		});
@@ -38,15 +41,30 @@ async function cdp(url: string, method: string): Promise<any> {
 	}
 }
 
+function stockLaunch(mode: string, profile: string, headed: boolean): string[] {
+	if (mode === "config" || mode === "env") {
+		return [];
+	}
+	return [
+		"--profile",
+		profile,
+		...(headed
+			? [...(mode === "initial" ? [] : ["--args", "--disable-gpu,--enable-automation"]), "--headed"]
+			: []),
+	];
+}
+
 const stockVersion =
 	process.env.PI_AGENT_BROWSER_REAL_UPSTREAM === "1"
 		? execFileSync("agent-browser", ["--version"], { encoding: "utf8" }).trim()
 		: undefined;
 
-const resolve = (args: string[], stdin?: string) =>
+const resolve = (args: readonly string[], stdin?: string) =>
 	resolveAgentBrowserInput({
-		params: { args, stdin },
-		getBatchPreflightValidationError: () => undefined,
+		params: { args: [...args], stdin },
+		getBatchPreflightValidationError: () => {
+			/* Valid fixture input needs no preflight rejection. */
+		},
 	});
 
 test("URL-less open uses native lazy launch without inventing navigation or hiding effective commands", () => {
@@ -65,7 +83,7 @@ test("URL-less open uses native lazy launch without inventing navigation or hidi
 	);
 });
 
-test("startup arguments follow native precedence and exclude external engines and attachments", async (t) => {
+test("startup adaptation preserves native argument sources and excludes external engines and attachments", async (t) => {
 	const root = await mkdtemp(join(process.platform === "win32" ? tmpdir() : "/tmp", "psa-"));
 	await writeFakeAgentBrowserBinary(
 		root,
@@ -82,61 +100,67 @@ test("startup arguments follow native precedence and exclude external engines an
 				.map((name) => [name, undefined]),
 		);
 		await withPatchedEnv(
-			{ ...cleared, HOME: root, USERPROFILE: root, PATH: `${root}${delimiter}${process.env.PATH}` },
+			{
+				...cleared,
+				HOME: root,
+				USERPROFILE: root,
+				PATH: `${root}${delimiter}${process.env.PATH ?? ""}`,
+			},
 			async () => {
 				const check = async (
-					args: string[],
+					args: readonly string[],
 					expected: string | undefined,
 					stdin?: string,
 					expectedRoot?: boolean,
 				) => {
 					const input = resolve(args, stdin);
 					assert.equal(input.status, "valid");
-					if (input.status !== "valid") {
-						throw Error("invalid test input");
-					}
+					const callerArgs = [...input.toolArgs];
 					await withNativeSessionDefaults(
 						input,
-						root,
-						undefined,
+						{
+							cwd: root,
+							root: expectedRoot === undefined ? undefined : { id: "startup-precedence" },
+						},
 						async (planned, withLaunchDefaults) => {
 							assert.equal(planned.chromeStartupArgs, expected, args.join(" "));
+							assert.deepEqual(
+								planned.toolArgs.slice(-callerArgs.length),
+								callerArgs,
+								"native argv precedence stays caller-owned",
+							);
 							if (expectedRoot !== undefined) {
+								// Exhaustive fixture variant (expectedRoot !== undefined): this selected path must satisfy its own contract.
+								// oxlint-disable-next-line node-test/no-conditional-assertion
 								assert.equal(
 									planned.toolArgs[0] === "--session",
 									expectedRoot,
 									"automatic root identity follows native attachment selection",
 								);
+								// Exhaustive fixture variant (expectedRoot !== undefined): this selected path must satisfy its own contract.
+								// oxlint-disable-next-line node-test/no-conditional-assertion
 								assert.equal(typeof withLaunchDefaults === "function", expectedRoot);
 								if (expectedRoot) {
-									assert.match(planned.toolArgs[1], /^pi-root-[a-f0-9]{24}$/);
+									// Exhaustive fixture variant (expectedRoot): this selected path must satisfy its own contract.
+									// oxlint-disable-next-line node-test/no-conditional-assertion
+									assert.match(readString(planned.toolArgs[1]), /^pi-root-[a-f0-9]{24}$/);
 								}
 							}
 							return { content: [], details: {} };
 						},
-						expectedRoot === undefined ? undefined : { id: "startup-precedence" },
 					);
 				};
-				await check(["open"], "--no-startup-window,--config-argument");
+				await check(["open"], undefined);
 				await withPatchedEnv({ AGENT_BROWSER_ARGS: "--env-argument" }, async () => {
-					await check(["open"], "--no-startup-window,--env-argument");
-					await check(["--args", "--argv-argument", "open"], "--no-startup-window,--argv-argument");
+					await check(["open"], undefined);
+					await check(["--args", "--argv-argument", "open"], undefined);
 				});
-				for (const args of [
-					["connect", "9222"],
-					["--cdp", "9222", "open"],
-					["--auto-connect", "open"],
-					["--provider", "kernel", "open"],
-					["--engine", "lightpanda", "open"],
-					["batch", "batch 'connect 9222'"],
-				]) {
-					await check(args, undefined);
-				}
+
 				await withPatchedEnv({ AGENT_BROWSER_AUTO_CONNECT: "true" }, async () => {
 					await check(["open"], undefined);
-					await check(["--auto-connect", "false", "open"], "--no-startup-window,--config-argument");
+					await check(["--auto-connect", "false", "open"], undefined);
 				});
-				await check(["batch", "batch open"], "--no-startup-window,--config-argument");
+				await check(["batch", "batch open"], undefined);
 				await check(["batch"], undefined, JSON.stringify([["connect", "9222"]]));
 				await writeFile(
 					join(root, "agent-browser.json"),
@@ -146,12 +170,7 @@ test("startup arguments follow native precedence and exclude external engines an
 					"CLI false overrides configured and environment auto-connect and keeps the local root",
 					async () => {
 						await withPatchedEnv({ AGENT_BROWSER_AUTO_CONNECT: "true" }, () =>
-							check(
-								["--auto-connect", "false", "open"],
-								"--no-startup-window,--config-argument",
-								undefined,
-								true,
-							),
+							check(["--auto-connect", "false", "open"], undefined, undefined, true),
 						);
 					},
 				);
@@ -162,6 +181,20 @@ test("startup arguments follow native precedence and exclude external engines an
 							check(["open"], undefined, undefined, false),
 						);
 					},
+				);
+				await writeFile(join(root, "agent-browser.json"), "{}");
+				await check(["open"], "--no-startup-window");
+				await check(["--args", "--argv-argument", "open"], "--no-startup-window,--argv-argument");
+				await check(["batch", "batch open"], "--no-startup-window");
+				await Promise.all(
+					[
+						["connect", "9222"],
+						["--cdp", "9222", "open"],
+						["--auto-connect", "open"],
+						["--provider", "kernel", "open"],
+						["--engine", "lightpanda", "open"],
+						["batch", "batch 'connect 9222'"],
+					].map((args) => check(args, undefined)),
 				);
 			},
 		);
@@ -199,12 +232,16 @@ for (const mode of ["stdin", "raw"] as const) {
 			),
 			[["get", "url"], rows[1], ["batch", "'get' 'url'"], rows[3]],
 		);
-		if (mode === "raw") assert.equal(result.toolStdin, stdin, "ignored stdin is unchanged");
+		if (mode === "raw") {
+			// Exhaustive fixture variant (mode === "raw"): this selected path must satisfy its own contract.
+			// oxlint-disable-next-line node-test/no-conditional-assertion
+			assert.equal(result.toolStdin, stdin, "ignored stdin is unchanged");
+		}
 	});
 }
 
 for (const mode of ["root", "explicit", "fresh"] as const) {
-	test(`Chrome startup default is bootstrap-only for ${mode} and preserves custom arguments`, async () => {
+	test(`native configured Chrome arguments stay caller-owned for ${mode} across initial and active calls`, async () => {
 		const root = await mkdtemp(join(process.platform === "win32" ? tmpdir() : "/tmp", "pss-"));
 		const log = join(root, "calls.jsonl");
 		await writeFakeAgentBrowserBinary(
@@ -215,7 +252,8 @@ const args = process.argv.slice(2);
 const active = ${JSON.stringify(join(root, "active"))};
 if (args.at(-1) === 'session') { console.log(JSON.stringify({success:true,data:{session:'default'}})); process.exit(0); }
 if (args.includes('info')) { console.log(JSON.stringify({success:true,data:{active:fs.existsSync(active),runtime:{restoreKey:null}}})); process.exit(0); }
-fs.appendFileSync(${JSON.stringify(log)}, JSON.stringify({args, launchArgs: args.includes('--args') ? args[args.lastIndexOf('--args') + 1] : null}) + '\\n');
+const configArgs = JSON.parse(fs.readFileSync(require('node:path').join(process.cwd(), 'agent-browser.json'), 'utf8')).args;
+fs.appendFileSync(${JSON.stringify(log)}, JSON.stringify({args, configArgs, environmentArgs: process.env.AGENT_BROWSER_ARGS ?? null, launchArgs: args.includes('--args') ? args[args.lastIndexOf('--args') + 1] : null}) + '\\n');
 fs.writeFileSync(active, '1');
 console.log(JSON.stringify({success:true,data:{url:'https://fixture.test/', title:'Fixture'}}));
 `,
@@ -234,7 +272,7 @@ console.log(JSON.stringify({success:true,data:{url:'https://fixture.test/', titl
 					...cleared,
 					HOME: root,
 					USERPROFILE: root,
-					PATH: `${root}${delimiter}${process.env.PATH}`,
+					PATH: `${root}${delimiter}${process.env.PATH ?? ""}`,
 					PI_AGENT_BROWSER_SOCKET_DIR: join(root, "s"),
 					PI_AGENT_BROWSER_TEST_CUSTOM_SESSION_INFO: "1",
 					PI_AGENT_BROWSER_TEST_PRESERVE_INTERNAL_LAUNCH_FLAGS: "1",
@@ -249,23 +287,39 @@ console.log(JSON.stringify({success:true,data:{url:'https://fixture.test/', titl
 						args: [...prefix, "open"],
 						...(mode === "fresh" ? { sessionMode: "fresh" as const } : {}),
 					});
-					assert.equal(opened.isError, false, opened.content[0]?.text);
-					assert.ok((opened.details?.effectiveArgs as string[]).includes("url"));
-					const first = (await readInvocationLog(log)).find((call) =>
-						call.args.includes("url"),
-					) as { launchArgs?: string };
-					assert.equal(first.launchArgs, "--no-startup-window,--disable-gpu");
+					const openedDetails = readRecord(opened.details);
+					assert.equal(opened.isError, false, opened.content[0].text);
+					assert.ok(
+						readArray(openedDetails.effectiveArgs)
+							.map((value) => readString(value))
+							.includes("url"),
+					);
+					const first = readRecord(
+						(await readInvocationLog(log)).find((call) =>
+							readArray(call.args).map(readString).includes("url"),
+						),
+					);
+					assert.equal(first.launchArgs, null, "native config args are not rewritten into argv");
+					assert.equal(first.configArgs, "--disable-gpu");
+					assert.equal(first.environmentArgs, null);
 					const followup = await executeRegisteredTool(harness.tool, harness.ctx, {
 						args: [...prefix, "open"],
 					});
-					assert.equal(followup.isError, false, followup.content[0]?.text);
-					const calls = (await readInvocationLog(log)).filter((call) =>
-						call.args.includes("url"),
-					) as Array<{ launchArgs?: string | null }>;
-					assert.equal(
-						calls.at(-1)?.launchArgs,
-						"--no-startup-window,--disable-gpu",
-						"configured arguments remain consistent on active native launches",
+					assert.equal(followup.isError, false, followup.content[0].text);
+					const calls = readArray(
+						(await readInvocationLog(log)).filter((call) =>
+							readArray(call.args).map(readString).includes("url"),
+						),
+					).map((value) => readRecord(value));
+					assert.equal(calls.length, 2, "both initial and active URL-less calls reached upstream");
+					assert.ok(
+						calls.every(
+							(call) =>
+								call.launchArgs === null &&
+								call.configArgs === "--disable-gpu" &&
+								call.environmentArgs === null,
+						),
+						"native configured arguments remain unchanged across initial and active calls",
 					);
 				},
 			);
@@ -292,11 +346,17 @@ for (const mode of ["root", "explicit", "fresh", "config", "env", "initial", "he
 					.map((name) => [name, undefined]),
 			);
 			try {
-				if (mode === "config")
+				if (mode === "config") {
 					await writeFile(
 						join(root, "agent-browser.json"),
-						JSON.stringify({ args: "--disable-gpu,--enable-automation", profile, headed }),
+						// Native launch defaults own their full args; request the one-page startup explicitly.
+						JSON.stringify({
+							args: "--no-startup-window,--disable-gpu,--enable-automation",
+							profile,
+							headed,
+						}),
 					);
+				}
 				await withPatchedEnv(
 					{
 						...cleared,
@@ -305,7 +365,7 @@ for (const mode of ["root", "explicit", "fresh", "config", "env", "initial", "he
 						PI_AGENT_BROWSER_SOCKET_DIR: join(root, "s"),
 						...(mode === "env"
 							? {
-									AGENT_BROWSER_ARGS: "--disable-gpu,--enable-automation",
+									AGENT_BROWSER_ARGS: "--no-startup-window,--disable-gpu,--enable-automation",
 									AGENT_BROWSER_PROFILE: profile,
 									AGENT_BROWSER_HEADED: "true",
 								}
@@ -321,65 +381,68 @@ for (const mode of ["root", "explicit", "fresh", "config", "env", "initial", "he
 						});
 						const prefix =
 							mode === "explicit" || mode === "config" ? ["--session", "stock-local"] : [];
-						const call = async (args: string[], extra = {}) => {
+						const call = async (args: readonly string[], extra = {}) => {
 							const result = await executeRegisteredTool(harness.tool, harness.ctx, {
 								args: [...prefix, ...args],
 								...extra,
 							});
-							assert.equal(result.isError, false, result.content[0]?.text);
+							assert.equal(result.isError, false, result.content[0].text);
 							return result;
 						};
 						try {
-							const launch =
-								mode === "config" || mode === "env"
-									? []
-									: [
-											"--profile",
-											profile,
-											...(headed
-												? [
-														...(mode === "initial"
-															? []
-															: ["--args", "--disable-gpu,--enable-automation"]),
-														"--headed",
-													]
-												: []),
-										];
+							const launch = stockLaunch(mode, profile, headed);
 							const opened = await call(
 								[...launch, "open", ...(mode === "initial" ? [fixture.baseUrl] : [])],
 								mode === "fresh" ? { sessionMode: "fresh" } : {},
 							);
-							assert.ok(
-								(opened.details?.effectiveArgs as string[]).includes(
-									mode === "initial" ? "open" : "url",
-								),
-							);
+							const openedDetails = readRecord(opened.details);
+							const openedArgs = readArray(openedDetails.effectiveArgs).map(readString);
+							assert.ok(openedArgs.includes(mode === "initial" ? "open" : "url"));
 							assert.equal(
-								(opened.details?.data as { url: string }).url,
+								readRecord(openedDetails.data).url,
 								mode === "initial" ? `${fixture.baseUrl}/` : "about:blank",
 							);
-							const endpoint = (
-								(await call(["get", "cdp-url"])).details?.data as { cdpUrl: string }
-							).cdpUrl;
-							const processes = await cdp(endpoint, "SystemInfo.getProcessInfo");
-							const pid = processes.processInfo.find(
-								(entry: { type: string }) => entry.type === "browser",
-							).id;
+							const endpoint = readRecord((await call(["get", "cdp-url"])).details?.data).cdpUrl;
+							const browserPid = async () => {
+								const processes = await cdp(readString(endpoint), "SystemInfo.getProcessInfo");
+								return readRecord(
+									readArray(processes.processInfo)
+										.map(readRecord)
+										.find((entry) => entry.type === "browser"),
+								).id;
+							};
+							const pid = await browserPid();
 							if (headed && mode !== "initial") {
-								const argv = (await cdp(endpoint, "Browser.getBrowserCommandLine"))
-									.arguments as string[];
+								const argv = readArray(
+									(await cdp(readString(endpoint), "Browser.getBrowserCommandLine")).arguments,
+								).map((value) => readString(value));
+								// Exhaustive fixture variant (headed && mode !== "initial"): this selected path must satisfy its own contract.
+								// oxlint-disable-next-line node-test/no-conditional-assertion
 								assert.ok(argv.includes("--no-startup-window"));
-								assert.ok(argv.includes("--disable-gpu"));
+								// Exhaustive fixture variant (headed && mode !== "initial"): this selected path must satisfy its own contract.
+								// oxlint-disable-next-line node-test/no-conditional-assertion
+								assert.ok(
+									["--disable-gpu", `--user-data-dir=${profile}`].every((value) =>
+										argv.includes(value),
+									),
+								);
+								// Exhaustive fixture variant (headed && mode !== "initial"): this selected path must satisfy its own contract.
+								// oxlint-disable-next-line node-test/no-conditional-assertion
 								assert.ok(!argv.some((value) => value.startsWith("--headless")));
-							} else
+							} else {
+								// Exhaustive fixture variant (headed && mode !== "initial"): this selected path must satisfy its own contract.
+								// oxlint-disable-next-line node-test/no-conditional-assertion
 								assert.equal(
-									(await cdp(endpoint, "Browser.getVersion")).userAgent.includes("HeadlessChrome"),
+									readString(
+										(await cdp(readString(endpoint), "Browser.getVersion")).userAgent,
+									).includes("HeadlessChrome"),
 									!headed,
 								);
+							}
 							const pages = async () =>
-								(await cdp(endpoint, "Target.getTargets")).targetInfos.filter(
-									(entry: { type: string }) => entry.type === "page",
-								);
+								readArray((await cdp(readString(endpoint), "Target.getTargets")).targetInfos)
+									.map(readRecord)
+									.filter((entry) => entry.type === "page");
 							assert.equal((await pages()).length, 1);
 							await call(["open", fixture.baseUrl]);
 							await call(["eval", "--stdin"], {
@@ -393,10 +456,10 @@ for (const mode of ["root", "explicit", "fresh", "config", "env", "initial", "he
 								stdin: JSON.stringify([["open", "about:blank"]]),
 							});
 							assert.equal(
-								((await call(["get", "url"])).details?.data as { url: string }).url,
+								readRecord((await call(["get", "url"])).details?.data).url,
 								`${fixture.baseUrl}/`,
 							);
-							if (mode === "root")
+							if (mode === "root") {
 								await withPatchedEnv(
 									{ PI_SUBAGENT_CHILD: "1", PI_SUBAGENT_ROOT_SESSION_ID: "stock-startup-parent" },
 									async () => {
@@ -407,44 +470,52 @@ for (const mode of ["root", "explicit", "fresh", "config", "env", "initial", "he
 										const result = await executeRegisteredTool(child.tool, child.ctx, {
 											args: ["open"],
 										});
-										assert.equal(result.isError, false, result.content[0]?.text);
-										assert.equal(result.details?.sessionName, opened.details?.sessionName);
+										const resultDetails = readRecord(result.details);
+										// Exhaustive fixture variant (mode === "root"): this selected path must satisfy its own contract.
+										// oxlint-disable-next-line node-test/no-conditional-assertion
+										assert.equal(result.isError, false, result.content[0].text);
+										// Exhaustive fixture variant (mode === "root"): this selected path must satisfy its own contract.
+										// oxlint-disable-next-line node-test/no-conditional-assertion
+										assert.equal(resultDetails.sessionName, openedDetails.sessionName);
 									},
 								);
+							}
 							assert.equal(
-								(
+								readRecord(
 									(
 										await call(["eval", "--stdin"], {
 											stdin: "localStorage.getItem('startup-marker')",
 										})
-									).details?.data as { result: unknown }
+									).details?.data,
 								).result,
 								"retained",
 							);
 							assert.equal((await pages()).length, 1);
-							assert.equal(
-								(await cdp(endpoint, "SystemInfo.getProcessInfo")).processInfo.find(
-									(entry: { type: string }) => entry.type === "browser",
-								).id,
-								pid,
-							);
+							assert.equal(await browserPid(), pid);
 							if (mode === "headless") {
 								const script = await executeRegisteredTool(
-									harness.getTool("agent_browser_code")!,
+									harness.getTool("agent_browser_code") ??
+										// Exhaustive fixture variant (mode === "headless"): this selected path must satisfy its own contract.
+										// oxlint-disable-next-line node-test/no-conditional-assertion
+										assert.fail("code tool must be registered"),
 									harness.ctx,
 									{
 										code: `await browser({args:["open"]}); await browser({args:["open",${JSON.stringify(fixture.baseUrl)}]}); emit((await browser({args:["open"]})).data.url);`,
 									},
 								);
-								assert.equal(script.isError, false, script.content[0]?.text);
-								assert.equal(script.details?.data, `${fixture.baseUrl}/`);
-								assert.equal(script.details?.sessionName, opened.details?.sessionName);
-								assert.equal(
-									(await cdp(endpoint, "SystemInfo.getProcessInfo")).processInfo.find(
-										(entry: { type: string }) => entry.type === "browser",
-									).id,
-									pid,
-								);
+								const scriptDetails = readRecord(script.details);
+								// Exhaustive fixture variant (mode === "headless"): this selected path must satisfy its own contract.
+								// oxlint-disable-next-line node-test/no-conditional-assertion
+								assert.equal(script.isError, false, script.content[0].text);
+								// Exhaustive fixture variant (mode === "headless"): this selected path must satisfy its own contract.
+								// oxlint-disable-next-line node-test/no-conditional-assertion
+								assert.equal(scriptDetails.data, `${fixture.baseUrl}/`);
+								// Exhaustive fixture variant (mode === "headless"): this selected path must satisfy its own contract.
+								// oxlint-disable-next-line node-test/no-conditional-assertion
+								assert.equal(scriptDetails.sessionName, openedDetails.sessionName);
+								// Exhaustive fixture variant (mode === "headless"): this selected path must satisfy its own contract.
+								// oxlint-disable-next-line node-test/no-conditional-assertion
+								assert.equal(await browserPid(), pid);
 							}
 							console.log(
 								JSON.stringify({

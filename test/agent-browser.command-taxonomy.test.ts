@@ -145,6 +145,8 @@ test("command taxonomy guards exactly the upstream ref-resolving selector comman
 		"guarded and unguarded lists must stay disjoint",
 	);
 	for (const command of knownCommands) {
+		// Exhaustive fixture variant (knownCommands): this selected path must satisfy its own contract.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.equal(isKnownCommandToken(command), true, `${command} is not a known command token`);
 	}
 	// diff guarding is deliberately command-level: diff screenshot resolves refs while diff snapshot's
@@ -158,6 +160,8 @@ test("command taxonomy guards exactly the upstream ref-resolving selector comman
 	// Upstream passes these selectors/operands through literally and never resolves @e refs for them,
 	// so guarding would falsely reject literal tokens such as `wait --text @e1` or `find text @e1 click`.
 	for (const command of ["a11y", "find", "wait"]) {
+		// Exhaustive fixture variant (["a11y", "find", "wait"]): this selected path must satisfy its own contract.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.equal(isRefGuardedCommand(command), false, command);
 	}
 });
@@ -179,22 +183,34 @@ test("recording FPS without a URL preserves restart refs", () => {
 		["--fps", "12", "take.webm", "--fps", "24"],
 		["out.webm"],
 	]) {
+		// Every FPS position and start/restart variant must preserve the recording operand contract.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.equal(isRecordPageTransitionCommand(["record", "restart", ...operands]), false);
+		// Every FPS position and start/restart variant must preserve the recording operand contract.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.equal(isRefInvalidatingBatchCommand(["record", "restart", ...operands]), false);
+		// Every FPS position and start/restart variant must preserve the recording operand contract.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.equal(
 			isRecordPageTransitionCommand(["record", "start", ...operands]),
 			true,
 			"older native starts replace the page even on failure",
 		);
+		// Every FPS position and start/restart variant must preserve the recording operand contract.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.equal(
 			isRefInvalidatingBatchCommand(["record", "start", ...operands]),
 			true,
 			"older native starts still need conservative ref protection",
 		);
+		// Every FPS position and start/restart variant must preserve the recording operand contract.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.equal(
 			isRecordPageTransitionCommand(["record", "restart", ...operands, "https://example.com"]),
 			true,
 		);
+		// Every FPS position and start/restart variant must preserve the recording operand contract.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.equal(
 			isRefInvalidatingBatchCommand(["record", "restart", ...operands, "https://example.com"]),
 			true,

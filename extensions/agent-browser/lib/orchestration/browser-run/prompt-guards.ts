@@ -3,12 +3,12 @@ import { isAbsolute, resolve } from "node:path";
 import { isCloseCommand } from "../../command-taxonomy.js";
 import { executableExistsOnPath } from "../../executable-path.js";
 import type { SessionArtifactManifest } from "../../results/contracts.js";
-import type { PromptPolicy, PromptRequestedArtifact } from "../../prompt-policy.js";
+import type { PromptRequestedArtifact } from "../../prompt-policy.js";
 
 export interface RequestedArtifactCloseViolation {
-	message: string;
-	missingArtifacts: PromptRequestedArtifact[];
-	reason: "requested-artifacts-missing-before-close";
+	readonly message: string;
+	readonly missingArtifacts: readonly PromptRequestedArtifact[];
+	readonly reason: "requested-artifacts-missing-before-close";
 }
 
 function resolveArtifactPath(cwd: string, path: string): string {
@@ -18,7 +18,7 @@ function resolveArtifactPath(cwd: string, path: string): string {
 function manifestContainsArtifact(
 	manifest: SessionArtifactManifest | undefined,
 	cwd: string,
-	artifact: PromptRequestedArtifact,
+	artifact: Readonly<PromptRequestedArtifact>,
 ): boolean {
 	if (!manifest) {
 		return false;
@@ -37,7 +37,7 @@ function manifestContainsArtifact(
 	});
 }
 
-async function isArtifactRequired(artifact: PromptRequestedArtifact): Promise<boolean> {
+async function isArtifactRequired(artifact: Readonly<PromptRequestedArtifact>): Promise<boolean> {
 	if (artifact.required) {
 		return true;
 	}
@@ -45,23 +45,28 @@ async function isArtifactRequired(artifact: PromptRequestedArtifact): Promise<bo
 }
 
 export async function findRequestedArtifactCloseViolation(options: {
-	artifactManifest?: SessionArtifactManifest;
-	command: string | undefined;
-	cwd: string;
-	promptPolicy: PromptPolicy;
+	readonly artifactManifest?: SessionArtifactManifest;
+	readonly command: string | undefined;
+	readonly cwd: string;
+	readonly promptPolicy: {
+		readonly requestedArtifacts: readonly Readonly<PromptRequestedArtifact>[];
+	};
 }): Promise<RequestedArtifactCloseViolation | undefined> {
 	if (!isCloseCommand(options.command)) {
 		return undefined;
 	}
-	const missingArtifacts: PromptRequestedArtifact[] = [];
-	for (const artifact of options.promptPolicy.requestedArtifacts) {
-		if (!(await isArtifactRequired(artifact))) {
-			continue;
-		}
-		if (!manifestContainsArtifact(options.artifactManifest, options.cwd, artifact)) {
-			missingArtifacts.push(artifact);
-		}
-	}
+	const requirements = await Promise.all(
+		options.promptPolicy.requestedArtifacts.map(async (artifact) => ({
+			artifact,
+			required: await isArtifactRequired(artifact),
+		})),
+	);
+	const missingArtifacts = requirements
+		.filter(
+			({ artifact, required }) =>
+				required && !manifestContainsArtifact(options.artifactManifest, options.cwd, artifact),
+		)
+		.map(({ artifact }) => artifact);
 	if (missingArtifacts.length === 0) {
 		return undefined;
 	}

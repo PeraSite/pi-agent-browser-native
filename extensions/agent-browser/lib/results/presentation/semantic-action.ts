@@ -4,7 +4,7 @@ import {
 } from "../../input-modes/semantic-action.js";
 import type { CompiledAgentBrowserSemanticAction } from "../../input-modes/types.js";
 import { isRecord } from "../../parsing.js";
-import type { CommandInfo } from "../../runtime.js";
+import type { CommandInfo } from "../../argv-descriptor.js";
 import {
 	formatNavigationSummary,
 	getNavigationSummary,
@@ -16,20 +16,27 @@ const SEMANTIC_NAVIGATION_PROBE_ACTIONS = new Set(["check", "click"]);
 
 const SEMANTIC_PRESENTATION_ACTIONS = new Set(["check", "click", "fill", "select"]);
 
+function formatSemanticSelectTarget(compiled: CompiledAgentBrowserSemanticAction): string {
+	const selector = compiled.selector ?? "selector";
+	const values =
+		compiled.values !== undefined && compiled.values.length > 0 ? compiled.values.join(", ") : "";
+	return values.length > 0 ? `${selector} → ${values}` : selector;
+}
+
 function formatSemanticActionTarget(compiled: CompiledAgentBrowserSemanticAction): string {
 	if (compiled.action === "select") {
-		const selector = compiled.selector ?? "selector";
-		const values = compiled.values?.length ? compiled.values.join(", ") : "";
-		return values ? `${selector} → ${values}` : selector;
+		return formatSemanticSelectTarget(compiled);
 	}
 	const commandIndex = getCompiledSemanticActionCommandIndex(compiled);
-	const locator = compiled.locator ?? compiled.args[commandIndex + 1] ?? "locator";
-	const locatorValue = compiled.args[commandIndex + 2];
+	const locator = compiled.locator ?? compiled.args.at(commandIndex + 1) ?? "locator";
+	const locatorValue = compiled.args.at(commandIndex + 2);
 	const nameIndex = compiled.args.indexOf("--name");
-	const name = nameIndex >= 0 ? compiled.args[nameIndex + 1] : undefined;
+	const name = nameIndex >= 0 ? compiled.args.at(nameIndex + 1) : undefined;
 	const quotedValue = JSON.stringify(locatorValue ?? "");
 	const target = `${locator} ${quotedValue}`;
-	return name ? `${target} (name ${JSON.stringify(name)})` : target;
+	return name !== undefined && name.length > 0
+		? `${target} (name ${JSON.stringify(name)})`
+		: target;
 }
 
 function formatSemanticActionCompactLine(compiled: CompiledAgentBrowserSemanticAction): string {
@@ -43,8 +50,6 @@ function formatSemanticActionCompactLine(compiled: CompiledAgentBrowserSemanticA
 			return `Checked: ${target}`;
 		case "select":
 			return `Selected: ${target}`;
-		default:
-			return `${compiled.action}: ${target}`;
 	}
 }
 
@@ -68,7 +73,7 @@ export function resolvePresentationCommandInfo(
 	compiledSemanticAction?: CompiledAgentBrowserSemanticAction,
 ): CommandInfo {
 	const presentationCommand = resolveSemanticPresentationCommand(compiledSemanticAction);
-	if (!presentationCommand) {
+	if (presentationCommand === undefined) {
 		return commandInfo;
 	}
 	return { ...commandInfo, command: presentationCommand };
@@ -89,10 +94,10 @@ export function shouldCaptureSemanticActionNavigationSummary(
 
 export function formatSemanticActionPresentationText(
 	compiled: CompiledAgentBrowserSemanticAction,
-	data: Record<string, unknown>,
+	data: Readonly<Record<string, unknown>>,
 ): string | undefined {
 	const presentationCommand = resolveSemanticPresentationCommand(compiled);
-	if (!presentationCommand) {
+	if (presentationCommand === undefined) {
 		return undefined;
 	}
 
@@ -100,13 +105,13 @@ export function formatSemanticActionPresentationText(
 	const navigationSummary = getNavigationSummary(data);
 	if (navigationSummary && isNavigationObservableCommand(presentationCommand)) {
 		const navigationText = formatNavigationSummary(navigationSummary);
-		if (navigationText) {
+		if (navigationText !== undefined && navigationText.length > 0) {
 			return `${actionLine}\n\nCurrent page:\n${navigationText}`;
 		}
 	}
 
 	const pageSummary = getPageSummary(data);
-	if (pageSummary) {
+	if (pageSummary !== undefined && pageSummary.length > 0) {
 		return `${actionLine}\n\nCurrent page:\n${redactModelFacingText(pageSummary)}`;
 	}
 
@@ -115,23 +120,23 @@ export function formatSemanticActionPresentationText(
 
 export function formatSemanticActionPresentationSummary(
 	compiled: CompiledAgentBrowserSemanticAction,
-	data: Record<string, unknown>,
+	data: Readonly<Record<string, unknown>>,
 ): string | undefined {
 	const presentationCommand = resolveSemanticPresentationCommand(compiled);
-	if (!presentationCommand) {
+	if (presentationCommand === undefined) {
 		return undefined;
 	}
 
 	const navigationSummary = getNavigationSummary(data);
 	if (navigationSummary && isNavigationObservableCommand(presentationCommand)) {
 		const navigationText = formatNavigationSummary(navigationSummary);
-		if (navigationText) {
+		if (navigationText !== undefined && navigationText.length > 0) {
 			return `${presentationCommand} → ${navigationText.split("\n", 1)[0] ?? navigationText}`;
 		}
 	}
 
 	const pageSummary = getPageSummary(data);
-	if (pageSummary) {
+	if (pageSummary !== undefined && pageSummary.length > 0) {
 		return `${presentationCommand} → ${pageSummary.split("\n", 1)[0] ?? pageSummary}`;
 	}
 

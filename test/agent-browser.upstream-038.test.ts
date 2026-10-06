@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readRecord, readString, readArray } from "./helpers/assertions.js";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
@@ -29,7 +30,7 @@ const origin = "https://example.test/";
 const refs = { e4: { role: "button", name: "Save" } };
 const tree = '- button "Save" [ref=e4]';
 
-test("failed full ref reads after native partial snapshots invalidate direct and batch refs", async () => {
+test("failed full ref reads after native partial snapshots invalidate direct and batch refs", async (t) => {
 	const cwd = await mkdtemp(join(tmpdir(), "piab-delta-failure-"));
 	try {
 		await writeFakeAgentBrowserBinary(
@@ -50,29 +51,33 @@ if (delta) {
 console.log(JSON.stringify({ success: true, data }));
 `,
 		);
-		await withPatchedEnv({ PATH: `${cwd}${delimiter}${process.env.PATH}` }, async () => {
+		await withPatchedEnv({ PATH: `${cwd}${delimiter}${process.env.PATH ?? ""}` }, async () => {
 			for (const args of [["snapshot", "--delta"], ["batch", "snapshot --delta"], ["batch"]]) {
-				await rm(join(cwd, "partial-seen"), { force: true });
-				const h = createExtensionHarness({ cwd });
-				await runExtensionEvent(h.handlers, "session_start", { reason: "new" }, h.ctx);
-				const call = (args: string[], stdin?: string) =>
-					executeRegisteredTool(h.tool, h.ctx, {
-						args: ["--session", "delta-failure", ...args],
-						stdin,
-					});
-				assert.equal((await call(["snapshot", "-i"])).isError, false);
-				const partial = await call(
-					args,
-					args.length === 1 ? '[["snapshot","--delta"]]' : undefined,
-				);
-				assert.equal(partial.isError, false, partial.content[0]?.text);
-				assert.equal(
-					(partial.details?.refSnapshotInvalidation as { reason?: string })?.reason,
-					"page-transition",
-				);
-				const blocked = await call(["click", "@e4"]);
-				assert.equal(blocked.isError, true);
-				assert.equal(blocked.details?.failureCategory, "stale-ref");
+				// These native variants share the same fake session and receipt marker.
+				// oxlint-disable-next-line no-await-in-loop
+				await t.test(args.join(" "), async () => {
+					await rm(join(cwd, "partial-seen"), { force: true });
+					const h = createExtensionHarness({ cwd });
+					await runExtensionEvent(h.handlers, "session_start", { reason: "new" }, h.ctx);
+					const invoke = (commandArgs: readonly string[], stdin?: string) =>
+						executeRegisteredTool(h.tool, h.ctx, {
+							args: ["--session", "delta-failure", ...commandArgs],
+							stdin,
+						});
+					assert.equal((await invoke(["snapshot", "-i"])).isError, false);
+					const partial = await invoke(
+						args,
+						args.length === 1 ? '[["snapshot","--delta"]]' : undefined,
+					);
+					assert.equal(partial.isError, false, partial.content.at(0)?.text);
+					assert.equal(
+						readRecord(partial.details?.refSnapshotInvalidation).reason,
+						"page-transition",
+					);
+					const blocked = await invoke(["click", "@e4"]);
+					assert.equal(blocked.isError, true);
+					assert.equal(blocked.details?.failureCategory, "stale-ref");
+				});
 			}
 		});
 	} finally {
@@ -90,8 +95,8 @@ test("contact sheets are pending images until stop and verified separately from 
 			commandInfo: { command: "record", subcommand: "start" },
 			envelope: { success: true, data },
 		});
-		assert.equal(start.artifacts?.[0]?.kind, "image");
-		assert.equal(start.artifactVerification?.pendingCount, 1);
+		assert.equal(readRecord(readArray(start.artifacts)[0]).kind, "image");
+		assert.equal(readRecord(start.artifactVerification).pendingCount, 1);
 		assert.equal(
 			start.content.some((item) => item.type === "image"),
 			false,
@@ -102,9 +107,9 @@ test("contact sheets are pending images until stop and verified separately from 
 			commandInfo: { command: "record", subcommand: "stop" },
 			envelope: { success: true, data },
 		});
-		assert.equal(stop.artifacts?.[0]?.kind, "image");
-		assert.equal(stop.artifactVerification?.verifiedCount, 1);
-		assert.equal(stop.artifacts?.[0]?.recording, undefined);
+		assert.equal(readRecord(readArray(stop.artifacts)[0]).kind, "image");
+		assert.equal(readRecord(stop.artifactVerification).verifiedCount, 1);
+		assert.equal(readRecord(readArray(stop.artifacts)[0]).recording, undefined);
 		assert.equal(
 			stop.content.some((item) => item.type === "image"),
 			true,
@@ -131,12 +136,14 @@ test("contact sheets are pending images until stop and verified separately from 
 				],
 			},
 		});
-		assert.equal(batch.artifacts?.length, 2);
-		assert.equal(batch.artifactVerification?.pendingCount, 0);
-		assert.equal(batch.artifactVerification?.verifiedCount, 2);
-		assert.equal(batch.artifactVerification?.verified, true);
+		assert.equal(readArray(batch.artifacts).length, 2);
+		assert.equal(readRecord(batch.artifactVerification).pendingCount, 0);
+		assert.equal(readRecord(batch.artifactVerification).verifiedCount, 2);
+		assert.equal(readRecord(batch.artifactVerification).verified, true);
 		assert.equal(
-			batch.nextActions?.some((action) => action.id === "stop-pending-recording"),
+			readArray(batch.nextActions)
+				.map(readRecord)
+				.some((action) => action.id === "stop-pending-recording"),
 			false,
 		);
 		const restart = await buildToolPresentation({
@@ -146,14 +153,15 @@ test("contact sheets are pending images until stop and verified separately from 
 			envelope: { success: true, data: { path: join(cwd, "next.webm") } },
 		});
 		const previousSheet = restart.artifacts?.find((artifact) => artifact.kind === "image");
-		assert.equal(previousSheet?.absolutePath, path);
-		assert.equal(previousSheet?.exists, true);
+		assert.ok(previousSheet);
+		assert.equal(previousSheet.absolutePath, path);
+		assert.equal(previousSheet.exists, true);
 		assert.equal(
-			previousSheet?.status,
+			previousSheet.status,
 			"unverified",
 			"restart omits native terminal sheet evidence",
 		);
-		assert.equal(previousSheet?.subcommand, "restart-previous");
+		assert.equal(previousSheet.subcommand, "restart-previous");
 	} finally {
 		await rm(cwd, { recursive: true, force: true });
 	}
@@ -176,36 +184,36 @@ if (args.includes('get') && args.includes('url') && fs.existsSync(session)) {
 console.log(JSON.stringify({ success: true, data }));
 `,
 		);
-		await withPatchedEnv({ PATH: `${cwd}${delimiter}${process.env.PATH}` }, async () => {
+		await withPatchedEnv({ PATH: `${cwd}${delimiter}${process.env.PATH ?? ""}` }, async () => {
 			const h = createExtensionHarness({ cwd });
 			await runExtensionEvent(h.handlers, "session_start", { reason: "new" }, h.ctx);
 			await Promise.all(
 				["catalog-a", "catalog-b"].map(async (session) => {
-					const call = (args: string[]) =>
+					const invoke = (args: readonly string[]) =>
 						executeRegisteredTool(h.tool, h.ctx, { args: ["--session", session, ...args] });
-					await call(["open", origin]);
+					await invoke(["open", origin]);
 					await writeFile(join(cwd, session), "advertise");
-					const result = await call(["get", "title"]);
+					const result = await invoke(["get", "title"]);
 					assert.equal(result.isError, false);
 					assert.equal(
-						(result.details?.data as { webmcp?: unknown }).webmcp,
+						readRecord(result.details?.data).webmcp,
 						undefined,
 						"keep native main-command data unchanged",
 					);
 					assert.equal(
-						(result.details?.webMcpCatalog as { tools: Array<{ name: string }> }).tools[0].name,
+						readRecord(readArray(readRecord(result.details?.webMcpCatalog).tools)[0]).name,
 						session,
 					);
 					assert.match(
 						result.content.map((part) => (part.type === "text" ? part.text : "")).join("\n"),
 						/Discovered by helper/,
 					);
-					const later = await call(["get", "title"]);
+					const later = await invoke(["get", "title"]);
 					assert.equal(later.details?.webMcpCatalog, undefined);
 					await writeFile(join(cwd, session), "advertise");
-					const json = await call(["--json", "get", "title"]);
-					assert.doesNotThrow(() => JSON.parse(json.content[0]?.text ?? ""));
-					assert.ok(json.details?.webMcpCatalog);
+					const json = await invoke(["--json", "get", "title"]);
+					assert.doesNotThrow(() => JSON.parse(json.content.at(0)?.text ?? ""));
+					assert.ok(json.details?.webMcpCatalog !== undefined);
 				}),
 			);
 		});
@@ -214,49 +222,59 @@ console.log(JSON.stringify({ success: true, data }));
 	}
 });
 
-test("native WebMCP catalog updates remain visible on snapshot and ordinary action results", async () => {
+test("native WebMCP catalog updates remain visible on snapshot and ordinary action results", async (t) => {
 	for (const command of ["snapshot", "click"]) {
 		for (const tools of [
 			[{ name: "search", description: "Search this page", frameId: "main", origin }],
 			[],
 		]) {
-			const data = {
-				origin,
-				snapshot: tree,
-				refs,
-				clicked: "@e4",
-				webmcp: {
-					experimental: true,
-					untrusted: true,
-					status: "ready",
-					available: tools.length > 0,
-					toolCount: tools.length,
-					tools,
-				},
-			};
-			const result = await buildToolPresentation({
-				cwd: process.cwd(),
-				commandInfo: { command },
-				envelope: { success: true, data },
+			// Complete each presentation case and its artifacts before advancing.
+			// oxlint-disable-next-line no-await-in-loop
+			await t.test(`${command}: ${tools.length} tools`, async () => {
+				const data = {
+					origin,
+					snapshot: tree,
+					refs,
+					clicked: "@e4",
+					webmcp: {
+						experimental: true,
+						untrusted: true,
+						status: "ready",
+						available: tools.length > 0,
+						toolCount: tools.length,
+						tools,
+					},
+				};
+				const result = await buildToolPresentation({
+					cwd: process.cwd(),
+					commandInfo: { command },
+					envelope: { success: true, data },
+				});
+				const text = readString(readRecord(result.content[0]).text);
+				assert.match(text, /WebMCP catalog update.*untrusted/);
+				assert.match(text, new RegExp(`"toolCount":${tools.length}`));
+				if (tools.length > 0) {
+					// Both catalog variants check toolCount; the present variant must also show its description.
+					// oxlint-disable-next-line node-test/no-conditional-assertion
+					assert.match(text, /Search this page/);
+				}
 			});
-			const text = result.content[0]?.type === "text" ? result.content[0].text : "";
-			assert.match(text, /WebMCP catalog update.*untrusted/);
-			assert.match(text, new RegExp(`"toolCount":${tools.length}`));
-			if (tools.length) {
-				assert.match(text, /Search this page/);
-			}
 		}
 	}
 });
 
-test("session input mode is stripped without losing the command or ref", () => {
+test("session input mode is stripped without losing the command or ref", async (t) => {
 	for (const args of [
 		["--input-mode", "human", "click", "@e4", "--human"],
 		["click", "@e4", "--input-mode", "smooth", "--human"],
 	]) {
-		assert.equal(parseCommandInfo(args).command, "click");
-		assert.deepEqual(extractUpstreamCommandTokens(args), ["click", "@e4", "--human"]);
-		assert.deepEqual(getGuardedRefUsage(extractUpstreamCommandTokens(args)), ["e4"]);
+		// Native argument variants run as individually owned subtests in declaration order.
+		// oxlint-disable-next-line no-await-in-loop
+		await t.test(args.join(" "), () => {
+			assert.equal(parseCommandInfo(args).command, "click");
+			assert.deepEqual(extractUpstreamCommandTokens(args), ["click", "@e4", "--human"]);
+			assert.deepEqual(getGuardedRefUsage(extractUpstreamCommandTokens(args)), ["e4"]);
+		});
 	}
 });
 
@@ -275,22 +293,34 @@ test("recording presentation options are not paths or navigation URLs", () => {
 				"30",
 			],
 		]) {
+			// Every fixed recording spelling must preserve its path and optional URL.
+			// oxlint-disable-next-line node-test/no-conditional-assertion
 			assert.deepEqual(getRecordCommandOperands(args), { path: "capture.webm", url: undefined });
+			// Every fixed recording spelling must identify the same artifact destination.
+			// oxlint-disable-next-line node-test/no-conditional-assertion
 			assert.equal(getExplicitArtifactDestination(args), "capture.webm");
+			// Every spelling must retain native start/restart transition classification.
+			// oxlint-disable-next-line node-test/no-conditional-assertion
 			assert.equal(isRecordPageTransitionCommand(args), subcommand === "start");
+			// Every spelling must retain a supplied navigation URL.
+			// oxlint-disable-next-line node-test/no-conditional-assertion
 			assert.equal(getRecordCommandOperands([...args, origin]).url, origin);
 		}
 	}
 });
 
-test("conditional screenshot flags preserve selector and destination operands", () => {
+test("conditional screenshot flags preserve selector and destination operands", async (t) => {
 	for (const args of [
 		["screenshot", "--if-changed", "@e4", "shots/page.png"],
 		["screenshot", "--threshold", "0.01", "@e4", "shots/page.png"],
 		["screenshot", "--full", "@e4", "--if-changed", "shots/page.png", "--threshold", "0"],
 	]) {
-		assert.equal(getExplicitArtifactDestination(args), "shots/page.png");
-		assert.deepEqual(getGuardedRefUsage(args), ["e4"]);
+		// Each command spelling is a separate native operand contract.
+		// oxlint-disable-next-line no-await-in-loop
+		await t.test(args.join(" "), () => {
+			assert.equal(getExplicitArtifactDestination(args), "shots/page.png");
+			assert.deepEqual(getGuardedRefUsage(args), ["e4"]);
+		});
 	}
 	assert.equal(
 		getExplicitArtifactDestination(["screenshot", "--if-changed", "--threshold", "0.01"]),
@@ -321,7 +351,7 @@ test("unchanged screenshots never invent a saved path or attach an old image", a
 			result.content.some((item) => item.type === "image"),
 			false,
 		);
-		assert.match(result.content[0]?.type === "text" ? result.content[0].text : "", /unchanged/i);
+		assert.match(readString(readRecord(result.content[0]).text), /unchanged/i);
 	} finally {
 		await rm(cwd, { recursive: true, force: true });
 	}
@@ -336,7 +366,7 @@ test("native delta full snapshots expose refs and tree without discarding the na
 		envelope: { success: true, data },
 	});
 	assert.deepEqual(result.data, data);
-	assert.match(result.content[0]?.type === "text" ? result.content[0].text : "", /Save.*ref=e4/);
+	assert.match(readString(readRecord(result.content[0]).text), /Save.*ref=e4/);
 	assert.match(result.summary, /1 refs/);
 });
 
@@ -369,9 +399,13 @@ test("multi-change native deltas stay compact patches rather than empty tree pre
 	});
 	assert.deepEqual(result.data, data);
 	assert.equal(result.fullOutputPath, undefined);
-	const text = result.content[0]?.type === "text" ? result.content[0].text : "";
+	const text = readString(readRecord(result.content[0]).text);
 	for (const change of changes) {
+		// Every known native delta change must retain its ref.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.ok(text.includes(change.ref));
+		// Every known native delta change must retain its value.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.ok(text.includes(change.value));
 	}
 	assert.doesNotMatch(text, /Refs: 0|\(no refs\)|Compact snapshot view/);
@@ -389,22 +423,36 @@ test("partial native snapshots display their revision and changes, not an empty 
 		},
 	]) {
 		const data = { origin, snapshot };
+		// Both fixed partial revisions must avoid constructing an empty ref set.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.equal(
 			extractRefSnapshotFromData(data),
 			undefined,
 			"partial refs require a native full read rather than an empty ref set",
 		);
+		// Complete each revision's presentation/artifact handling before the next case.
+		// oxlint-disable-next-line no-await-in-loop
 		const result = await buildToolPresentation({
 			cwd: process.cwd(),
 			commandInfo: { command: "snapshot" },
 			envelope: { success: true, data },
 		});
+		// Both fixed partial revisions must preserve native data.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.deepEqual(result.data, data);
-		const text = result.content[0]?.type === "text" ? result.content[0].text : "";
+		const text = readString(readRecord(result.content[0]).text);
+		// Both fixed partial revisions must render their native kind.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.match(text, new RegExp(snapshot.kind));
+		// Both fixed partial revisions must render their revision.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.match(text, /revision/i);
+		// Neither partial revision may claim a complete empty snapshot.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.doesNotMatch(text, /no interactive elements/);
 		if (snapshot.kind === "delta") {
+			// The fixed delta variant must render its changed ref.
+			// oxlint-disable-next-line node-test/no-conditional-assertion
 			assert.match(text, /@e4/);
 		}
 	}
