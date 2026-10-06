@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
+import { readRecord, readArray, readString } from "./helpers/assertions.js";
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import test from "node:test";
 
-function run(command: string, args: string[]) {
+function run(command: string, args: readonly string[]) {
 	return spawnSync(command, args, {
 		cwd: process.cwd(),
 		encoding: "utf8",
@@ -18,22 +19,36 @@ test("platform smoke scripts have working syntax and help", () => {
 		"scripts/platform-smoke/artifacts.mjs",
 		"scripts/platform-smoke/crabbox-runner.mjs",
 		"scripts/platform-smoke/doctor.mjs",
+		"scripts/platform-smoke/doctor-support.mjs",
+		"scripts/platform-smoke/doctor-windows.mjs",
+		"scripts/platform-smoke/commands.mjs",
+		"scripts/platform-smoke/lease-evidence.mjs",
+		"scripts/platform-smoke/suite-checks.mjs",
+		"scripts/platform-smoke/suite-evidence.mjs",
 		"scripts/platform-smoke/targets.mjs",
 	]) {
+		// Every file in this fixed script inventory must pass native syntax checking.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.equal(run(process.execPath, ["--check", path]).status, 0, path);
 	}
 
-	const doctorScript = readFileSync("scripts/platform-smoke/doctor.mjs", "utf8");
+	const doctorScript = readFileSync("scripts/platform-smoke/doctor-windows.mjs", "utf8");
 	assert.match(doctorScript, /cleanup failed/);
 
 	for (const path of [
 		"scripts/platform-smoke/platform-build-windows.ps1",
 		"scripts/platform-smoke/browser-dogfood-windows.ps1",
 	]) {
+		// Both fixed native Windows scripts must exist.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
 		assert.ok(existsSync(path), `${path} should exist`);
 		const powershellScript = readFileSync(path, "utf8");
 		if (path.endsWith("browser-dogfood-windows.ps1")) {
+			// This dogfood script alone must not perform a global npm install.
+			// oxlint-disable-next-line node-test/no-conditional-assertion
 			assert.doesNotMatch(powershellScript, /npm\s+install\s+-g/);
+			// This dogfood script alone must not install upstream browser assets.
+			// oxlint-disable-next-line node-test/no-conditional-assertion
 			assert.doesNotMatch(powershellScript, /agent-browser\s+install/);
 		}
 	}
@@ -48,23 +63,29 @@ test("platform smoke scripts have working syntax and help", () => {
 });
 
 test("platform smoke config and package scripts require macOS, Ubuntu, and native Windows", () => {
-	const packageJson = JSON.parse(readFileSync("package.json", "utf8")) as {
-		files?: string[];
-		scripts?: Record<string, string>;
-	};
-	assert.ok(packageJson.files?.includes("platform-smoke.config.mjs"));
-	assert.ok(packageJson.files?.includes("scripts/platform-smoke.mjs"));
-	assert.ok(packageJson.files?.includes("scripts/platform-smoke"));
-	assert.ok(packageJson.files?.includes("docs/platform-smoke.md"));
-	assert.match(packageJson.scripts?.["check:platform-smoke"] ?? "", /node --check scripts\/platform-smoke\.mjs/);
-	assert.match(packageJson.scripts?.["check:platform-smoke"] ?? "", /test\/platform-smoke\.test\.ts/);
-	assert.equal(packageJson.scripts?.["smoke:platform:doctor"], "node scripts/platform-smoke.mjs doctor");
-	assert.match(packageJson.scripts?.["smoke:platform:ubuntu-image"] ?? "", /build-ubuntu-image\.mjs/);
-	assert.match(packageJson.scripts?.["smoke:platform:all"] ?? "", /smoke:platform:doctor/);
-	assert.match(packageJson.scripts?.["smoke:platform:all"] ?? "", /macos,ubuntu,windows-native/);
-	assert.match(packageJson.scripts?.["smoke:platform:windows-native"] ?? "", /windows-native/);
+	const packageJson = readRecord(JSON.parse(readFileSync("package.json", "utf8")));
+	const files = readArray(packageJson.files);
+	const scripts = readRecord(packageJson.scripts);
+	assert.ok(files.includes("platform-smoke.config.mjs"));
+	assert.ok(files.includes("scripts/platform-smoke.mjs"));
+	assert.ok(files.includes("scripts/platform-smoke"));
+	assert.ok(files.includes("docs/platform-smoke.md"));
+	assert.match(
+		readString(scripts["check:platform-smoke"]),
+		/node --check scripts\/platform-smoke\.mjs/,
+	);
+	assert.match(readString(scripts["check:platform-smoke"]), /test\/platform-smoke\.test\.ts/);
+	assert.equal(scripts["smoke:platform:doctor"], "node scripts/platform-smoke.mjs doctor");
+	assert.match(readString(scripts["smoke:platform:ubuntu-image"]), /build-ubuntu-image\.mjs/);
+	assert.match(readString(scripts["smoke:platform:all"]), /smoke:platform:doctor/);
+	assert.match(readString(scripts["smoke:platform:all"]), /macos,ubuntu,windows-native/);
+	assert.match(readString(scripts["smoke:platform:windows-native"]), /windows-native/);
 	const linuxImage = readFileSync("scripts/platform-smoke/linux-image/Dockerfile", "utf8");
-	for (const dependency of ["libvulkan1", "mesa-vulkan-drivers", "xvfb"]) assert.match(linuxImage, new RegExp(`\\b${dependency}\\b`));
+	for (const dependency of ["libvulkan1", "mesa-vulkan-drivers", "xvfb"]) {
+		// Every fixed Ubuntu graphics dependency must remain in the image.
+		// oxlint-disable-next-line node-test/no-conditional-assertion
+		assert.match(linuxImage, new RegExp(`\\b${dependency}\\b`));
+	}
 
 	const code = String.raw`
 import config, * as configModule from "./platform-smoke.config.mjs";
@@ -152,23 +173,23 @@ try {
   mkdirSync(suiteDir, { recursive: true });
   writeFileSync(join(suiteDir, "present.txt"), "ok");
   const manifest = writeManifest(suiteDir, ["artifact-manifest.json", "present.txt", "missing.txt"]);
-  const cleanup = createLeaseCleanupFailureResult({ artifactRoot: root, packageName: "pi-agent-browser-native" }, "ubuntu", "cbx_failed", {
+  const cleanup = createLeaseCleanupFailureResult({ config: { artifactRoot: root, packageName: "pi-agent-browser-native" }, targetName: "ubuntu", leaseId: "cbx_failed", stopResult: {
     stdout: "",
     stderr: "stop failed",
     code: 1,
     signal: null,
-  });
-  const cleanupSuccess = createLeaseCleanupResult({ artifactRoot: root, packageName: "pi-agent-browser-native" }, "ubuntu", "cbx_ok", {
+  }});
+  const cleanupSuccess = createLeaseCleanupResult({ config: { artifactRoot: root, packageName: "pi-agent-browser-native" }, targetName: "ubuntu", leaseId: "cbx_ok", stopResult: {
     stdout: "stopped",
     stderr: "",
     code: 0,
     signal: null,
-  }, {
+  }, staleCleanupResult: {
     stdout: "cleaned stale clones",
     stderr: "",
     code: 0,
     signal: null,
-  });
+  }});
   const warmupFailure = createLeaseWarmupFailureResult({ artifactRoot: root, packageName: "pi-agent-browser-native" }, "ubuntu", {
     stdout: "",
     stderr: "warmup failed",

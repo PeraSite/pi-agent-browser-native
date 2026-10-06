@@ -3,6 +3,7 @@
  */
 
 import assert from "node:assert/strict";
+import { readRecord, readString } from "./helpers/assertions.js";
 import test from "node:test";
 
 import { buildToolPresentation } from "../extensions/agent-browser/lib/results/presentation.js";
@@ -27,7 +28,9 @@ test("formatSemanticActionPresentationText prefers compact action line over loca
 
 test("shouldCaptureSemanticActionNavigationSummary probes find click without title or url", () => {
 	assert.equal(
-		shouldCaptureSemanticActionNavigationSummary(semanticClick, { clicked: "[data-agent-browser-located='true']" }),
+		shouldCaptureSemanticActionNavigationSummary(semanticClick, {
+			clicked: "[data-agent-browser-located='true']",
+		}),
 		true,
 	);
 	assert.equal(
@@ -38,7 +41,13 @@ test("shouldCaptureSemanticActionNavigationSummary probes find click without tit
 		}),
 		false,
 	);
-	assert.equal(shouldCaptureSemanticActionNavigationSummary({ ...semanticClick, action: "fill" }, { filled: true }), false);
+	assert.equal(
+		shouldCaptureSemanticActionNavigationSummary(
+			{ ...semanticClick, action: "fill" },
+			{ filled: true },
+		),
+		false,
+	);
 });
 
 test("buildToolPresentation enriches semanticAction find click like direct click", async () => {
@@ -60,13 +69,13 @@ test("buildToolPresentation enriches semanticAction find click like direct click
 	});
 
 	assert.equal(presentation.content[0]?.type, "text");
-	const text = (presentation.content[0] as { text: string }).text;
-	assert.match(text, /Clicked: text "Close"/);
-	assert.match(text, /Current page:/);
-	assert.match(text, /Destination Docs/);
-	assert.match(text, /https:\/\/example.com\/docs/);
+	const text = readRecord(presentation.content[0]).text;
+	assert.match(readString(text), /Clicked: text "Close"/);
+	assert.match(readString(text), /Current page:/);
+	assert.match(readString(text), /Destination Docs/);
+	assert.match(readString(text), /https:\/\/example.com\/docs/);
 	assert.match(presentation.summary, /click → Destination Docs/);
 	assert.equal(presentation.pageChangeSummary?.changeType, "navigation");
-	assert.equal(presentation.pageChangeSummary?.command, "click");
+	assert.equal(presentation.pageChangeSummary.command, "click");
 	assert.deepEqual(presentation.nextActions?.[0]?.params?.args, ["snapshot", "-i"]);
 });

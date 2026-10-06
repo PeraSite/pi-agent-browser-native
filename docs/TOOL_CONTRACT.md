@@ -1,6 +1,7 @@
 # Tool contract
 
 Related docs:
+
 - [`../README.md`](../README.md)
 - [`REQUIREMENTS.md`](REQUIREMENTS.md)
 - [`ARCHITECTURE.md`](ARCHITECTURE.md)
@@ -23,6 +24,7 @@ Official Pi 1.0's initial SDK resume supplies an initial tool selection that byp
 ## Why this tool shape
 
 This keeps the integration:
+
 - thin
 - powerful
 - low-drift
@@ -43,9 +45,9 @@ An SDK host can import the package's compiled `dist/extensions/agent-browser/ind
 
 ```ts
 agentBrowserExtension(pi, {
-  async beforeExecute(toolCallId, ctx) {
-    await saveHostState(toolCallId, ctx.signal);
-  },
+	async beforeExecute(toolCallId, ctx) {
+		await saveHostState(toolCallId, ctx.signal);
+	},
 });
 ```
 
@@ -65,13 +67,13 @@ Config shape:
 
 ```json
 {
-  "webSearch": {
-    "enabled": true,
-    "preferredProvider": "exa",
-    "defaultSearchType": "deep-lite",
-    "exaApiKey": "$EXA_API_KEY",
-    "braveApiKey": "$BRAVE_API_KEY"
-  }
+	"webSearch": {
+		"enabled": true,
+		"preferredProvider": "exa",
+		"defaultSearchType": "deep-lite",
+		"exaApiKey": "$EXA_API_KEY",
+		"braveApiKey": "$BRAVE_API_KEY"
+	}
 }
 ```
 
@@ -79,24 +81,25 @@ Schema:
 
 ```json
 {
-  "query": "search text",
-  "provider": "auto",
-  "searchType": "deep-lite",
-  "includeDomains": ["docs.exa.ai"],
-  "excludeDomains": ["archive.example"],
-  "category": "publication",
-  "additionalQueries": ["Exa search API defaults"],
-  "highlightsDynamic": false,
-  "count": 5,
-  "offset": 0,
-  "country": "US",
-  "searchLang": "en-US",
-  "safesearch": "moderate",
-  "freshness": "pw"
+	"query": "search text",
+	"provider": "auto",
+	"searchType": "deep-lite",
+	"includeDomains": ["docs.exa.ai"],
+	"excludeDomains": ["archive.example"],
+	"category": "publication",
+	"additionalQueries": ["Exa search API defaults"],
+	"highlightsDynamic": false,
+	"count": 5,
+	"offset": 0,
+	"country": "US",
+	"searchLang": "en-US",
+	"safesearch": "moderate",
+	"freshness": "pw"
 }
 ```
 
 Provider notes:
+
 - `provider` is optional; `auto` uses available keys plus `webSearch.preferredProvider`.
 - `offset` skips results, not pages, for both providers. Each fetches the first `count + offset` results and slices locally; the maximum request is 19 results (`count: 10`, `offset: 9`), within Brave's 20-result page limit.
 - `searchType` applies to Exa only and supports `auto`, `fast`, `instant`, `deep-lite`, `deep`, and `deep-reasoning`. Effective precedence is the per-call field, then `webSearch.defaultSearchType`, then `auto`. Use `deep-lite` for implementation research, `deep` for hard multi-source work, and `deep-reasoning` only for the hardest or exhaustive work.
@@ -111,26 +114,26 @@ Result details:
 
 ```json
 {
-  "provider": "exa",
-  "query": "search text",
-  "returnedQuery": "search text",
-  "count": 5,
-  "offset": 0,
-  "searchType": "deep-lite",
-  "requestId": "request-id-when-provider-returns-one",
-  "duplicatesRemoved": 1,
-  "fetchedAt": "2026-06-02T00:00:00.000Z",
-  "results": [
-    {
-      "title": "Result title",
-      "url": "https://example.com/",
-      "description": "Compact summary or first highlight",
-      "highlights": ["Relevant excerpt"],
-      "source": "Example",
-      "pageDate": "2026-06-02",
-      "language": "en"
-    }
-  ]
+	"provider": "exa",
+	"query": "search text",
+	"returnedQuery": "search text",
+	"count": 5,
+	"offset": 0,
+	"searchType": "deep-lite",
+	"requestId": "request-id-when-provider-returns-one",
+	"duplicatesRemoved": 1,
+	"fetchedAt": "2026-06-02T00:00:00.000Z",
+	"results": [
+		{
+			"title": "Result title",
+			"url": "https://example.com/",
+			"description": "Compact summary or first highlight",
+			"highlights": ["Relevant excerpt"],
+			"source": "Example",
+			"pageDate": "2026-06-02",
+			"language": "en"
+		}
+	]
 }
 ```
 
@@ -138,17 +141,17 @@ For Exa, `details.searchType` is the effective requested type even when the prov
 
 ## Input mode chooser
 
-| Need | Tool | Input |
-| --- | --- | --- |
-| One native command | `agent_browser` | `{ args, stdin?, outputPath?, timeoutMs?, sessionMode? }` |
-| Fixed sequence | `agent_browser` | `args: ["batch", "--bail"]` and native JSON-array `stdin` |
-| Loops, branches, aggregation | `agent_browser_code` | `{ code, session?, namespace?, timeoutMs?, outputPath? }` |
-| Discover/enable advanced tools | `agent_browser_tools` | `{ enable?: ["action", "qa", "electron", "source", "network"] }` |
-| Stable locator or native select | `agent_browser_action` | Flat action/locator fields |
-| Diagnostic verdict | `agent_browser_qa` | Flat URL or attached-check fields |
-| Desktop app lifecycle | `agent_browser_electron` | Flat action/target fields |
-| UI/source candidates | `agent_browser_source` | Flat selector/fiber/component fields |
-| Failed-request/source candidates | `agent_browser_network_source` | Flat request/filter fields |
+| Need                             | Tool                           | Input                                                            |
+| -------------------------------- | ------------------------------ | ---------------------------------------------------------------- |
+| One native command               | `agent_browser`                | `{ args, stdin?, outputPath?, timeoutMs?, sessionMode? }`        |
+| Fixed sequence                   | `agent_browser`                | `args: ["batch", "--bail"]` and native JSON-array `stdin`        |
+| Loops, branches, aggregation     | `agent_browser_code`           | `{ code, session?, namespace?, timeoutMs?, outputPath? }`        |
+| Discover/enable advanced tools   | `agent_browser_tools`          | `{ enable?: ["action", "qa", "electron", "source", "network"] }` |
+| Stable locator or native select  | `agent_browser_action`         | Flat action/locator fields                                       |
+| Diagnostic verdict               | `agent_browser_qa`             | Flat URL or attached-check fields                                |
+| Desktop app lifecycle            | `agent_browser_electron`       | Flat action/target fields                                        |
+| UI/source candidates             | `agent_browser_source`         | Flat selector/fiber/component fields                             |
+| Failed-request/source candidates | `agent_browser_network_source` | Flat request/filter fields                                       |
 
 Run `agent_browser_tools {}` for inventory; `enable` adds selected capabilities without removing unrelated active tools. Pi's native selected-tool history handles reload/resume rather than a package-owned activation registry. If an exact recovery action names an inactive advanced tool, enable its capability before using that payload.
 
@@ -200,7 +203,7 @@ Upstream 0.35.2 adds `dashboard start --allowed-origins <origins>` and `AGENT_BR
 
 ## Headed and local fixture limits
 
-Local Chrome uses stock `--args --no-startup-window` at bootstrap and composes it consistently with caller-configured Chrome arguments (CLI overrides environment, which overrides native config). Plain active-session follow-ups do not resend bootstrap settings. A pre-existing custom-argument browser may restart once because stock Chrome launch arguments form part of native session identity; there is no migration or launch-settings journal. Headless remains the default. CDP/auto-connect, providers, Electron, and Lightpanda do not receive this Chrome default. The wrapper does not delete tabs or edit profiles.
+Local Chrome uses stock `--args --no-startup-window` at bootstrap only when native environment/config does not own local launch defaults; caller CLI argument values then follow that default. With native environment/config launch defaults, no wrapper Chrome startup arguments are injected, keeping browser, local auth, and helper invocations consistent. Include `--no-startup-window` in native `args` when a single headed window is required. CLI still overrides environment, which overrides native config. Plain active-session follow-ups do not resend wrapper bootstrap settings. Changed launch settings can trigger native's normal session-identity restart; there is no migration or launch-settings journal. Headless remains the default. CDP/auto-connect, providers, Electron, and Lightpanda do not receive this Chrome default. The wrapper does not delete tabs or edit profiles.
 
 URL-less `open` is executed as native `get url`, including effective raw/stdin batch rows and code calls. This lazily opens a missing browser without navigating an existing page or issuing a second incomplete launch. `details.args` retains the request; `effectiveArgs`, `command`, native URL data and lifecycle show what ran. No launch receipt is synthesized. Explicit URLs, required-URL errors for `goto`/`navigate`, and top-level help/version argv keep their native meanings. Ignored batch stdin remains unchanged.
 
@@ -218,6 +221,7 @@ URL-less `open` is executed as native `get url`, including effective raw/stdin b
 
 <!-- agent-browser-playbook:start shared-guidelines -->
 <!-- Generated from extensions/agent-browser/lib/playbook.ts. Run `npm run docs -- playbook write` to update. -->
+
 - Choose agent_browser for one native command, native batch --bail with JSON-array stdin for a known fixed sequence, or agent_browser_code for loops, branches, and aggregation. Return to the model when a fresh observation needs judgment. Neither tool is a named recipe registry.
 - agent_browser_code takes { code, session?, namespace?, timeoutMs?, outputPath? }. JavaScript globals are fresh for every call; the selected browser persists and is shared with agent_browser. Use await browser({ args, stdin?, timeoutMs? }), inspect result.success, and emit selected JSON instead of whole envelopes. Use emitImage(result.imageObservations[0]) only when image inspection is needed; image handles belong to the current code call. No imports or host filesystem/network/process APIs are exposed.
 - Standard workflow: open the page, snapshot -i, interact using current @refs from that snapshot, and re-snapshot after navigation, scrolling, rerendering, or other major DOM changes because refs are page-scoped; the wrapper fails mutation-prone stale/recycled refs before upstream can silently target a different current-page element. On dense pages, use wrapper-side snapshot -i --search <text> or snapshot -i --filter role=<role> to render matching refs while preserving the full ref map in details.refSnapshot, add snapshot --viewport when scroll position or above/below-fold context matters, and add snapshot --diff when a quick before/after ref-map delta would prevent reading a full spill file.
@@ -260,6 +264,7 @@ URL-less `open` is executed as native `get url`, including effective raw/stdin b
 - Respect explicit user stop boundaries yourself. When the surrounding authenticated employee or automation context is explicitly unattended/auto-approved, ordinary non-destructive form submissions within the requested flow may proceed without separate confirmation. Still require explicit authorization for purchases, production-control actions, destructive or irreversible actions, and account, security, or privacy changes. The wrapper does not infer broad business intent from prompt text; details.promptGuard is reserved for concrete artifact-before-close checks.
 - Recording needs ffmpeg on PATH before start. Current upstream checks it at startup; older natives may defer failure. A pending recording is not verified output.
 - Do not call --help or other exploratory inspection commands unless the user explicitly asks for them or debugging the browser integration is necessary.
+
 <!-- agent-browser-playbook:end shared-guidelines -->
 
 ## Parameters
@@ -316,13 +321,13 @@ The browser persists between code and direct calls. JavaScript variables do not.
 
 ```json
 {
-  "code": "const page = await browser({ args: ['get', 'title'] }); if (!page.success) throw new Error(page.error); emit({ title: page.data.title ?? page.data.result });"
+	"code": "const page = await browser({ args: ['get', 'title'] }); if (!page.success) throw new Error(page.error); emit({ title: page.data.title ?? page.data.result });"
 }
 ```
 
 ```json
 {
-  "code": "const shot = await browser({ args: ['screenshot', '/tmp/page.png'] }); if (!shot.success) throw new Error(shot.error); emit(shot.artifactVerification); if (shot.imageObservations?.length) emitImage(shot.imageObservations[0]);"
+	"code": "const shot = await browser({ args: ['screenshot', '/tmp/page.png'] }); if (!shot.success) throw new Error(shot.error); emit(shot.artifactVerification); if (shot.imageObservations?.length) emitImage(shot.imageObservations[0]);"
 }
 ```
 
@@ -342,16 +347,16 @@ Abort, timeout, branch change, reload, and shutdown stop/reap the child, settle 
 
 Enable `action` through `agent_browser_tools`, then call the tool with flat fields. Optional `outputPath` and `timeoutMs` apply to the ordinary executor; this tool has no `sessionMode` field.
 
-| Field | Contract |
-| --- | --- |
-| `action` | Required: `click`, `check`, `fill`, or `select` |
-| `selector` | Direct CSS/selector/current-ref target; cannot combine with locator fields for click/check/fill |
-| `locator` | `role`, `text`, `label`, `placeholder`, `alt`, `title`, or `testid`; select supports only role/label |
-| `value` | Locator value or one select option; for label select, this is the label |
-| `values` | One or more select options; required for label select; rejected on other actions |
-| `text` | Fill text; required for fill, rejected on select |
-| `role`, `name` | Accessible role and optional name; role may replace locator value and must agree if both are given |
-| `session` | Explicit native session; preserved in compiled commands and recovery |
+| Field          | Contract                                                                                             |
+| -------------- | ---------------------------------------------------------------------------------------------------- |
+| `action`       | Required: `click`, `check`, `fill`, or `select`                                                      |
+| `selector`     | Direct CSS/selector/current-ref target; cannot combine with locator fields for click/check/fill      |
+| `locator`      | `role`, `text`, `label`, `placeholder`, `alt`, `title`, or `testid`; select supports only role/label |
+| `value`        | Locator value or one select option; for label select, this is the label                              |
+| `values`       | One or more select options; required for label select; rejected on other actions                     |
+| `text`         | Fill text; required for fill, rejected on select                                                     |
+| `role`, `name` | Accessible role and optional name; role may replace locator value and must agree if both are given   |
+| `session`      | Explicit native session; preserved in compiled commands and recovery                                 |
 
 Locator click/check/fill compiles to native `find`; direct targets compile to their ordinary command. Select uses native `select <selector> <value...>`. Accessible select resolves exactly one current visible combobox/listbox through a fresh snapshot or the eligible one-use confirmed capture; missing or ambiguous targets fail before action. Use `role: "combobox"` or `"listbox"` plus `name`, or label plus option `values`. No native `find ... select` capability is assumed.
 
@@ -384,13 +389,13 @@ The verdict is `qaPreset: { passed, failedChecks, notRunChecks, warnings, summar
 
 Enable `electron`. Inputs are flat `{ action, ...fields, outputPath? }`; caller `stdin` and `sessionMode` are not accepted. The [Electron guide](ELECTRON.md) covers workflows and ownership.
 
-| Action | Fields | Behavior |
-| --- | --- | --- |
-| `list` | `query?`, `maxResults?` | Host-only bounded discovery; default 50, cap 200. No timeout field. macOS/Linux scanning only; Windows returns unsupported discovery. |
-| `launch` | Exactly one of `appPath`, `appName`, `bundleId`, `executablePath`; `appArgs?`, `handoff?`, `targetType?`, `timeoutMs?`, `allow?`, `deny?` | Verify Electron evidence, create a temporary isolated profile/OS-chosen debug port, attach through native connect, hand off, and record ownership. |
-| `status` | `launchId?` or `all: true`, `timeoutMs?` | Inspect tracked PID/port/profile and targets; explicit cleaned IDs remain inspectable as historical records. |
-| `probe` | `launchId?`, `timeoutMs?` | Verify URL then read title/focus/tabs/snapshot with owned session settings. Without an ID, inspect the current attached managed session. |
-| `cleanup` | `launchId?` or `all: true`, `timeoutMs?` | Close the tracked native session, stop only the owned app, verify port shutdown, remove its temporary profile. Partial cleanup fails with exact retry guidance. |
+| Action    | Fields                                                                                                                                    | Behavior                                                                                                                                                        |
+| --------- | ----------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `list`    | `query?`, `maxResults?`                                                                                                                   | Host-only bounded discovery; default 50, cap 200. No timeout field. macOS/Linux scanning only; Windows returns unsupported discovery.                           |
+| `launch`  | Exactly one of `appPath`, `appName`, `bundleId`, `executablePath`; `appArgs?`, `handoff?`, `targetType?`, `timeoutMs?`, `allow?`, `deny?` | Verify Electron evidence, create a temporary isolated profile/OS-chosen debug port, attach through native connect, hand off, and record ownership.              |
+| `status`  | `launchId?` or `all: true`, `timeoutMs?`                                                                                                  | Inspect tracked PID/port/profile and targets; explicit cleaned IDs remain inspectable as historical records.                                                    |
+| `probe`   | `launchId?`, `timeoutMs?`                                                                                                                 | Verify URL then read title/focus/tabs/snapshot with owned session settings. Without an ID, inspect the current attached managed session.                        |
+| `cleanup` | `launchId?` or `all: true`, `timeoutMs?`                                                                                                  | Close the tracked native session, stop only the owned app, verify port shutdown, remove its temporary profile. Partial cleanup fails with exact retry guidance. |
 
 ```json
 { "action": "launch", "appName": "Visual Studio Code", "handoff": "snapshot" }
@@ -450,7 +455,10 @@ For `eval --stdin`, put the script in the top-level `stdin` field. The wrapper n
 ```
 
 ```json
-{ "args": ["auth", "save", "my-login", "--password-stdin"], "stdin": "password from the user-approved secret source" }
+{
+	"args": ["auth", "save", "my-login", "--password-stdin"],
+	"stdin": "password from the user-approved secret source"
+}
 ```
 
 ### `outputPath`
@@ -466,7 +474,11 @@ For `eval --stdin`, put the script in the top-level `stdin` field. The wrapper n
 Example:
 
 ```json
-{ "args": ["eval", "--stdin"], "stdin": "({ title: document.title, url: location.href })", "outputPath": "logs/page-state.json" }
+{
+	"args": ["eval", "--stdin"],
+	"stdin": "({ title: document.title, url: location.href })",
+	"outputPath": "logs/page-state.json"
+}
 ```
 
 ### `timeoutMs`
@@ -494,6 +506,7 @@ A native `session` default from user/project JSON or `AGENT_BROWSER_SESSION` sel
 - default: `"auto"`
 
 Behavior:
+
 - if `args` already include `--session` (including argv compiled from `agent_browser_action.session`), upstream session choice wins
 - `"auto"` prepends the current extension-managed active session when appropriate
 - after resume, a confirmed inactive wrapper-owned daemon with automatic managed restore enabled reopens its complete recorded URL, including its fragment, before the first current-page operation, including `get url` and `reload`. Non-page calls such as `tab list` or explicit HTTP `read <url>` can start a daemon without consuming that pending reopen, even across branch/reload replay. The wrapper verifies the observed tab and invalidates old refs; native `open` resets frame scope. This reloads the page with restored cookies/storage, not unsaved forms, JavaScript memory, or history. Live wrong-tab recovery does not navigate. Explicit URL reads, URL `a11y`/`vitals`, `diff url`, `window new`, URL-bearing recording commands, and explicit navigation/context changes do not require the old tab. Caller-owned/attached and restore-disabled sessions are not auto-reopened
@@ -504,6 +517,7 @@ Behavior:
 - sessionless paths skip that injection even under `"auto"`: plain-text help/version, read-only skills, local auth/profile/setup commands, `session list`, and syntactically local state lifecycle operations keep `effectiveArgs` free of the implicit managed `--session` unless the caller supplied one. All upstream rows and supported targets remain available. Browser-backed or context-dependent commands such as `auth login` and `state save/load` keep normal managed-session injection when the caller did not choose an explicit session (`extensions/agent-browser/lib/command-policy.ts`, `needsManagedSession`; `extensions/agent-browser/lib/runtime.ts`, `buildExecutionPlan`)
 
 Recommended use:
+
 - use `"auto"` for the common browse/snapshot/click flow inside one `pi` session
 - use `"fresh"` when switching from an already-active implicit session to domain containment or a new profile/browser executable/debug/auth/provider launch without inventing a fixed explicit session name
 - when a fresh launch fails or times out before becoming current, check `details.managedSessionOutcome`: it states whether the prior managed session was preserved or whether the attempted fresh session was abandoned because no prior managed session existed; when `sessionMode` is `"fresh"` and the tool ultimately fails, the model-visible result also appends `Managed session outcome: …` (see `#details` below). Failures under `sessionMode: "auto"` still expose the struct on `details` when the extension injects a managed `--session`, but they do not add that extra prose line.
@@ -513,6 +527,7 @@ Recommended use:
 Caller `args` may omit `--json` for structured details and prose; explicit `--json false` selects opaque native text. See [Wrapper `--json`](#wrapper-json).
 
 The extension should:
+
 - inject `--json` when no caller output mode is selected
 - invoke `agent-browser` directly, not through a shell
 - parse JSON-mode output into tool details
@@ -522,6 +537,7 @@ The extension should:
 
 <!-- agent-browser-playbook:start inspection -->
 <!-- Generated from extensions/agent-browser/lib/playbook.ts. Run `npm run docs -- playbook write` to update. -->
+
 Native inspection calls use the `agent_browser` tool shape, not shell-like direct-binary commands:
 
 - { "args": ["--help"] }
@@ -529,6 +545,7 @@ Native inspection calls use the `agent_browser` tool shape, not shell-like direc
 
 These calls return plain text and stay stateless: the extension does not inject its implicit session and does not let inspection consume the managed-session slot needed for later profile, session, CDP, state, auto-connect, or provider-backed launches.
 <!-- agent-browser-playbook:end inspection -->
+
 - still describe normal browser workflows in guidance so models do not overuse inspection for routine tasks
 - surface stderr and non-zero exits clearly
 - attach images when the result points to a screenshot-like artifact
@@ -560,6 +577,7 @@ Conditional `changed: false` captures have no new image/artifact attachment. A p
 ### Content
 
 Primary content should be:
+
 - useful result text for the model, not just a status line
 - an image attachment when relevant
 - browser-aware compacting for oversized snapshots so the model gets a concise actionable view before raw page noise
@@ -568,6 +586,7 @@ Primary content should be:
 - wrapper-side `snapshot -i --search <text>` and `snapshot -i --filter role=<role>` filters should strip those wrapper-only flags before upstream spawn, preserve the full latest ref map in `details.refSnapshot`, and render matching direct refs plus surrounding snapshot context with `details.snapshotFilter` counts so dense-page agents can find controls without opening raw spill files; search should also run one bounded read-only rendered-DOM probe across the full document so visible below-fold warnings and accessible labels omitted from the accessibility snapshot remain discoverable while hidden nodes stay excluded; the visible summary should distinguish direct ref matches from rendered/contextual matches to avoid apparent count mismatches; wrapper-side `--viewport` should also strip before upstream spawn, run one read-only viewport/scroll probe, and report `details.snapshotViewport`; wrapper-side `--diff` should strip before upstream spawn and report `details.snapshotDiff` against the previous wrapper-tracked ref map for that session
 
 Examples:
+
 - small `snapshot` results should include the actual snapshot text
 - oversized `snapshot` results should switch to a compact view that preserves the primary content, nearby sections, a trimmed set of high-value refs, and a separate bounded list of omitted high-value controls when dense pages or desktop host screens would otherwise hide editable inputs, named surfaces/tabs, or primary action buttons, while exposing the full redacted snapshot path directly in the rendered tool text and via `details.fullOutputPath`
 - successful navigation actions like `click`, `back`, `forward`, and `reload` should include a lightweight post-action title/url summary when the wrapper can address the active session
@@ -580,22 +599,22 @@ Recommended details:
 
 ```json
 {
-  "args": ["snapshot", "-i"],
-  "effectiveArgs": ["--json", "--session", "pi-abc123", "snapshot", "-i"],
-  "command": "snapshot",
-  "sessionMode": "auto",
-  "sessionName": "pi-abc123",
-  "usedImplicitSession": true,
-  "resultCategory": "success",
-  "successCategory": "completed",
-  "data": {
-    "origin": "https://example.com/",
-    "refs": {
-      "e1": { "name": "Example Domain", "role": "heading" }
-    },
-    "snapshot": "- heading \"Example Domain\" [level=1, ref=e1]"
-  },
-  "summary": "Snapshot: 1 refs on https://example.com/"
+	"args": ["snapshot", "-i"],
+	"effectiveArgs": ["--json", "--session", "pi-abc123", "snapshot", "-i"],
+	"command": "snapshot",
+	"sessionMode": "auto",
+	"sessionName": "pi-abc123",
+	"usedImplicitSession": true,
+	"resultCategory": "success",
+	"successCategory": "completed",
+	"data": {
+		"origin": "https://example.com/",
+		"refs": {
+			"e1": { "name": "Example Domain", "role": "heading" }
+		},
+		"snapshot": "- heading \"Example Domain\" [level=1, ref=e1]"
+	},
+	"summary": "Snapshot: 1 refs on https://example.com/"
 }
 ```
 
@@ -703,6 +722,7 @@ Implementation and precedence:
 - The main tool implementation merges these fields into Pi-facing `details` from `extensions/agent-browser/index.ts` and from `extensions/agent-browser/lib/results/presentation.ts` for presentation-time failures.
 
 Additional structured fields can appear when relevant:
+
 - `sessionTabReopenPending: boolean` persists a confirmed-cold managed session's outstanding URL reopen through non-page commands and branch/reload replay. `true` means a daemon may have started but the remembered page has not been reopened; `false` means a reopen attempt or an executed explicit context/navigation command consumed the obligation, not that navigation succeeded. Cancellation after the reopen CLI starts returns `failureCategory: "aborted"`, the exact `sessionName` / `namespace`, the consumed `false` marker and ref invalidation through the normal result path, so replay cannot repeat the navigation. Cancellation before the CLI starts leaves the obligation pending. Successful close clears it with the rest of that session's page state. Internal remembered URLs retain their complete fragment; comparison remains fragment-insensitive and presentation redaction is unchanged. Old persisted targets without a fragment cannot reconstruct it.
 - `closeAllApplied: true` when a successful direct or nested `close` / `quit` / `exit --all` reached upstream. The marker makes live state and transcript replay clear every managed/attached/page/ref/route/trace/recording identity in the effective canonical namespace; a later batch row that proves browser reactivation may rebuild only the effective session.
 - `attachedBrowserSession: true` on successful calls that establish or reuse a wrapper-tracked CDP/auto-connect/Electron attachment, and on a failed fresh attachment only when `managedSessionOutcome.activeAfter` proves its daemon remained active for cleanup. The marker restores attachment continuity from the active transcript branch, including that active-after-failure case; live state and transcript replay remove it after a terminal successful close/cleanup even when aggregate verification failed; a close followed by a later step whose lifecycle reports a browser launch preserves it, while a successful non-launching diagnostic leaves the close terminal. Caller config, environment, paths, and file-access settings remain upstream-owned; the marker only adds live-URL verification and lifecycle continuity.
@@ -750,8 +770,8 @@ Additional structured fields can appear when relevant:
 - `imagePath` / `imagePaths` for Pi inline image attachments from the **`screenshot`** command (including batched screenshot steps). **`diff screenshot`** still records the diff output as an `image`-kind entry in `details.artifacts`, but it does **not** populate `imagePath` / `imagePaths` or attach an inline image: only plain `screenshot` is treated as a trusted live-capture path for automatic inlining (`isTrustedScreenshotOutput` in `extensions/agent-browser/lib/results/presentation/artifacts.ts`).
 - `artifacts` for saved files such as screenshots, `state save` outputs, `diff screenshot` diff images, PDFs, downloads, `wait --download` / `wait -d` files, traces, CPU profiles, completed video recordings, path-bearing HAR captures, and future recording output paths reported by `record start` / `record restart`. Non-file URL payloads such as `data:` / `blob:` / `http(s):` values are not treated as verified local artifacts. For direct artifact commands and batch artifact steps, the wrapper creates parent directories for requested paths before spawning upstream. Filesystem `mkdir` failures at this shared preparation boundary return `validation-error`, `agentBrowserStarted: false`, the attempted directory and `verify-artifact-path` guidance. When execution cwd differs from the launch/project root, relative file operands in raw batch strings are bound to the captured invocation root; otherwise raw strings stay unchanged and absolute artifact paths are preferred. Each artifact includes the original saved or requested `path`, resolved `absolutePath`, `kind`/`artifactType`, optional `mediaType`, optional `extension`, best-effort disk metadata such as `exists`, `sizeBytes`, and `updatedAtMs`, plus `requestedPath`, `status`, `cwd`, `session`, `namespace`, and `tempPath` when applicable. `requestedPath` is retained only when known from the caller, separately from reported/resolved locations; a differing screenshot report remains in `tempPath` and is displayed as `Reported path`, whether it is a temporary file or a canonical path alias. Ordinary file `mediaType` values come from bounded PNG/JPEG/GIF/WebP header recognition, not suffixes; unknown, missing, unreadable or truncated headers leave it undefined. Header recognition is not full-file format validation. Inline screenshot attachments use the same byte classifier and existing size limit. For commands that create/update artifacts, a path that existed but was not updated during this command uses `status: "stale"`; observational `wait --download` may accept a file completed just before the wait began. Pending `record start` / `record restart` artifacts use `status: "pending"`, omit `exists` rather than reporting false, and include `recordingState: "openRecording"` / `willExistOnStop: true`. Within one Pi extension process, the wrapper keeps an unbounded transcript-backed active-recording reservation index separate from the bounded artifact manifest, keyed by canonical namespace plus session; still-live process-owned reservations survive branch switches, while known closures are appended after tree navigation and during shutdown/reload so a close on one branch cannot be resurrected after returning to an older branch. Persisted active reservations require absolute storage paths and cwd; their display paths may remain relative. If a journal append fails, the next serialized browser boundary, tree navigation, or shutdown retries all current reservations and known closures. `recordingPersistenceWarning` and visible warning text remain present while restart protection is not durable; successful recovery is quiet and cleanup still runs. Artifact lifecycle calls, explicit `wait --download <path>` / `wait -d <path>` destinations, and result `outputPath` writes serialize around the global destination check/update, every successful direct, ordered nested-batch, fresh-replacement, code, Electron, or shutdown close retires only its exact identity at that lifecycle point, and destination reuse is rejected through lexical, existing or dangling symlink, hardlink, full Unicode-fold, or macOS/Windows case aliases. Batch preflight rejects `record start` / `record restart` after a close row because upstream can report a recording that did not start; split those operations into separate calls. A `No recording in progress` stop failure, direct or nested, first checks the matching native receipt once. Retirement preserves the receipt and freshly checked file metadata; it never turns an existing file into a missing file merely because no recording is active. A later successful batch recording row opens its new pending path normally. Batch preflight applies the same distinct-destination rule to the steps upstream will execute: raw argument command strings exclusively when any exist, stdin arrays only otherwise; upstream-ignored stdin rows cannot fail artifact preflight, add pending recordings, or create parent directories. Parent directories are prepared for the effective steps in both modes; outside execution-directory binding, raw argument strings stay unchanged, so screenshot normalization and tracked path requests apply to stdin rows only. Outer CLI globals are removed before artifact parsing, but native batch row operands stay literal: `pdf --quick ignored.pdf` targets `--quick`, not `ignored.pdf`. Reservation checks, preparation, and requested-path presentation follow that same distinction. Recording path/URL consumers skip complete numeric `--fps` pairs without rewriting argv; native still validates rate, format and extra arguments. FPS-only calls keep the intended pinned tab.
 
-
   Recording destinations are reserved within one Pi process, not across processes. Use unique paths for concurrent Pi processes: different explicit sessions can overwrite one file even when both `record stop` results are verified. Upstream’s same-session `record start` guard does not reserve the filename across other sessions.
+
 - `savedFilePath` / `savedFile` for direct `download`, `pdf`, and `wait --download` / `wait -d` saved-file workflows when a host file path is reported or wrapper-verified. Batch results preserve the same fields on the relevant `batchSteps` entry. These fields are metadata only until `artifactVerification` verifies the file. Native `download <selector> <path>` always owns the click and download, including loopback links, generated Blob exports, and redirects; the wrapper does not substitute a fetch of an anchor's `href`.
 - `batchSteps[].artifacts` for per-step artifacts in `batch` output; top-level `artifacts` and `artifactManifest` coalesce an earlier pending recording into the later saved, missing, or stale terminal result for the same namespace/session identity. `record restart` includes both the previous recording it finalized (or an explicit missing/stale failure) and the new pending recording; missing/stale terminal rows retire the prior pending manifest row. A successful later `close` / `quit` / `exit` retires an earlier unfinalized pending recording as `subcommand: "close-abandoned"`, clears its stop action, and leaves its file unverified. Batch presentation checks the path: only a confirmed absent file becomes `status: "missing"`; a present or inaccessible file stays unverified. It updates aggregate verification/manifest state consistently; a later successful `record stop` replaces that intermediate abandoned row with its saved artifact. Close also resets ref/page/network-route state produced by earlier rows; later lifecycle-proven browser launches, including `record stop`, can rebuild that state without triggering stale pre-close `about:blank` recovery, explicitly non-launching diagnostics cannot, and unknown later rows stay conservatively active. Per-step history remains unchanged. When any later call on the same namespace/session fails while a recording remains pending, `nextActions` combines its normal recovery with exact `stop-pending-recording` args and visible cleanup guidance; the same applies at top level when a later batch step fails. After reload in a non-Git checkout or with managed restore disabled, a live daemon without current-instance provenance or a matching same-owner native daemon receipt cannot accept a stop. A tracked Electron attachment can rebuild that proof through the live debug-endpoint check described above; unproven restore-disabled sessions cannot rebuild provenance from a name or URL. That policy refusal includes `managedSessionCleanupOnlyReason: "restore-disabled-daemon-without-provenance"` plus the exact `sessionName`/`namespace`, including on implicit calls. It replaces the impossible stop with `close-pending-recording`, an exact close without `sessionMode: "fresh"`. Close retires the recording as `close-abandoned`; any file it leaves is unverified. Same-instance recordings and supported durable-Git reloads still use stop and normal WebM verification.
 - `artifactVerification` for a normalized verification summary on the unified result and on each successful `batchSteps[]` row and on failed recording rows whose receipt identifies an artifact. Top-level `batch` verification rolls up all step file artifacts; each step’s summary reflects that step’s nested tool presentation (including its spill paths and manifest slice). It reports `verified`, `verifiedCount`, `missingCount`, `pendingCount`, `unverifiedCount`, and `artifacts[]` entries with `path`, optional `absolutePath`, optional `requestedPath`, `kind` (a normal file artifact kind or `"spill"` for manifest-backed rows), optional `mediaType`, optional `exists`, optional `sizeBytes`, optional `updatedAtMs`, optional `status`, optional `retentionState` / `storageScope` on manifest-derived rows, `state` (`verified`, `missing`, `pending`, or `unverified`), and optional `limitation` (human-readable lifecycle or retention context, for example pending `record start` / `record restart`, missing, stale, or otherwise unverified files, ephemeral spill files, or evicted persisted spills). The summary `verified` boolean is true only when every entry is `verified`. `record start` / `record restart` are `pending` until `record stop`; `state load` may mention a path in command output but is not a saved artifact row.
@@ -806,6 +826,7 @@ A failed inner native confirmed action is a tool failure, including inside a bat
 The TUI renderer is user-facing only. It may compact or colorize what the human sees in the Pi transcript, but it must not further truncate, summarize, or remove the model-facing `content` returned by the tool. Use the existing `details.fullOutputPath` / spill-file contracts for content that is too large for the model.
 
 Worth doing in v1:
+
 - screenshots → saved-path summary, visible artifact metadata, `details.artifacts` metadata, and inline image attachment when safe; screenshot paths that upstream would treat ambiguously, such as `.dogfood/run/foo.png`, are normalized to absolute paths before launch and repaired from upstream temp output when possible
 - file artifacts such as PDFs, downloads, `wait --download` / `wait -d` files, `state save` state files, diff screenshot output images, traces, CPU profiles, completed video recordings, and path-bearing HAR captures → concise saved-path summaries plus metadata in `details.artifacts` and changed/referenced invocation receipts in `details.artifactManifest`; `record start` / `record restart` report recording lifecycle state and the future output path without adding a missing manifest entry, and `record restart` can also report the previous wrapper-known recording that was finalized by the restart; native 0.37 checks `ffmpeg` before starting video capture, while older supported natives may defer failure; successful start/restart calls without ffmpeg expose `details.recordingDependencyWarning` and leave output unverified until checked after stop; direct saved-file workflows also expose `details.savedFilePath` / `details.savedFile`; large or binary artifacts are not inlined into model context; the recent manifest cap can age out explicit-file metadata but does not remove explicit saved files from disk
 - `diff screenshot` → same file-artifact pattern as above for the **diff** image path only (summary text uses “Saved diff image” only when the diff output exists; missing output says “Diff image reported; file not verified” and fails as `artifact-missing`); baseline paths and other fields stay in the structured payload but are not echoed as separate saved artifacts in the visible artifact block, and there is no Pi inline image attachment for the diff output
@@ -825,6 +846,7 @@ Worth doing in v1:
 ## Missing binary behavior
 
 If `agent-browser` is not on `PATH`, fail with a message that:
+
 - says `agent-browser` is required
 - says this project does not bundle it
 - points to upstream install/docs
@@ -851,15 +873,19 @@ If `agent-browser` is not on `PATH`, fail with a message that:
 - treat every explicit caller-provided `--session` as user-managed, including `piab-*` names. Wrapper-owned implicit sessions set a Pi-transcript- and Git-checkout-generation-scoped `AGENT_BROWSER_RESTORE` key automatically unless disabled with `PI_AGENT_BROWSER_MANAGED_SESSION_RESTORE=0`; explicit caller sessions do not receive that injection unless they exactly target the current wrapper-owned identity. Caller state/restore paths, profiles, upstream config, file access, launch arguments, environment variables, local file pages, `outputPath`, and close arguments pass through unchanged. `session list` and `state list` keep all upstream rows and restore identifiers visible. Automatic restore still validates and pins its own checkout/storage/namespace identity and coordinates same-daemon reuse so the wrapper cannot mix restore pools or corrupt managed lifecycle state. Ambiguous tab, attachment, history, code, or state-load transitions remain page-target correctness boundaries: content calls live-check `get url` or require explicit navigation before acting. Windows uses `cross-spawn` for native executable and `.cmd` argument transport, rather than PowerShell or wrapper-owned argument reordering. Empty operands such as `fill #field ""`, `--args ""`, and explicit default `--namespace ""`, literal doublequotes in fill text, and command/subcommand adjacency are retained. Upstream receives the empty namespace rather than a wrapper omission or environment workaround. The selected child `PATH` shim is not bypassed; POSIX keeps native Node `spawn`.
 - before a DOM/content-bearing read or interaction against a caller-owned explicit session or established attachment, run a session-scoped `get url` probe so stale transcript state cannot target the wrong page. A failed or non-URL probe blocks the requested content command. The shared execution lock orders that probe, semantic snapshot resolution, and the main command across cooperating updated Pi processes. Nested `batch` steps remain unsupported; raw batch command strings mirror upstream's ASCII-space tokenizer, including quoting and backslash handling.
 - pass explicit `--profile` straight through to upstream `agent-browser`; no profile-cloning or isolation layer is added in v1
+
 <!-- agent-browser-playbook:start wrapper-tab-recovery -->
 <!-- Generated from extensions/agent-browser/lib/playbook.ts. Run `npm run docs -- playbook write` to update. -->
+
 - After open/goto/navigate calls with --profile, --restore, --session-name, or --state, agent_browser best-effort re-selects the tab whose URL matches the returned page when restored tabs steal focus during launch or reconnect.
 - After confirmed shutdown of an automatically restored managed session, the wrapper retains its complete recorded URL, including the fragment, until the first current-page operation (including get url and reload). Non-page calls such as tab list may start a daemon without fulfilling that reopen; explicit URL reads leave the managed browser and pending reopen untouched. The wrapper uses native open once, verifies the observed tab, and discards old refs/frame scope; it does not restore unsaved forms, JavaScript memory, or history. Explicit navigation, caller-owned/attached sessions, and restore-disabled sessions are not auto-reopened.
 - For a still-live browser after tab drift or resume, the wrapper verifies/selects the intended tab before ref/semantic helpers and page commands; failed selection stops the call without navigating. Local commands, read <url>, URL a11y/vitals, diff url, window new, and explicit tab/navigation/connection/state recovery do not require the prior tab. Batch checks follow effective rows past non-page prefixes and stop at explicit context changes, preserving caller argv/stdin and continue-on-error behavior. Same-tab reselection is avoided because it clears refs. Use exact batch --bail for fail-fast, not --bail=<value>. Routine same-session calls skip tab-list preflights.
 - For sessions with observed tab-drift risk, after a successful command on a known target tab, agent_browser also best-effort restores that intended tab if a restored/background tab steals focus after the command completes. Routine same-session commands skip focus correction; observed pages without a native targetId use tab list to establish their identity.
 - If a known session target unexpectedly reports about:blank, agent_browser best-effort re-selects the prior intended target when it still exists; if recovery fails, it records the observed about:blank target and reports exact recovery guidance instead of treating the prior page as active.
 - If upstream reports tab_gone, the pinned bound tab is gone; use details.nextActions (tab list / tab new) instead of assuming another tab is yours.
+
 <!-- agent-browser-playbook:end wrapper-tab-recovery -->
+
 - caller-owned sessions honor native `AGENT_BROWSER_SOCKET_DIR` unless the wrapper-specific socket override is set, using the same integrity checks; on other local Unix launches, set a short private socket directory for wrapper-spawned `agent-browser` processes so extension-generated session names do not fail the upstream Unix socket-path length limit in longer cwd/session-name combinations; require an absolute non-symlink directory owned by the current uid with mode `0700`, otherwise fail before spawn. Socket checks trust the operating environment's actual `/`, not its reported UID; all non-root ownership, permission and alias-destination checks remain in force. This is not protection from the controller of the root filesystem; see [socket trust](ARCHITECTURE.md#ownership). Android/Termux uses a short directory under the owner-only `/data/data/<package>` app sandbox, compacts generated managed identities to one 80-bit digest so ordinary namespace plus fresh-session paths remain within the limit, stores policy-lock coordination under `os.tmpdir()`, and probes process identity with Termux's `ps` beside Node instead of unavailable `/bin/ps`
 - keep wrapper-spawned commands bounded by clamping `AGENT_BROWSER_DEFAULT_TIMEOUT` to the upstream documented default of 25 seconds while the default wrapper child-process watchdog is 35 seconds (`PI_AGENT_BROWSER_PROCESS_TIMEOUT_MS` overrides it, and top-level `timeoutMs` overrides it per call for browser CLI subprocesses). Explicit `wait <ms>`, `wait --timeout <ms>`, and WebMCP `invoke` / `result --timeout <ms>` calls can exceed that default; when top-level `timeoutMs` is omitted, the wrapper derives a per-call subprocess watchdog from the requested command duration plus a small grace window. Dialog commands use `PI_AGENT_BROWSER_DIALOG_PROCESS_TIMEOUT_MS` (default 5000 ms), and click/tap/find refs or tokens plus `eval --stdin` snippets whose text looks like alert/confirm/prompt/dialog triggers use `PI_AGENT_BROWSER_DIALOG_TRIGGER_PROCESS_TIMEOUT_MS` (default 8000 ms). Timed-out advanced QA or native batch calls may add `details.timeoutPartialProgress` and visible `Timeout partial progress` evidence with per-step status, retry payloads, current page title/URL, and declared artifact path checks; timed-out dialog-like commands may add dialog status/dismiss/fresh-session recovery next actions
 - interactive or long-running upstream families such as `chat` without a prompt, `dashboard start`, `stream enable`, `trace start`, `profiler start`, `record start`, `inspect`, `install`, `upgrade`, `doctor --fix`, and `confirm-interactive` are passed through thinly but remain bounded by the same wrapper timeout/session planning rules; prefer explicit arguments, single-shot `chat <message>`, non-interactive flags like `doctor --offline --quick` or `doctor --json`, and cleanup pairs such as `dashboard stop`, `stream disable`, `trace stop`, `profiler stop`, and `record stop`
@@ -877,35 +903,38 @@ This is neither a browser transaction nor rollback. It does not coordinate human
 
 The 0.7 public contract removes old multimode `agent_browser` inputs. Native CLI coverage, authentication, recordings, artifacts, diagnostics, and specialized outcomes remain available.
 
-| Previous 0.6 input | 0.7 replacement |
-| --- | --- |
-| `agent_browser { args, stdin?, outputPath?, timeoutMs?, sessionMode? }` | Same compact direct shape |
-| `agent_browser { script: source }` | `agent_browser_code { code: source, session?, namespace?, timeoutMs?, outputPath? }`; check `.success`, not `.ok`; browser now persists |
-| `agent_browser { job: { steps, failFast? } }` | Native `batch --bail` with argv rows; omit `--bail` only for deliberate safe continuation, or use code for branching |
-| `agent_browser { semanticAction: fields }` | Enable `action`, then `agent_browser_action { ...fields }` |
-| `agent_browser { qa: fields }` | Enable `qa`, then `agent_browser_qa { ...fields }` |
-| `agent_browser { electron: fields }` | Enable `electron`, then `agent_browser_electron { ...fields }` |
-| `agent_browser { sourceLookup: fields }` | Enable `source`, then `agent_browser_source { ...fields }` |
-| `agent_browser { networkSourceLookup: fields }` | Enable `network`, then `agent_browser_network_source { ...fields }` |
+| Previous 0.6 input                                                      | 0.7 replacement                                                                                                                         |
+| ----------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `agent_browser { args, stdin?, outputPath?, timeoutMs?, sessionMode? }` | Same compact direct shape                                                                                                               |
+| `agent_browser { script: source }`                                      | `agent_browser_code { code: source, session?, namespace?, timeoutMs?, outputPath? }`; check `.success`, not `.ok`; browser now persists |
+| `agent_browser { job: { steps, failFast? } }`                           | Native `batch --bail` with argv rows; omit `--bail` only for deliberate safe continuation, or use code for branching                    |
+| `agent_browser { semanticAction: fields }`                              | Enable `action`, then `agent_browser_action { ...fields }`                                                                              |
+| `agent_browser { qa: fields }`                                          | Enable `qa`, then `agent_browser_qa { ...fields }`                                                                                      |
+| `agent_browser { electron: fields }`                                    | Enable `electron`, then `agent_browser_electron { ...fields }`                                                                          |
+| `agent_browser { sourceLookup: fields }`                                | Enable `source`, then `agent_browser_source { ...fields }`                                                                              |
+| `agent_browser { networkSourceLookup: fields }`                         | Enable `network`, then `agent_browser_network_source { ...fields }`                                                                     |
 
 Move former outer `outputPath`/`timeoutMs` alongside advanced flat fields where supported. Action has optional `session` but no `sessionMode`; QA/source/network retain `sessionMode`; Electron `timeoutMs` is flat and action-specific (`list` rejects it). Code chooses session/namespace in the parent.
 
-| Former job step | Native argv rows |
-| --- | --- |
-| `open` plus `loadState` | `open <url>`, then `wait --load <state>` |
-| Selector `click` / `fill` | Ordinary command with selector and optional text |
-| Locator click/fill | `find <locator> <value> <action> ...` |
-| `select` | `select <selector> <value...>` |
-| `wait` | `wait <milliseconds>` |
-| `assertText` / `assertUrl` | `wait --text <text>` / `wait --url <url-or-glob>` |
-| `waitForDownload` | `wait --download <path>` |
-| `snapshot` / `screenshot` | `snapshot -i` / `screenshot <path>` |
-| Paced `type` | Optional `focus <selector>`, interleaved `keyboard type <character>` / `wait <delayMs>`, optional final `press <key>` |
+| Former job step            | Native argv rows                                                                                                      |
+| -------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| `open` plus `loadState`    | `open <url>`, then `wait --load <state>`                                                                              |
+| Selector `click` / `fill`  | Ordinary command with selector and optional text                                                                      |
+| Locator click/fill         | `find <locator> <value> <action> ...`                                                                                 |
+| `select`                   | `select <selector> <value...>`                                                                                        |
+| `wait`                     | `wait <milliseconds>`                                                                                                 |
+| `assertText` / `assertUrl` | `wait --text <text>` / `wait --url <url-or-glob>`                                                                     |
+| `waitForDownload`          | `wait --download <path>`                                                                                              |
+| `snapshot` / `screenshot`  | `snapshot -i` / `screenshot <path>`                                                                                   |
+| Paced `type`               | Optional `focus <selector>`, interleaved `keyboard type <character>` / `wait <delayMs>`, optional final `press <key>` |
 
 For exact delayed-input behavior, build native rows instead of relying on unverified native `--delay` equivalence. Keep the former 200-character pacing bound when porting that workflow. Typing `hi` with a 20 ms gap:
 
 ```json
-{ "args": ["batch", "--bail"], "stdin": "[[\"focus\",\"#prompt\"],[\"keyboard\",\"type\",\"h\"],[\"wait\",\"20\"],[\"keyboard\",\"type\",\"i\"]]" }
+{
+	"args": ["batch", "--bail"],
+	"stdin": "[[\"focus\",\"#prompt\"],[\"keyboard\",\"type\",\"h\"],[\"wait\",\"20\"],[\"keyboard\",\"type\",\"i\"]]"
+}
 ```
 
 Fixed waits are elapsed time, not postconditions. Preserve explicit URL/text waits, same-snapshot fill ordering, fresh refs after mutations, and partial-progress inspection. There is no legacy public script/job runtime. Exact isolated-script cleanup leases are normalized only by offline conversion so canonical replay can retire their recorded pre-upgrade resources. Saved auth and original Pi transcripts are not rewritten or deleted; [rollback](RELEASE.md#07-upgrade-and-rollback) changes the package version, not browser side effects.

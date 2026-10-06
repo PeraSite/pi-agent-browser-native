@@ -7,18 +7,35 @@ test("queued browser cancellation withdraws waiting work without releasing the a
 	const queue = new KeyedAsyncExecutionQueue();
 	let release!: () => void;
 	let entered!: () => void;
-	const started = new Promise<void>(resolve => { entered = resolve; });
-	const held = new Promise<void>(resolve => { release = resolve; });
-	const first = queue.run("team\u0000same", "team", async () => { entered(); await held; });
+	const started = new Promise<void>((resolve) => {
+		entered = resolve;
+	});
+	const held = new Promise<void>((resolve) => {
+		release = resolve;
+	});
+	const first = queue.run("team\u0000same", "team", async () => {
+		entered();
+		await held;
+	});
 	await started;
 	const controller = new AbortController();
-	const cancelled = queue.run("team\u0000same", "team", async () => assert.fail("cancelled action dispatched"), controller.signal);
+	const cancelled = queue.run(
+		"team\u0000same",
+		"team",
+		async () => assert.fail("cancelled action dispatched"),
+		controller.signal,
+	);
 	controller.abort();
 	await assert.rejects(cancelled, { name: "AbortError" });
 	let laterStarted = false;
-	const later = queue.run("team\u0000same", "team", async () => { laterStarted = true; });
-	await Promise.resolve(); assert.equal(laterStarted, false);
-	release(); await Promise.all([first, later]); assert.equal(laterStarted, true);
+	const later = queue.run("team\u0000same", "team", async () => {
+		laterStarted = true;
+	});
+	await Promise.resolve();
+	assert.equal(laterStarted, false);
+	release();
+	await Promise.all([first, later]);
+	assert.equal(laterStarted, true);
 });
 
 test("KeyedAsyncExecutionQueue drains same-namespace work without deadlocking late arrivals", async () => {
@@ -52,11 +69,16 @@ test("KeyedAsyncExecutionQueue drains same-namespace work without deadlocking la
 		await Promise.race([
 			Promise.all([first, exclusive, late]),
 			new Promise<never>((_resolve, reject) => {
-				timeout = setTimeout(() => reject(new Error("namespace-exclusive queue deadlocked")), 1_000);
+				timeout = setTimeout(
+					() => reject(new Error("namespace-exclusive queue deadlocked")),
+					1_000,
+				);
 			}),
 		]);
 	} finally {
-		if (timeout) clearTimeout(timeout);
+		if (timeout) {
+			clearTimeout(timeout);
+		}
 	}
 	assert.deepEqual(events, ["first-start", "first-end", "exclusive", "late"]);
 });

@@ -11,6 +11,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { readRecord, readArray, readString } from "./helpers/assertions.js";
 import { SessionPageState } from "../extensions/agent-browser/lib/session-page-state.js";
 
 import {
@@ -22,93 +23,129 @@ import {
 	writeFakeAgentBrowserBinary,
 } from "./helpers/agent-browser-harness.js";
 
-test("agentBrowserExtension rejects incomplete semantic actions before spawning agent-browser", { concurrency: false }, async () => {
-	const tempDir = await mkdtemp(join(tmpdir(), "pi-agent-browser-semantic-action-invalid-"));
-	const logPath = join(tempDir, "invocations.log");
-	const basePath = process.env.PATH ?? "";
-	await writeFakeAgentBrowserBinary(
-		tempDir,
-		`const fs = require("node:fs");
+test(
+	"agentBrowserExtension rejects incomplete semantic actions before spawning agent-browser",
+	{ concurrency: false },
+	async () => {
+		const tempDir = await mkdtemp(join(tmpdir(), "pi-agent-browser-semantic-action-invalid-"));
+		const logPath = join(tempDir, "invocations.log");
+		const basePath = process.env.PATH ?? "";
+		await writeFakeAgentBrowserBinary(
+			tempDir,
+			`const fs = require("node:fs");
 fs.appendFileSync(${JSON.stringify(logPath)}, JSON.stringify({ args: process.argv.slice(2) }) + "\\n");
 process.stdout.write(JSON.stringify({ success: true, data: "should not run" }));`,
-	);
+		);
 
-	try {
-		await withPatchedEnv({ PATH: `${tempDir}:${basePath}` }, async () => {
-			const harness = createExtensionHarness({ cwd: tempDir });
-			await runExtensionEvent(harness.handlers, "session_start", { reason: "new" }, harness.ctx);
+		try {
+			await withPatchedEnv({ PATH: `${tempDir}:${basePath}` }, async () => {
+				const harness = createExtensionHarness({ cwd: tempDir });
+				await runExtensionEvent(harness.handlers, "session_start", { reason: "new" }, harness.ctx);
 
-			const missingText = await executeRegisteredTool(harness.tool, harness.ctx, {
-				semanticAction: { action: "fill", locator: "label", value: "Email" },
+				const missingText = await executeRegisteredTool(harness.tool, harness.ctx, {
+					semanticAction: { action: "fill", locator: "label", value: "Email" },
+				});
+				assert.equal(missingText.isError, true);
+				assert.match(
+					readString(readRecord(missingText.content[0]).text),
+					/semanticAction\.text is required for fill/,
+				);
+				assert.equal(readRecord(missingText.details).failureCategory, "validation-error");
+
+				const unsupportedUncheck = await executeRegisteredTool(harness.tool, harness.ctx, {
+					semanticAction: { action: "uncheck", locator: "label", value: "Agree terms" },
+				});
+				assert.equal(unsupportedUncheck.isError, true);
+				assert.match(
+					readString(readRecord(unsupportedUncheck.content[0]).text),
+					/semanticAction\.action must be one of: check, click, fill, select/,
+				);
+				assert.equal(readRecord(unsupportedUncheck.details).failureCategory, "validation-error");
+
+				const unsupportedRoleName = await executeRegisteredTool(harness.tool, harness.ctx, {
+					semanticAction: { action: "click", locator: "text", value: "Export", name: "Export" },
+				});
+				assert.equal(unsupportedRoleName.isError, true);
+				assert.match(
+					readString(readRecord(unsupportedRoleName.content[0]).text),
+					/semanticAction\.name is only supported/,
+				);
+				assert.equal(readRecord(unsupportedRoleName.details).failureCategory, "validation-error");
+
+				const mismatchedRoleValue = await executeRegisteredTool(harness.tool, harness.ctx, {
+					semanticAction: { action: "click", locator: "role", role: "button", value: "link" },
+				});
+				assert.equal(mismatchedRoleValue.isError, true);
+				assert.match(
+					readString(readRecord(mismatchedRoleValue.content[0]).text),
+					/semanticAction\.role must match value/,
+				);
+				assert.equal(readRecord(mismatchedRoleValue.details).failureCategory, "validation-error");
+
+				const emptySession = await executeRegisteredTool(harness.tool, harness.ctx, {
+					semanticAction: { action: "click", locator: "text", value: "Export", session: "" },
+				});
+				assert.equal(emptySession.isError, true);
+				assert.match(
+					readString(readRecord(emptySession.content[0]).text),
+					/semanticAction\.session must be a non-empty string/,
+				);
+				assert.equal(readRecord(emptySession.details).failureCategory, "validation-error");
+
+				const selectWithoutSelector = await executeRegisteredTool(harness.tool, harness.ctx, {
+					semanticAction: { action: "select", value: "chocolate" },
+				});
+				assert.equal(selectWithoutSelector.isError, true);
+				assert.match(
+					readString(readRecord(selectWithoutSelector.content[0]).text),
+					/semanticAction\.selector or semanticAction\.locator is required for select/,
+				);
+				assert.equal(readRecord(selectWithoutSelector.details).failureCategory, "validation-error");
+
+				const selectWithoutValue = await executeRegisteredTool(harness.tool, harness.ctx, {
+					semanticAction: { action: "select", selector: "#flavor" },
+				});
+				assert.equal(selectWithoutValue.isError, true);
+				assert.match(
+					readString(readRecord(selectWithoutValue.content[0]).text),
+					/semanticAction\.value or semanticAction\.values is required for select/,
+				);
+				assert.equal(readRecord(selectWithoutValue.details).failureCategory, "validation-error");
+
+				const selectWithLocator = await executeRegisteredTool(harness.tool, harness.ctx, {
+					semanticAction: {
+						action: "select",
+						locator: "placeholder",
+						selector: "#flavor",
+						value: "chocolate",
+					},
+				});
+				assert.equal(selectWithLocator.isError, true);
+				assert.match(
+					readString(readRecord(selectWithLocator.content[0]).text),
+					/selector cannot be combined with locator, role, or name for select/,
+				);
+				assert.equal(readRecord(selectWithLocator.details).failureCategory, "validation-error");
+
+				const invocations = await readInvocationLog(logPath).catch(() => []);
+				assert.deepEqual(invocations, []);
 			});
-			assert.equal(missingText.isError, true);
-			assert.match((missingText.content[0] as { text: string }).text, /semanticAction\.text is required for fill/);
-			assert.equal(missingText.details?.failureCategory, "validation-error");
+		} finally {
+			await rm(tempDir, { force: true, recursive: true });
+		}
+	},
+);
 
-			const unsupportedUncheck = await executeRegisteredTool(harness.tool, harness.ctx, {
-				semanticAction: { action: "uncheck", locator: "label", value: "Agree terms" },
-			});
-			assert.equal(unsupportedUncheck.isError, true);
-			assert.match((unsupportedUncheck.content[0] as { text: string }).text, /semanticAction\.action must be one of: check, click, fill, select/);
-			assert.equal(unsupportedUncheck.details?.failureCategory, "validation-error");
-
-			const unsupportedRoleName = await executeRegisteredTool(harness.tool, harness.ctx, {
-				semanticAction: { action: "click", locator: "text", value: "Export", name: "Export" },
-			});
-			assert.equal(unsupportedRoleName.isError, true);
-			assert.match((unsupportedRoleName.content[0] as { text: string }).text, /semanticAction\.name is only supported/);
-			assert.equal(unsupportedRoleName.details?.failureCategory, "validation-error");
-
-			const mismatchedRoleValue = await executeRegisteredTool(harness.tool, harness.ctx, {
-				semanticAction: { action: "click", locator: "role", role: "button", value: "link" },
-			});
-			assert.equal(mismatchedRoleValue.isError, true);
-			assert.match((mismatchedRoleValue.content[0] as { text: string }).text, /semanticAction\.role must match value/);
-			assert.equal(mismatchedRoleValue.details?.failureCategory, "validation-error");
-
-			const emptySession = await executeRegisteredTool(harness.tool, harness.ctx, {
-				semanticAction: { action: "click", locator: "text", value: "Export", session: "" },
-			});
-			assert.equal(emptySession.isError, true);
-			assert.match((emptySession.content[0] as { text: string }).text, /semanticAction\.session must be a non-empty string/);
-			assert.equal(emptySession.details?.failureCategory, "validation-error");
-
-			const selectWithoutSelector = await executeRegisteredTool(harness.tool, harness.ctx, {
-				semanticAction: { action: "select", value: "chocolate" },
-			});
-			assert.equal(selectWithoutSelector.isError, true);
-			assert.match((selectWithoutSelector.content[0] as { text: string }).text, /semanticAction\.selector or semanticAction\.locator is required for select/);
-			assert.equal(selectWithoutSelector.details?.failureCategory, "validation-error");
-
-			const selectWithoutValue = await executeRegisteredTool(harness.tool, harness.ctx, {
-				semanticAction: { action: "select", selector: "#flavor" },
-			});
-			assert.equal(selectWithoutValue.isError, true);
-			assert.match((selectWithoutValue.content[0] as { text: string }).text, /semanticAction\.value or semanticAction\.values is required for select/);
-			assert.equal(selectWithoutValue.details?.failureCategory, "validation-error");
-
-			const selectWithLocator = await executeRegisteredTool(harness.tool, harness.ctx, {
-				semanticAction: { action: "select", locator: "placeholder", selector: "#flavor", value: "chocolate" },
-			});
-			assert.equal(selectWithLocator.isError, true);
-			assert.match((selectWithLocator.content[0] as { text: string }).text, /selector cannot be combined with locator, role, or name for select/);
-			assert.equal(selectWithLocator.details?.failureCategory, "validation-error");
-
-			const invocations = await readInvocationLog(logPath).catch(() => []);
-			assert.deepEqual(invocations, []);
-		});
-	} finally {
-		await rm(tempDir, { force: true, recursive: true });
-	}
-});
-
-test("agentBrowserExtension returns rich input recovery when semanticAction fill misses current editable refs", { concurrency: false }, async () => {
-	const tempDir = await mkdtemp(join(tmpdir(), "pi-agent-browser-semantic-candidates-"));
-	const logPath = join(tempDir, "invocations.log");
-	const basePath = process.env.PATH ?? "";
-	await writeFakeAgentBrowserBinary(
-		tempDir,
-		`const fs = require("node:fs");
+test(
+	"agentBrowserExtension returns rich input recovery when semanticAction fill misses current editable refs",
+	{ concurrency: false },
+	async () => {
+		const tempDir = await mkdtemp(join(tmpdir(), "pi-agent-browser-semantic-candidates-"));
+		const logPath = join(tempDir, "invocations.log");
+		const basePath = process.env.PATH ?? "";
+		await writeFakeAgentBrowserBinary(
+			tempDir,
+			`const fs = require("node:fs");
 const args = process.argv.slice(2);
 fs.appendFileSync(${JSON.stringify(logPath)}, JSON.stringify({ args }) + "\\n");
 if (args.includes("snapshot")) {
@@ -133,169 +170,385 @@ if (args.includes("snapshot")) {
   process.exit(1);
 }
 process.stdout.write(JSON.stringify({ success: true, data: "ok" }));`,
-	);
+		);
 
-	try {
-		await withPatchedEnv({ PATH: `${tempDir}:${basePath}`, PI_AGENT_BROWSER_TEST_PAGE_URL: "https://search.example/" }, async () => {
-			const harness = createExtensionHarness({ cwd: tempDir });
-			await runExtensionEvent(harness.handlers, "session_start", { reason: "new" }, harness.ctx);
+		try {
+			await withPatchedEnv(
+				{
+					PATH: `${tempDir}:${basePath}`,
+					PI_AGENT_BROWSER_TEST_PAGE_URL: "https://search.example/",
+				},
+				async () => {
+					const harness = createExtensionHarness({ cwd: tempDir });
+					await runExtensionEvent(
+						harness.handlers,
+						"session_start",
+						{ reason: "new" },
+						harness.ctx,
+					);
 
-			const initialSnapshot = await executeRegisteredTool(harness.tool, harness.ctx, { args: ["snapshot", "-i"] });
-			assert.equal(initialSnapshot.isError, false, JSON.stringify(initialSnapshot));
+					const initialSnapshot = await executeRegisteredTool(harness.tool, harness.ctx, {
+						args: ["snapshot", "-i"],
+					});
+					assert.equal(initialSnapshot.isError, false, JSON.stringify(initialSnapshot));
 
-			const result = await executeRegisteredTool(harness.tool, harness.ctx, {
-				semanticAction: { action: "fill", locator: "placeholder", value: "Search Wikipedia", text: "- [ ] item" },
-			});
+					const result = await executeRegisteredTool(harness.tool, harness.ctx, {
+						semanticAction: {
+							action: "fill",
+							locator: "placeholder",
+							value: "Search Wikipedia",
+							text: "- [ ] item",
+						},
+					});
 
-			assert.equal(result.isError, true);
-			assert.equal(result.details?.failureCategory, "selector-not-found");
-			const text = result.content[0] as { text: string };
-			assert.match(text.text, /Current snapshot ref fallback:/);
-			assert.match(text.text, /@e7 searchbox "Search Wikipedia"/);
-			assert.doesNotMatch(text.text, /@e6/);
-			assert.match(text.text, /@e8 textbox "Search Wikipedia"/);
-			assert.match(text.text, /@e13 textbox "Search Wikipedia"/);
-			assert.doesNotMatch(text.text, /@e9/);
-			assert.doesNotMatch(text.text, /@e14/);
-			assert.match(text.text, /Rich input recovery:/);
-			assert.doesNotMatch(text.text, /Agent-browser candidate fallbacks:/);
-			assert.doesNotMatch(text.text, /- \[ \] item/);
-			const visibleRefFallback = result.details?.visibleRefFallback as { candidates?: Array<{ args?: string[]; editableEvidence?: boolean }>; target?: { text?: string } } | undefined;
-			assert.equal(visibleRefFallback?.target?.text, undefined);
-			assert.ok(visibleRefFallback?.candidates?.every((candidate) => candidate.args === undefined));
-			assert.ok(visibleRefFallback?.candidates?.every((candidate) => candidate.editableEvidence === undefined));
-			const richInputRecovery = result.details?.richInputRecovery as { candidates?: Array<{ clickArgs?: string[]; focusArgs?: string[]; ref?: string; role?: string }>; inputMethodHint?: string; nextActionIds?: string[] } | undefined;
-			assert.deepEqual(richInputRecovery?.candidates?.map((candidate) => ({ clickArgs: candidate.clickArgs, focusArgs: candidate.focusArgs, ref: candidate.ref, role: candidate.role })), [
-				{ clickArgs: ["click", "@e7"], focusArgs: ["focus", "@e7"], ref: "@e7", role: "searchbox" },
-				{ clickArgs: ["click", "@e8"], focusArgs: ["focus", "@e8"], ref: "@e8", role: "textbox" },
-				{ clickArgs: ["click", "@e13"], focusArgs: ["focus", "@e13"], ref: "@e13", role: "textbox" },
-			]);
-			assert.match(richInputRecovery?.inputMethodHint ?? "", /keyboard type when a framework-controlled editor requires real key events/);
-			assert.match(richInputRecovery?.inputMethodHint ?? "", /keyboard inserttext is paste-like/);
-			const nextActions = result.details?.nextActions as Array<{ id?: string; params?: { args?: string[] }; reason?: string; safety?: string }> | undefined;
-			assert.deepEqual(nextActions?.map((action) => action.id), [
-				"refresh-interactive-refs",
-				"focus-current-editable-ref-1",
-				"click-current-editable-ref-1",
-				"focus-current-editable-ref-2",
-				"click-current-editable-ref-2",
-				"focus-current-editable-ref-3",
-				"click-current-editable-ref-3",
-			]);
-			assert.deepEqual(nextActions?.[1]?.params?.args?.slice(-2), ["focus", "@e7"]);
-			assert.deepEqual(nextActions?.[2]?.params?.args?.slice(-2), ["click", "@e7"]);
-			assert.deepEqual(nextActions?.[3]?.params?.args?.slice(-2), ["focus", "@e8"]);
-			assert.deepEqual(nextActions?.[4]?.params?.args?.slice(-2), ["click", "@e8"]);
-			assert.deepEqual(nextActions?.[5]?.params?.args?.slice(-2), ["focus", "@e13"]);
-			assert.deepEqual(nextActions?.[6]?.params?.args?.slice(-2), ["click", "@e13"]);
-			assert.match(nextActions?.[1]?.safety ?? "", /Several editable refs share/);
-			const invocationsAfterFirstMiss = await readInvocationLog(logPath);
-			assert.equal(invocationsAfterFirstMiss.length, 4);
-			assert.deepEqual(invocationsAfterFirstMiss.map((entry) => entry.args.slice(3)), [
-				["snapshot", "-i"],
-				["tab", "list"],
-				["find", "placeholder", "Search Wikipedia", "fill", "- [ ] item"],
-				["snapshot", "-i"],
-			]);
-			for (const action of nextActions ?? []) {
-				assert.ok(!action.params?.args?.includes("- [ ] item"));
-				assert.ok(!action.params?.args?.includes("Enter"));
-				assert.doesNotMatch(action.id ?? "", /submit/i);
-				assert.doesNotMatch(action.reason ?? "", /agent browser/);
-			}
+					assert.equal(result.isError, true);
+					assert.equal(readRecord(result.details).failureCategory, "selector-not-found");
+					const text = readRecord(result.content[0]);
+					assert.match(readString(text.text), /Current snapshot ref fallback:/);
+					assert.match(readString(text.text), /@e7 searchbox "Search Wikipedia"/);
+					assert.doesNotMatch(readString(text.text), /@e6/);
+					assert.match(readString(text.text), /@e8 textbox "Search Wikipedia"/);
+					assert.match(readString(text.text), /@e13 textbox "Search Wikipedia"/);
+					assert.doesNotMatch(readString(text.text), /@e9/);
+					assert.doesNotMatch(readString(text.text), /@e14/);
+					assert.match(readString(text.text), /Rich input recovery:/);
+					assert.doesNotMatch(readString(text.text), /Agent-browser candidate fallbacks:/);
+					assert.doesNotMatch(readString(text.text), /- \[ \] item/);
+					const visibleRefFallback = readRecord(readRecord(result.details).visibleRefFallback);
+					assert.equal(readRecord(visibleRefFallback.target).text, undefined);
+					assert.ok(
+						readArray(visibleRefFallback.candidates).every(
+							(candidate) => readRecord(candidate).args === undefined,
+						),
+					);
+					assert.ok(
+						readArray(visibleRefFallback.candidates).every(
+							(candidate) => readRecord(candidate).editableEvidence === undefined,
+						),
+					);
+					const richInputRecovery = readRecord(readRecord(result.details).richInputRecovery);
+					assert.deepEqual(
+						readArray(richInputRecovery.candidates).map((candidate) => ({
+							clickArgs: readRecord(candidate).clickArgs,
+							focusArgs: readRecord(candidate).focusArgs,
+							ref: readRecord(candidate).ref,
+							role: readRecord(candidate).role,
+						})),
+						[
+							{
+								clickArgs: ["click", "@e7"],
+								focusArgs: ["focus", "@e7"],
+								ref: "@e7",
+								role: "searchbox",
+							},
+							{
+								clickArgs: ["click", "@e8"],
+								focusArgs: ["focus", "@e8"],
+								ref: "@e8",
+								role: "textbox",
+							},
+							{
+								clickArgs: ["click", "@e13"],
+								focusArgs: ["focus", "@e13"],
+								ref: "@e13",
+								role: "textbox",
+							},
+						],
+					);
+					assert.match(
+						readString(richInputRecovery.inputMethodHint ?? ""),
+						/keyboard type when a framework-controlled editor requires real key events/,
+					);
+					assert.match(
+						readString(richInputRecovery.inputMethodHint ?? ""),
+						/keyboard inserttext is paste-like/,
+					);
+					const nextActions = readArray(readRecord(result.details).nextActions);
+					assert.deepEqual(
+						nextActions.map((action) => readRecord(action).id),
+						[
+							"refresh-interactive-refs",
+							"focus-current-editable-ref-1",
+							"click-current-editable-ref-1",
+							"focus-current-editable-ref-2",
+							"click-current-editable-ref-2",
+							"focus-current-editable-ref-3",
+							"click-current-editable-ref-3",
+						],
+					);
+					assert.deepEqual(
+						readArray(readRecord(readRecord(nextActions[1]).params).args).slice(-2),
+						["focus", "@e7"],
+					);
+					assert.deepEqual(
+						readArray(readRecord(readRecord(nextActions[2]).params).args).slice(-2),
+						["click", "@e7"],
+					);
+					assert.deepEqual(
+						readArray(readRecord(readRecord(nextActions[3]).params).args).slice(-2),
+						["focus", "@e8"],
+					);
+					assert.deepEqual(
+						readArray(readRecord(readRecord(nextActions[4]).params).args).slice(-2),
+						["click", "@e8"],
+					);
+					assert.deepEqual(
+						readArray(readRecord(readRecord(nextActions[5]).params).args).slice(-2),
+						["focus", "@e13"],
+					);
+					assert.deepEqual(
+						readArray(readRecord(readRecord(nextActions[6]).params).args).slice(-2),
+						["click", "@e13"],
+					);
+					assert.match(
+						readString(readRecord(nextActions[1]).safety ?? ""),
+						/Several editable refs share/,
+					);
+					const invocationsAfterFirstMiss = await readInvocationLog(logPath);
+					assert.equal(invocationsAfterFirstMiss.length, 4);
+					assert.deepEqual(
+						invocationsAfterFirstMiss.map((entry) => entry.args.slice(3)),
+						[
+							["snapshot", "-i"],
+							["tab", "list"],
+							["find", "placeholder", "Search Wikipedia", "fill", "- [ ] item"],
+							["snapshot", "-i"],
+						],
+					);
+					for (const action of nextActions) {
+						// The preceding exact action-ID assertion proves this recovery list is nonempty before validating every payload.
+						// oxlint-disable-next-line node-test/no-conditional-assertion
+						assert.ok(
+							!readArray(readRecord(readRecord(action).params).args).includes("- [ ] item"),
+						);
+						// The preceding exact action-ID assertion proves this recovery list is nonempty before validating every payload.
+						// oxlint-disable-next-line node-test/no-conditional-assertion
+						assert.ok(!readArray(readRecord(readRecord(action).params).args).includes("Enter"));
+						// The preceding exact action-ID assertion proves this recovery list is nonempty before validating every payload.
+						// oxlint-disable-next-line node-test/no-conditional-assertion
+						assert.doesNotMatch(readString(readRecord(action).id ?? ""), /submit/i);
+						// The preceding exact action-ID assertion proves this recovery list is nonempty before validating every payload.
+						// oxlint-disable-next-line node-test/no-conditional-assertion
+						assert.doesNotMatch(readString(readRecord(action).reason ?? ""), /agent browser/);
+					}
 
-			const rawDashFillMiss = await executeRegisteredTool(harness.tool, harness.ctx, {
-				args: ["find", "placeholder", "Search Wikipedia", "fill", "- [ ] item"],
-			});
-			assert.equal(rawDashFillMiss.isError, true);
-			assert.equal(rawDashFillMiss.details?.failureCategory, "selector-not-found");
-			assert.match((rawDashFillMiss.content[0] as { text: string }).text, /Current snapshot ref fallback:/);
-			assert.match((rawDashFillMiss.content[0] as { text: string }).text, /Rich input recovery:/);
-			assert.match((rawDashFillMiss.content[0] as { text: string }).text, /@e7 searchbox "Search Wikipedia"/);
-			assert.doesNotMatch((rawDashFillMiss.content[0] as { text: string }).text, /- \[ \] item/);
-			const rawVisibleRefFallback = rawDashFillMiss.details?.visibleRefFallback as { candidates?: Array<{ args?: string[]; editableEvidence?: boolean }>; target?: { text?: string } } | undefined;
-			assert.equal(rawVisibleRefFallback?.target?.text, undefined);
-			assert.ok(rawVisibleRefFallback?.candidates?.every((candidate) => candidate.args === undefined));
-			assert.ok(rawVisibleRefFallback?.candidates?.every((candidate) => candidate.editableEvidence === undefined));
-			const rawNextActions = rawDashFillMiss.details?.nextActions as Array<{ params?: { args?: string[] } }> | undefined;
-			for (const action of rawNextActions ?? []) {
-				assert.ok(!action.params?.args?.includes("- [ ] item"));
-			}
+					const rawDashFillMiss = await executeRegisteredTool(harness.tool, harness.ctx, {
+						args: ["find", "placeholder", "Search Wikipedia", "fill", "- [ ] item"],
+					});
+					assert.equal(rawDashFillMiss.isError, true);
+					assert.equal(readRecord(rawDashFillMiss.details).failureCategory, "selector-not-found");
+					assert.match(
+						readString(readRecord(rawDashFillMiss.content[0]).text),
+						/Current snapshot ref fallback:/,
+					);
+					assert.match(
+						readString(readRecord(rawDashFillMiss.content[0]).text),
+						/Rich input recovery:/,
+					);
+					assert.match(
+						readString(readRecord(rawDashFillMiss.content[0]).text),
+						/@e7 searchbox "Search Wikipedia"/,
+					);
+					assert.doesNotMatch(
+						readString(readRecord(rawDashFillMiss.content[0]).text),
+						/- \[ \] item/,
+					);
+					const rawVisibleRefFallback = readRecord(
+						readRecord(rawDashFillMiss.details).visibleRefFallback,
+					);
+					assert.equal(readRecord(rawVisibleRefFallback.target).text, undefined);
+					assert.ok(
+						readArray(rawVisibleRefFallback.candidates).every(
+							(candidate) => readRecord(candidate).args === undefined,
+						),
+					);
+					assert.ok(
+						readArray(rawVisibleRefFallback.candidates).every(
+							(candidate) => readRecord(candidate).editableEvidence === undefined,
+						),
+					);
+					const rawNextActions = readArray(readRecord(rawDashFillMiss.details).nextActions);
+					assert.ok(rawNextActions.length > 0);
+					for (const action of rawNextActions) {
+						// The nonempty raw recovery list is asserted above; validate every payload without skipping an empty list.
+						// oxlint-disable-next-line node-test/no-conditional-assertion
+						assert.ok(
+							!readArray(readRecord(readRecord(action).params).args).includes("- [ ] item"),
+						);
+					}
 
-			const clickMiss = await executeRegisteredTool(harness.tool, harness.ctx, {
-				semanticAction: { action: "click", locator: "text", value: "Search Wikipedia" },
-			});
-			assert.equal(clickMiss.isError, true);
-			assert.equal(clickMiss.details?.failureCategory, "selector-not-found");
-			assert.equal(clickMiss.details?.richInputRecovery, undefined);
-			assert.match((clickMiss.content[0] as { text: string }).text, /Agent-browser candidate fallbacks:/);
-			assert.match((clickMiss.content[0] as { text: string }).text, /Next actions:/);
-			assert.match((clickMiss.content[0] as { text: string }).text, /refresh-interactive-refs.*snapshot.*-i/);
-			assert.doesNotMatch((clickMiss.content[0] as { text: string }).text, /try-searchbox-name-candidate|try-textbox-name-candidate|try-labeled-textbox-candidate/);
-			const clickNextActions = clickMiss.details?.nextActions as Array<{ id?: string; params?: { args?: string[] } }> | undefined;
-			assert.deepEqual(clickNextActions?.map((action) => action.id), [
-				"refresh-interactive-refs",
-				"try-current-visible-ref",
-				"try-button-name-candidate",
-				"try-link-name-candidate",
-			]);
-			assert.deepEqual(clickNextActions?.[1]?.params?.args?.slice(-2), ["click", "@e10"]);
-			assert.deepEqual(clickNextActions?.[2]?.params?.args, ["find", "role", "button", "click", "--name", "Search Wikipedia"]);
-			assert.deepEqual(clickNextActions?.[3]?.params?.args, ["find", "role", "link", "click", "--name", "Search Wikipedia"]);
-			assert.ok(!JSON.stringify(clickNextActions).includes("agent browser"));
+					const clickMiss = await executeRegisteredTool(harness.tool, harness.ctx, {
+						semanticAction: { action: "click", locator: "text", value: "Search Wikipedia" },
+					});
+					assert.equal(clickMiss.isError, true);
+					assert.equal(readRecord(clickMiss.details).failureCategory, "selector-not-found");
+					assert.equal(readRecord(clickMiss.details).richInputRecovery, undefined);
+					assert.match(
+						readString(readRecord(clickMiss.content[0]).text),
+						/Agent-browser candidate fallbacks:/,
+					);
+					assert.match(readString(readRecord(clickMiss.content[0]).text), /Next actions:/);
+					assert.match(
+						readString(readRecord(clickMiss.content[0]).text),
+						/refresh-interactive-refs.*snapshot.*-i/,
+					);
+					assert.doesNotMatch(
+						readString(readRecord(clickMiss.content[0]).text),
+						/try-searchbox-name-candidate|try-textbox-name-candidate|try-labeled-textbox-candidate/,
+					);
+					const clickNextActions = readArray(readRecord(clickMiss.details).nextActions);
+					assert.deepEqual(
+						clickNextActions.map((action) => readRecord(action).id),
+						[
+							"refresh-interactive-refs",
+							"try-current-visible-ref",
+							"try-button-name-candidate",
+							"try-link-name-candidate",
+						],
+					);
+					assert.deepEqual(
+						readArray(readRecord(readRecord(clickNextActions[1]).params).args).slice(-2),
+						["click", "@e10"],
+					);
+					assert.deepEqual(readRecord(readRecord(clickNextActions[2]).params).args, [
+						"find",
+						"role",
+						"button",
+						"click",
+						"--name",
+						"Search Wikipedia",
+					]);
+					assert.deepEqual(readRecord(readRecord(clickNextActions[3]).params).args, [
+						"find",
+						"role",
+						"link",
+						"click",
+						"--name",
+						"Search Wikipedia",
+					]);
+					assert.ok(!JSON.stringify(clickNextActions).includes("agent browser"));
 
-			const textFillMiss = await executeRegisteredTool(harness.tool, harness.ctx, {
-				semanticAction: { action: "fill", locator: "text", value: "Composer", text: "private smoke prompt" },
-			});
-			assert.equal(textFillMiss.isError, true);
-			assert.equal(textFillMiss.details?.failureCategory, "selector-not-found");
-			assert.match((textFillMiss.content[0] as { text: string }).text, /Rich input recovery:/);
-			assert.match((textFillMiss.content[0] as { text: string }).text, /@e11 textbox "Composer"/);
-			assert.doesNotMatch((textFillMiss.content[0] as { text: string }).text, /private smoke prompt/);
-			const textFillRecovery = textFillMiss.details?.richInputRecovery as { candidates?: Array<{ clickArgs?: string[]; focusArgs?: string[]; ref?: string; role?: string }> } | undefined;
-			assert.deepEqual(textFillRecovery?.candidates?.map((candidate) => ({ clickArgs: candidate.clickArgs, focusArgs: candidate.focusArgs, ref: candidate.ref, role: candidate.role })), [
-				{ clickArgs: ["click", "@e11"], focusArgs: ["focus", "@e11"], ref: "@e11", role: "textbox" },
-			]);
-			const textFillNextActions = textFillMiss.details?.nextActions as Array<{ id?: string; params?: { args?: string[] }; reason?: string; safety?: string }> | undefined;
-			assert.deepEqual(textFillNextActions?.map((action) => action.id), ["refresh-interactive-refs", "focus-current-editable-ref", "click-current-editable-ref"]);
-			for (const action of textFillNextActions ?? []) {
-				assert.ok(!action.params?.args?.includes("private smoke prompt"));
-				assert.ok(!action.params?.args?.includes("Enter"));
-				assert.doesNotMatch(action.id ?? "", /submit/i);
-				assert.doesNotMatch(action.reason ?? "", /private smoke prompt/);
-			}
+					const textFillMiss = await executeRegisteredTool(harness.tool, harness.ctx, {
+						semanticAction: {
+							action: "fill",
+							locator: "text",
+							value: "Composer",
+							text: "private smoke prompt",
+						},
+					});
+					assert.equal(textFillMiss.isError, true);
+					assert.equal(readRecord(textFillMiss.details).failureCategory, "selector-not-found");
+					assert.match(
+						readString(readRecord(textFillMiss.content[0]).text),
+						/Rich input recovery:/,
+					);
+					assert.match(
+						readString(readRecord(textFillMiss.content[0]).text),
+						/@e11 textbox "Composer"/,
+					);
+					assert.doesNotMatch(
+						readString(readRecord(textFillMiss.content[0]).text),
+						/private smoke prompt/,
+					);
+					const textFillRecovery = readRecord(readRecord(textFillMiss.details).richInputRecovery);
+					assert.deepEqual(
+						readArray(textFillRecovery.candidates).map((candidate) => ({
+							clickArgs: readRecord(candidate).clickArgs,
+							focusArgs: readRecord(candidate).focusArgs,
+							ref: readRecord(candidate).ref,
+							role: readRecord(candidate).role,
+						})),
+						[
+							{
+								clickArgs: ["click", "@e11"],
+								focusArgs: ["focus", "@e11"],
+								ref: "@e11",
+								role: "textbox",
+							},
+						],
+					);
+					const textFillNextActions = readArray(readRecord(textFillMiss.details).nextActions);
+					assert.deepEqual(
+						textFillNextActions.map((action) => readRecord(action).id),
+						[
+							"refresh-interactive-refs",
+							"focus-current-editable-ref",
+							"click-current-editable-ref",
+						],
+					);
+					for (const action of textFillNextActions) {
+						// The preceding exact action-ID assertion proves this recovery list is nonempty before validating every payload.
+						// oxlint-disable-next-line node-test/no-conditional-assertion
+						assert.ok(
+							!readArray(readRecord(readRecord(action).params).args).includes(
+								"private smoke prompt",
+							),
+						);
+						// The preceding exact action-ID assertion proves this recovery list is nonempty before validating every payload.
+						// oxlint-disable-next-line node-test/no-conditional-assertion
+						assert.ok(!readArray(readRecord(readRecord(action).params).args).includes("Enter"));
+						// The preceding exact action-ID assertion proves this recovery list is nonempty before validating every payload.
+						// oxlint-disable-next-line node-test/no-conditional-assertion
+						assert.doesNotMatch(readString(readRecord(action).id ?? ""), /submit/i);
+						// The preceding exact action-ID assertion proves this recovery list is nonempty before validating every payload.
+						// oxlint-disable-next-line node-test/no-conditional-assertion
+						assert.doesNotMatch(
+							readString(readRecord(action).reason ?? ""),
+							/private smoke prompt/,
+						);
+					}
 
-			const selectMiss = await executeRegisteredTool(harness.tool, harness.ctx, {
-				semanticAction: { action: "select", selector: "find", values: ["role", "button", "click", "--name", "Search Wikipedia"] },
-			});
-			assert.equal(selectMiss.isError, true);
-			assert.equal(selectMiss.details?.failureCategory, "selector-not-found");
-			assert.doesNotMatch((selectMiss.content[0] as { text: string }).text, /Current snapshot ref fallback|Agent-browser candidate fallbacks|@e10/);
-			const selectMissNextActions = selectMiss.details?.nextActions as Array<{ id?: string }> | undefined;
-			assert.deepEqual(selectMissNextActions?.map((action) => action.id), ["refresh-interactive-refs"]);
+					const selectMiss = await executeRegisteredTool(harness.tool, harness.ctx, {
+						semanticAction: {
+							action: "select",
+							selector: "find",
+							values: ["role", "button", "click", "--name", "Search Wikipedia"],
+						},
+					});
+					assert.equal(selectMiss.isError, true);
+					assert.equal(readRecord(selectMiss.details).failureCategory, "selector-not-found");
+					assert.doesNotMatch(
+						readString(readRecord(selectMiss.content[0]).text),
+						/Current snapshot ref fallback|Agent-browser candidate fallbacks|@e10/,
+					);
+					const selectMissNextActions = readArray(readRecord(selectMiss.details).nextActions);
+					assert.deepEqual(
+						selectMissNextActions.map((action) => readRecord(action).id),
+						["refresh-interactive-refs"],
+					);
 
-			const rawSelectMiss = await executeRegisteredTool(harness.tool, harness.ctx, {
-				args: ["select", "find", "role", "button", "click", "--name", "Search Wikipedia"],
-			});
-			assert.equal(rawSelectMiss.isError, true);
-			assert.equal(rawSelectMiss.details?.failureCategory, "selector-not-found");
-			assert.doesNotMatch((rawSelectMiss.content[0] as { text: string }).text, /Current snapshot ref fallback|@e10/);
-			const rawSelectMissNextActions = rawSelectMiss.details?.nextActions as Array<{ id?: string }> | undefined;
-			assert.deepEqual(rawSelectMissNextActions?.map((action) => action.id), ["refresh-interactive-refs"]);
+					const rawSelectMiss = await executeRegisteredTool(harness.tool, harness.ctx, {
+						args: ["select", "find", "role", "button", "click", "--name", "Search Wikipedia"],
+					});
+					assert.equal(rawSelectMiss.isError, true);
+					assert.equal(readRecord(rawSelectMiss.details).failureCategory, "selector-not-found");
+					assert.doesNotMatch(
+						readString(readRecord(rawSelectMiss.content[0]).text),
+						/Current snapshot ref fallback|@e10/,
+					);
+					const rawSelectMissNextActions = readArray(readRecord(rawSelectMiss.details).nextActions);
+					assert.deepEqual(
+						rawSelectMissNextActions.map((action) => readRecord(action).id),
+						["refresh-interactive-refs"],
+					);
+				},
+			);
+		} finally {
+			await rm(tempDir, { force: true, recursive: true });
+		}
+	},
+);
 
-		});
-	} finally {
-		await rm(tempDir, { force: true, recursive: true });
-	}
-});
-
-test("agentBrowserExtension suggests current snapshot refs when raw find role locators miss", { concurrency: false }, async () => {
-	const tempDir = await mkdtemp(join(tmpdir(), "pi-agent-browser-find-ref-fallback-"));
-	const logPath = join(tempDir, "invocations.log");
-	const basePath = process.env.PATH ?? "";
-	await writeFakeAgentBrowserBinary(
-		tempDir,
-		`const fs = require("node:fs");
+test(
+	"agentBrowserExtension suggests current snapshot refs when raw find role locators miss",
+	{ concurrency: false },
+	async () => {
+		const tempDir = await mkdtemp(join(tmpdir(), "pi-agent-browser-find-ref-fallback-"));
+		const logPath = join(tempDir, "invocations.log");
+		const basePath = process.env.PATH ?? "";
+		await writeFakeAgentBrowserBinary(
+			tempDir,
+			`const fs = require("node:fs");
 const args = process.argv.slice(2);
 fs.appendFileSync(${JSON.stringify(logPath)}, JSON.stringify({ args }) + "\\n");
 if (args.includes("snapshot")) {
@@ -315,61 +568,96 @@ if (args.includes("snapshot")) {
 } else {
   process.stdout.write(JSON.stringify({ success: true, data: "ok" }));
 }`,
-	);
+		);
 
-	try {
-		await withPatchedEnv({ PATH: `${tempDir}:${basePath}`, PI_AGENT_BROWSER_TEST_PAGE_URL: "https://login.example/" }, async () => {
-			const harness = createExtensionHarness({ cwd: tempDir });
-			await runExtensionEvent(harness.handlers, "session_start", { reason: "new" }, harness.ctx);
-
-			const initialSnapshot = await executeRegisteredTool(harness.tool, harness.ctx, { args: ["snapshot", "-i"] });
-			assert.equal(initialSnapshot.isError, false, JSON.stringify(initialSnapshot));
-
-			const result = await executeRegisteredTool(harness.tool, harness.ctx, {
-				args: ["find", "role", "button", "click", "--name", "Login"],
-			});
-			assert.equal(result.isError, true);
-			assert.equal(result.details?.failureCategory, "selector-not-found");
-			assert.match((result.content[0] as { text: string }).text, /Current snapshot ref fallback:/);
-			assert.match((result.content[0] as { text: string }).text, /@e3 button "Login"/);
-			assert.doesNotMatch((result.content[0] as { text: string }).text, /@e5 link "Login"/);
-			assert.doesNotMatch((result.content[0] as { text: string }).text, /@e6 button "Login later"/);
-
-			const visibleRefFallback = result.details?.visibleRefFallback as { candidates?: Array<{ ref?: string; role?: string; name?: string }> } | undefined;
-			assert.deepEqual(visibleRefFallback?.candidates, [
+		try {
+			await withPatchedEnv(
 				{
-					action: "click",
-					args: ["click", "@e3"],
-					name: "Login",
-					reason: 'Current snapshot shows button "Login" at @e3, matching the failed click locator exactly.',
-					ref: "@e3",
-					role: "button",
+					PATH: `${tempDir}:${basePath}`,
+					PI_AGENT_BROWSER_TEST_PAGE_URL: "https://login.example/",
 				},
-			]);
-			assert.equal(result.details?.refSnapshot, undefined);
-			assert.deepEqual(SessionPageState.fromBranch(harness.ctx.sessionManager.getBranch()).get(String(result.details?.sessionName)).refSnapshot?.refIds, ["e3", "e4", "e5", "e6"]);
+				async () => {
+					const harness = createExtensionHarness({ cwd: tempDir });
+					await runExtensionEvent(
+						harness.handlers,
+						"session_start",
+						{ reason: "new" },
+						harness.ctx,
+					);
 
-			const nextActions = result.details?.nextActions as Array<{ id?: string; params?: { args?: string[] }; safety?: string }> | undefined;
-			assert.deepEqual(nextActions?.map((action) => action.id), ["refresh-interactive-refs", "try-current-visible-ref"]);
-			assert.deepEqual(nextActions?.[1]?.params?.args?.slice(-2), ["click", "@e3"]);
-			assert.match(nextActions?.[1]?.safety ?? "", /current snapshot/);
+					const initialSnapshot = await executeRegisteredTool(harness.tool, harness.ctx, {
+						args: ["snapshot", "-i"],
+					});
+					assert.equal(initialSnapshot.isError, false, JSON.stringify(initialSnapshot));
 
-			const invocations = await readInvocationLog(logPath);
-			assert.equal(invocations.filter((entry) => entry.args.includes("find")).length, 1);
-			assert.equal(invocations.filter((entry) => entry.args.includes("snapshot")).length, 2);
-		});
-	} finally {
-		await rm(tempDir, { force: true, recursive: true });
-	}
-});
+					const result = await executeRegisteredTool(harness.tool, harness.ctx, {
+						args: ["find", "role", "button", "click", "--name", "Login"],
+					});
+					assert.equal(result.isError, true);
+					assert.equal(readRecord(result.details).failureCategory, "selector-not-found");
+					assert.match(
+						readString(readRecord(result.content[0]).text),
+						/Current snapshot ref fallback:/,
+					);
+					assert.match(readString(readRecord(result.content[0]).text), /@e3 button "Login"/);
+					assert.doesNotMatch(readString(readRecord(result.content[0]).text), /@e5 link "Login"/);
+					assert.doesNotMatch(
+						readString(readRecord(result.content[0]).text),
+						/@e6 button "Login later"/,
+					);
 
-test("agentBrowserExtension offers current ref fallback for failed semantic find steps inside batch", { concurrency: false }, async () => {
-	const tempDir = await mkdtemp(join(tmpdir(), "pi-agent-browser-batch-semantic-ref-fallback-"));
-	const logPath = join(tempDir, "invocations.log");
-	const basePath = process.env.PATH ?? "";
-	await writeFakeAgentBrowserBinary(
-		tempDir,
-		`const fs = require("node:fs");
+					const visibleRefFallback = readRecord(readRecord(result.details).visibleRefFallback);
+					assert.deepEqual(visibleRefFallback.candidates, [
+						{
+							action: "click",
+							args: ["click", "@e3"],
+							name: "Login",
+							reason:
+								'Current snapshot shows button "Login" at @e3, matching the failed click locator exactly.',
+							ref: "@e3",
+							role: "button",
+						},
+					]);
+					assert.equal(readRecord(result.details).refSnapshot, undefined);
+					assert.deepEqual(
+						SessionPageState.fromBranch(harness.ctx.sessionManager.getBranch()).get(
+							readString(readRecord(result.details).sessionName),
+						).refSnapshot?.refIds,
+						["e3", "e4", "e5", "e6"],
+					);
+
+					const nextActions = readArray(readRecord(result.details).nextActions);
+					assert.deepEqual(
+						nextActions.map((action) => readRecord(action).id),
+						["refresh-interactive-refs", "try-current-visible-ref"],
+					);
+					assert.deepEqual(
+						readArray(readRecord(readRecord(nextActions[1]).params).args).slice(-2),
+						["click", "@e3"],
+					);
+					assert.match(readString(readRecord(nextActions[1]).safety ?? ""), /current snapshot/);
+
+					const invocations = await readInvocationLog(logPath);
+					assert.equal(invocations.filter((entry) => entry.args.includes("find")).length, 1);
+					assert.equal(invocations.filter((entry) => entry.args.includes("snapshot")).length, 2);
+				},
+			);
+		} finally {
+			await rm(tempDir, { force: true, recursive: true });
+		}
+	},
+);
+
+test(
+	"agentBrowserExtension offers current ref fallback for failed semantic find steps inside batch",
+	{ concurrency: false },
+	async () => {
+		const tempDir = await mkdtemp(join(tmpdir(), "pi-agent-browser-batch-semantic-ref-fallback-"));
+		const logPath = join(tempDir, "invocations.log");
+		const basePath = process.env.PATH ?? "";
+		await writeFakeAgentBrowserBinary(
+			tempDir,
+			`const fs = require("node:fs");
 const args = process.argv.slice(2);
 let stdin = "";
 process.stdin.on("data", (chunk) => { stdin += chunk; });
@@ -390,68 +678,96 @@ process.stdin.on("end", () => {
   }
   process.stdout.write(JSON.stringify({ success: true, data: "ok" }));
 });`,
-	);
+		);
 
-	try {
-		await withPatchedEnv({ PATH: `${tempDir}:${basePath}` }, async () => {
-			const harness = createExtensionHarness({ cwd: tempDir });
-			await runExtensionEvent(harness.handlers, "session_start", { reason: "new" }, harness.ctx);
+		try {
+			await withPatchedEnv({ PATH: `${tempDir}:${basePath}` }, async () => {
+				const harness = createExtensionHarness({ cwd: tempDir });
+				await runExtensionEvent(harness.handlers, "session_start", { reason: "new" }, harness.ctx);
 
-			const result = await executeRegisteredTool(harness.tool, harness.ctx, {
-				args: ["batch"],
-				stdin: JSON.stringify([["find", "role", "button", "click", "--name", "Shadow action"]]),
+				const result = await executeRegisteredTool(harness.tool, harness.ctx, {
+					args: ["batch"],
+					stdin: JSON.stringify([["find", "role", "button", "click", "--name", "Shadow action"]]),
+				});
+
+				assert.equal(result.isError, true);
+				assert.equal(readRecord(result.details).failureCategory, "selector-not-found");
+				assert.match(
+					readString(readRecord(result.content[0]).text),
+					/Current snapshot ref fallback:/,
+				);
+				assert.match(readString(readRecord(result.content[0]).text), /@e18 button "Shadow action"/);
+				const nextActions = readArray(readRecord(result.details).nextActions);
+				assert.ok(
+					nextActions.some(
+						(action) =>
+							readRecord(action).id === "try-current-visible-ref" &&
+							readArray(readRecord(readRecord(action).params).args).at(-1) === "@e18",
+					),
+				);
 			});
+		} finally {
+			await rm(tempDir, { force: true, recursive: true });
+		}
+	},
+);
 
-			assert.equal(result.isError, true);
-			assert.equal(result.details?.failureCategory, "selector-not-found");
-			assert.match((result.content[0] as { text: string }).text, /Current snapshot ref fallback:/);
-			assert.match((result.content[0] as { text: string }).text, /@e18 button "Shadow action"/);
-			const nextActions = result.details?.nextActions as Array<{ id?: string; params?: { args?: string[] } }> | undefined;
-			assert.ok(nextActions?.some((action) => action.id === "try-current-visible-ref" && action.params?.args?.at(-1) === "@e18"));
-		});
-	} finally {
-		await rm(tempDir, { force: true, recursive: true });
-	}
-});
-
-test("agentBrowserExtension returns a safe semantic retry action only for stale-ref find shorthand failures", { concurrency: false }, async () => {
-	const tempDir = await mkdtemp(join(tmpdir(), "pi-agent-browser-semantic-stale-"));
-	const basePath = process.env.PATH ?? "";
-	await writeFakeAgentBrowserBinary(
-		tempDir,
-		`const args = process.argv.slice(2);
+test(
+	"agentBrowserExtension returns a safe semantic retry action only for stale-ref find shorthand failures",
+	{ concurrency: false },
+	async () => {
+		const tempDir = await mkdtemp(join(tmpdir(), "pi-agent-browser-semantic-stale-"));
+		const basePath = process.env.PATH ?? "";
+		await writeFakeAgentBrowserBinary(
+			tempDir,
+			`const args = process.argv.slice(2);
 if (args.includes("find") || args.includes("select")) {
   process.stdout.write(JSON.stringify({ success: false, error: "Unknown ref @e4 while resolving locator" }));
   process.exit(1);
 }
 process.stdout.write(JSON.stringify({ success: true, data: "ok" }));`,
-	);
+		);
 
-	try {
-		await withPatchedEnv({ PATH: `${tempDir}:${basePath}` }, async () => {
-			const harness = createExtensionHarness({ cwd: tempDir });
-			await runExtensionEvent(harness.handlers, "session_start", { reason: "new" }, harness.ctx);
+		try {
+			await withPatchedEnv({ PATH: `${tempDir}:${basePath}` }, async () => {
+				const harness = createExtensionHarness({ cwd: tempDir });
+				await runExtensionEvent(harness.handlers, "session_start", { reason: "new" }, harness.ctx);
 
-			const result = await executeRegisteredTool(harness.tool, harness.ctx, {
-				semanticAction: { action: "click", locator: "text", value: "Export" },
+				const result = await executeRegisteredTool(harness.tool, harness.ctx, {
+					semanticAction: { action: "click", locator: "text", value: "Export" },
+				});
+
+				assert.equal(result.isError, true);
+				assert.equal(readRecord(result.details).failureCategory, "stale-ref");
+				const nextActions = readArray(readRecord(result.details).nextActions);
+				assert.deepEqual(
+					nextActions.map((action) => readRecord(action).id),
+					["refresh-interactive-refs", "retry-semantic-action-after-stale-ref"],
+				);
+				assert.deepEqual(readRecord(readRecord(nextActions[1]).params).args, [
+					"find",
+					"text",
+					"Export",
+					"click",
+				]);
+				assert.match(
+					readString(readRecord(nextActions[1]).safety ?? ""),
+					/prior action did not execute|direct stale @refs/,
+				);
+
+				const selectResult = await executeRegisteredTool(harness.tool, harness.ctx, {
+					semanticAction: { action: "select", selector: "@e4", value: "find" },
+				});
+				assert.equal(selectResult.isError, true);
+				assert.equal(readRecord(selectResult.details).failureCategory, "stale-ref");
+				const selectNextActions = readArray(readRecord(selectResult.details).nextActions);
+				assert.deepEqual(
+					selectNextActions.map((action) => readRecord(action).id),
+					["refresh-interactive-refs"],
+				);
 			});
-
-			assert.equal(result.isError, true);
-			assert.equal(result.details?.failureCategory, "stale-ref");
-			const nextActions = result.details?.nextActions as Array<{ id?: string; params?: { args?: string[] }; safety?: string }> | undefined;
-			assert.deepEqual(nextActions?.map((action) => action.id), ["refresh-interactive-refs", "retry-semantic-action-after-stale-ref"]);
-			assert.deepEqual(nextActions?.[1]?.params?.args, ["find", "text", "Export", "click"]);
-			assert.match(nextActions?.[1]?.safety ?? "", /prior action did not execute|direct stale @refs/);
-
-			const selectResult = await executeRegisteredTool(harness.tool, harness.ctx, {
-				semanticAction: { action: "select", selector: "@e4", value: "find" },
-			});
-			assert.equal(selectResult.isError, true);
-			assert.equal(selectResult.details?.failureCategory, "stale-ref");
-			const selectNextActions = selectResult.details?.nextActions as Array<{ id?: string; params?: { args?: string[] } }> | undefined;
-			assert.deepEqual(selectNextActions?.map((action) => action.id), ["refresh-interactive-refs"]);
-		});
-	} finally {
-		await rm(tempDir, { force: true, recursive: true });
-	}
-});
+		} finally {
+			await rm(tempDir, { force: true, recursive: true });
+		}
+	},
+);
