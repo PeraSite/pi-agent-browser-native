@@ -3,13 +3,14 @@ import { lstat, rm } from "node:fs/promises";
 import { win32 } from "node:path";
 import { promisify } from "node:util";
 
-import { fetchCdpJson, parseCdpTargets, parseCdpVersion } from "./cdp.js";
 import {
-	ELECTRON_PROFILE_DIR_PREFIX,
+	fetchCdpJson,
+	parseCdpTargets,
+	parseCdpVersion,
 	type ElectronCdpTarget,
 	type ElectronCdpVersion,
-	type ElectronLaunchRecord,
-} from "./launch.js";
+} from "./cdp.js";
+import { ELECTRON_PROFILE_DIR_PREFIX, type ElectronLaunchRecord } from "./launch-types.js";
 import { pathExists } from "../fs-utils.js";
 import { isRecord } from "../parsing.js";
 import { stringifyUnknown } from "../results/text.js";

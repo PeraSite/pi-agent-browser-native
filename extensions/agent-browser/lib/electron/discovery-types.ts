@@ -1,3 +1,6 @@
+export const ELECTRON_DISCOVERY_DEFAULT_MAX_RESULTS = 50;
+export const ELECTRON_DISCOVERY_MAX_RESULTS = 200;
+
 export type ElectronDiscoveryPlatform = "darwin" | "linux" | "win32";
 
 export interface ElectronAppSensitivity {

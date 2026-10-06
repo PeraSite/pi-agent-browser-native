@@ -7,14 +7,16 @@ import {
 	resolveRealPath,
 } from "./discovery-evidence.js";
 import { discoverLinuxApps } from "./discovery-linux.js";
-import type {
-	DiscoverElectronAppsOptions,
-	ElectronAppDiscovery,
-	ElectronAppSensitivity,
-	ElectronDiscoveryPlatform,
-	ElectronDiscoveryResult,
-	ElectronDiscoveryScanLocations,
-	ResolvedElectronDiscoveryLocations,
+import {
+	ELECTRON_DISCOVERY_DEFAULT_MAX_RESULTS,
+	ELECTRON_DISCOVERY_MAX_RESULTS,
+	type DiscoverElectronAppsOptions,
+	type ElectronAppDiscovery,
+	type ElectronAppSensitivity,
+	type ElectronDiscoveryPlatform,
+	type ElectronDiscoveryResult,
+	type ElectronDiscoveryScanLocations,
+	type ResolvedElectronDiscoveryLocations,
 } from "./discovery-types.js";
 
 export type {
@@ -27,8 +29,10 @@ export type {
 } from "./discovery-types.js";
 export { inspectDarwinApp } from "./discovery-darwin.js";
 export { hasLinuxElectronEvidence } from "./discovery-evidence.js";
-export const ELECTRON_DISCOVERY_DEFAULT_MAX_RESULTS = 50;
-export const ELECTRON_DISCOVERY_MAX_RESULTS = 200;
+export {
+	ELECTRON_DISCOVERY_DEFAULT_MAX_RESULTS,
+	ELECTRON_DISCOVERY_MAX_RESULTS,
+} from "./discovery-types.js";
 
 const SENSITIVE_APP_PATTERNS = [
 	{ category: "notes", patterns: [/\bobsidian\b/i, /\bnotion\b/i, /\blogseq\b/i] },

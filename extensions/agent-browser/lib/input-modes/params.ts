@@ -3,7 +3,7 @@ import { StringEnum as localStringEnum, type StringEnumBuilder } from "../string
 import {
 	ELECTRON_DISCOVERY_DEFAULT_MAX_RESULTS,
 	ELECTRON_DISCOVERY_MAX_RESULTS,
-} from "../electron/discovery.js";
+} from "../electron/discovery-types.js";
 import {
 	AGENT_BROWSER_CODE_MAX_TIMEOUT_MS,
 	AGENT_BROWSER_ELECTRON_HANDOFFS,

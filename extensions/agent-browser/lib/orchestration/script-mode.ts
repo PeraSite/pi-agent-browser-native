@@ -19,7 +19,7 @@ import type {
 } from "../results/contracts.js";
 import { attachInlineImage } from "../results/presentation/artifacts.js";
 import { projectAgentBrowserObservation } from "../results/presentation/content.js";
-import { redactPresentationData } from "../results/presentation/diagnostics.js";
+import { redactPresentationData } from "../results/presentation/diagnostic-redaction.js";
 import type { AgentBrowserToolResult } from "./browser-run/types.js";
 import {
 	collectCodeArtifactReceipts,

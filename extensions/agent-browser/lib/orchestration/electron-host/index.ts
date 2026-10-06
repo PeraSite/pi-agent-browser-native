@@ -1,15 +1,13 @@
 import type { CompiledAgentBrowserElectron } from "../../input-modes/types.js";
 import { withAttachedBrowserSessionContext } from "../../process.js";
 import { getSessionPageStateKey } from "../../session-page-state.js";
-import { buildElectronHostFailureResult } from "../browser-run/final-result.js";
+import { buildElectronHostFailureResult } from "../browser-run/final-result-electron.js";
 import type { AgentBrowserToolResult } from "../browser-run/types.js";
 import { selectElectronRecords } from "./branch.js";
 import { cleanupTrackedElectronHostLaunches } from "./cleanup.js";
 import { buildElectronCleanupResult } from "./cleanup-result.js";
 import type { ElectronHostInput, ElectronHostObservationInput } from "./contracts.js";
 import { discoverElectronHostApps } from "./discovery.js";
-import { probeElectronHost } from "./probe.js";
-import { inspectElectronHostLaunches } from "./status.js";
 
 export type { ElectronLaunchRecord } from "../../electron/launch.js";
 export { ELECTRON_PROFILE_ISOLATION_DETAILS } from "./discovery.js";
@@ -84,10 +82,14 @@ async function handleElectronHostInputInContext(
 	switch (input.action) {
 		case "list":
 			return discoverElectronHostApps(input, visibleInput);
-		case "status":
+		case "status": {
+			const { inspectElectronHostLaunches } = await import("./status.js");
 			return inspectElectronHostLaunches(options, input, visibleInput);
-		case "probe":
+		}
+		case "probe": {
+			const { probeElectronHost } = await import("./probe.js");
 			return probeElectronHost(options, input, visibleInput);
+		}
 		case "cleanup":
 			return cleanupElectronHostInput(options, input, visibleInput);
 		case "launch":

@@ -5,7 +5,7 @@ import { buildValidationFailureResult } from "./input-plan.js";
 import type { ResolvedAgentBrowserValidInput } from "./input-plan-types.js";
 import type { AgentBrowserToolResult } from "./browser-run/types.js";
 import { inspectManagedSessionDaemon } from "./browser-run/managed-session-daemon-policy.js";
-import { buildMissingBinaryMessage } from "./browser-run/final-result.js";
+import { buildMissingBinaryMessage } from "./browser-run/final-result-missing-binary.js";
 import type { NativeDefaults } from "./native-config.js";
 
 export interface RootBrowserLaunchPolicy {

@@ -1,13 +1,9 @@
-import {
-	discoverElectronApps,
-	type ElectronAppDiscovery,
-	type ElectronDiscoveryResult,
-} from "../../electron/discovery.js";
+import type { ElectronAppDiscovery, ElectronDiscoveryResult } from "../../electron/discovery.js";
 import type { CompiledAgentBrowserElectron } from "../../input-modes/types.js";
 import { buildAgentBrowserResultCategoryDetails } from "../../results/categories.js";
 import { redactSensitiveText } from "../../runtime-redaction.js";
 import { normalizeProcessError } from "../../process-errors.js";
-import { redactToolDetails } from "../browser-run/final-result.js";
+import { redactToolDetails } from "../browser-run/final-result-redaction.js";
 import type { AgentBrowserToolResult } from "../browser-run/types.js";
 
 const ELECTRON_PROFILE_ISOLATION_NOTE =
@@ -125,6 +121,7 @@ export async function discoverElectronHostApps(
 	visibleInput: CompiledAgentBrowserElectron,
 ): Promise<AgentBrowserToolResult> {
 	try {
+		const { discoverElectronApps } = await import("../../electron/discovery.js");
 		const discovery = await discoverElectronApps({
 			maxResults: compiledElectron.maxResults,
 			query: compiledElectron.query,

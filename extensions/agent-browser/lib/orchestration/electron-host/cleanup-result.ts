@@ -3,7 +3,7 @@ import type { CompiledAgentBrowserElectron } from "../../input-modes/types.js";
 import { buildAgentBrowserNextActions } from "../../results/action-recommendations.js";
 import { buildAgentBrowserResultCategoryDetails } from "../../results/categories.js";
 import { redactSensitiveText } from "../../runtime-redaction.js";
-import { redactToolDetails } from "../browser-run/final-result.js";
+import { redactToolDetails } from "../browser-run/final-result-redaction.js";
 import type { AgentBrowserToolResult } from "../browser-run/types.js";
 function formatElectronCleanupVisibleText(results: readonly ElectronCleanupResult[]): string {
 	if (results.length === 0) {

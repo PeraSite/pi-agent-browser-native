@@ -1,10 +1,3 @@
-import {
-	distinctNetworkCandidates,
-	getFailedNetworkRequests,
-	observeInitiatorCandidates,
-} from "./lookup-network-evidence.js";
-import { distinctSourceCandidates, observeSourceCandidates } from "./lookup-source-evidence.js";
-import { scanWorkspaceComponent, scanWorkspaceRequests } from "./lookup-workspace.js";
 import type {
 	AgentBrowserNetworkSourceLookupAnalysis,
 	AgentBrowserNetworkSourceLookupStatus,
@@ -60,6 +53,9 @@ export async function analyzeSourceLookupResults(
 	cwd: string,
 	context?: AgentBrowserSourceLookupAnalysisContext,
 ): Promise<AgentBrowserSourceLookupAnalysis> {
+	const { distinctSourceCandidates, observeSourceCandidates } =
+		await import("./lookup-source-evidence.js");
+	const { scanWorkspaceComponent } = await import("./lookup-workspace.js");
 	const observed = observeSourceCandidates(data);
 	const workspace = await scanWorkspaceComponent(compiled.query, cwd);
 	const candidates = distinctSourceCandidates([...observed.candidates, ...workspace.candidates]);
@@ -117,6 +113,9 @@ export async function analyzeNetworkSourceLookupResults(
 	compiled: CompiledAgentBrowserNetworkSourceLookup,
 	cwd: string,
 ): Promise<AgentBrowserNetworkSourceLookupAnalysis> {
+	const { distinctNetworkCandidates, getFailedNetworkRequests, observeInitiatorCandidates } =
+		await import("./lookup-network-evidence.js");
+	const { scanWorkspaceRequests } = await import("./lookup-workspace.js");
 	const failedRequests = getFailedNetworkRequests(
 		data,
 		compiled.query.url ?? compiled.query.filter,

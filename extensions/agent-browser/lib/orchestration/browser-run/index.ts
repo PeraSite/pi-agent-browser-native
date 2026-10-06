@@ -20,7 +20,8 @@ import {
 	annotateScreenshotImageObservations,
 	collectScreenshotSample,
 } from "./screenshot-observation.js";
-import { buildJsonVisibleContent, buildMissingBinaryFailureResult } from "./final-result.js";
+import { buildJsonVisibleContent } from "./final-result-redaction.js";
+import { buildMissingBinaryFailureResult } from "./final-result-missing-binary.js";
 import { createNativeHelperObserver } from "./native-helper-observation.js";
 import {
 	projectBrowserObservationResult,
