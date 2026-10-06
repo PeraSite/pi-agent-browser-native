@@ -1,6 +1,6 @@
 import { Readable, Writable } from "node:stream";
 import { pipeline } from "node:stream/promises";
-import { parser, type Token } from "stream-json/parser.js";
+import type { Token } from "stream-json/parser.js";
 import { isRecord } from "./parsing.js";
 import { normalizeProcessError } from "./process-errors.js";
 
@@ -210,6 +210,7 @@ export async function projectJson(
 	fields: ProjectionFields,
 	maxBytes = ENVELOPE_MAX_BYTES,
 ): Promise<Record<string, unknown> | undefined> {
+	const { parser } = await import("stream-json/parser.js");
 	async function* decode(): AsyncGenerator<string> {
 		const decoder = new TextDecoder("utf-8", { fatal: true });
 		for await (const chunk of input) {

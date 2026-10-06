@@ -570,6 +570,12 @@ test(
 						executionCalls++;
 					},
 				});
+				// Make the premature call callable after suppression so it reaches the read gate,
+				// rather than Pi's independent unknown-tool preflight.
+				pi.on("before_agent_start", (event) => {
+					pi.setActiveTools([...pi.getActiveTools(), "agent_browser"]);
+					Object.assign(event.systemPromptOptions, { selectedTools: pi.getActiveTools() });
+				});
 			},
 			discoveryStream(model, context, options) {
 				requests++;
@@ -583,24 +589,26 @@ test(
 						},
 					])(model, context, options);
 				}
-				const result = context.messages
-					.filter(isAgentBrowserToolResult)
-					.map(readPipelineToolResult)
-					.find((message) => message.toolName === "agent_browser");
-				assert.equal(result?.isError, true);
-				assert.match(JSON.stringify(result), /prior turn/);
-				assert.equal(executionCalls, 0);
 				return streamTextResponse(model, "Stopped after guarded refusal.");
 			},
 			async runPrompt(session) {
 				const before = session.getActiveToolNames().sort();
 				await session.prompt("Discover and try a premature browser call.");
+				const terminal = session.messages.at(-1);
+				if (terminal?.role !== "assistant") {
+					throw new Error("Expected a terminal assistant response");
+				}
+				assert.equal(terminal.stopReason, "stop", terminal.errorMessage);
+				assert.equal(terminal.errorMessage, undefined);
 				assert.deepEqual(session.getActiveToolNames().sort(), before);
 				assert.ok(!before.includes("agent_browser_qa"));
 			},
 			fakeScript: `throw Error("browser must not dispatch before discovery");`,
 		});
 		assert.equal(requests, 2);
+		assert.equal(pipeline.inMemoryResult.isError, true);
+		assert.match(JSON.stringify(pipeline.inMemoryResult), /prior turn/);
+		assert.equal(executionCalls, 0);
 		assert.equal(pipeline.persistedResult.isError, true);
 		assert.deepEqual(pipeline.invocations, []);
 	},

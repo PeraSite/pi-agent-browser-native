@@ -27,7 +27,6 @@ import {
 	type BrowserObservationState,
 } from "./browser-observation-result.js";
 import { prepareBrowserRun } from "./prepare.js";
-import { processBrowserOutput } from "./process-output.js";
 import type {
 	AgentBrowserProcessResult,
 	AgentBrowserToolResult,
@@ -331,6 +330,9 @@ async function executePreparedBrowserRun(
 			options.state.confirmationPolicyMayBeEstablished ??= false;
 			return missing;
 		}
+		// Output presentation is not needed for synchronous registration or failed preparation.
+		// Its static host-peer imports retain Pi's loader mapping when loaded on demand.
+		const { processBrowserOutput } = await import("./process-output.js");
 		const output = await processBrowserOutput({
 			...options,
 			prepared,

@@ -1314,9 +1314,12 @@ test("parseAgentBrowserEnvelope accepts exact plugin list and show success envel
 
 test("parseAgentBrowserEnvelope rejects object envelopes without boolean success", async () => {
 	const parsed = await parseAgentBrowserEnvelope(JSON.stringify({ error: "boom" }));
+	const malformedPlugin = await parseAgentBrowserEnvelope(JSON.stringify({ plugin: ["demo"] }));
 
 	assert.equal(parsed.envelope, undefined);
 	assert.equal(parsed.parseError, MISSING_SUCCESS_PARSE_ERROR);
+	assert.equal(malformedPlugin.envelope, undefined);
+	assert.equal(malformedPlugin.parseError, MISSING_SUCCESS_PARSE_ERROR);
 });
 
 test("parseAgentBrowserEnvelope rejects object envelopes with non-boolean success", async () => {

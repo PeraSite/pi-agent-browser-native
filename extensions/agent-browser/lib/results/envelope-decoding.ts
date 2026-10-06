@@ -16,7 +16,7 @@ function decodePluginList(
 	if (keys[0] === "plugins" && Array.isArray(value.plugins)) {
 		return { success: true, data: { plugins: value.plugins } };
 	}
-	if (keys[0] === "plugin" && isRecord(value.plugin)) {
+	if (keys[0] === "plugin" && isRecord(value.plugin) && !Array.isArray(value.plugin)) {
 		return { success: true, data: { plugin: value.plugin } };
 	}
 	return undefined;
