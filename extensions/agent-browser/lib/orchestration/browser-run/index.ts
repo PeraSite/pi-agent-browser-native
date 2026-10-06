@@ -26,7 +26,6 @@ import {
 	projectBrowserObservationResult,
 	type BrowserObservationState,
 } from "./browser-observation-result.js";
-import { prepareBrowserRun } from "./prepare.js";
 import type {
 	AgentBrowserProcessResult,
 	AgentBrowserToolResult,
@@ -162,6 +161,8 @@ async function honorHelperConfirmation(
 async function runAgentBrowserToolInContext(
 	options: BrowserRunOptions,
 ): Promise<AgentBrowserToolResult> {
+	// Preparation belongs to this call's existing helper/attachment observation context.
+	const { prepareBrowserRun } = await import("./prepare.js");
 	const prepared = await prepareBrowserRun(options);
 	applyBrowserRunStatePatch(
 		options.state,

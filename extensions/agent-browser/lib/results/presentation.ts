@@ -1,8 +1,4 @@
 import type { ToolPresentation } from "./contracts.js";
-import {
-	buildEarlyPresentation,
-	sanitizeModelFacingPresentation,
-} from "./presentation/early-result.js";
 import type { BuildToolPresentationOptions } from "./presentation/input-contracts.js";
 import { applyPresentationNotices } from "./presentation/notices.js";
 import { applyPresentationOutcome } from "./presentation/outcomes.js";
@@ -10,15 +6,14 @@ import {
 	completePresentationOutput,
 	extractPresentationArtifacts,
 } from "./presentation/output-completion.js";
-import {
-	buildPresentationSource,
-	buildSourcePresentation,
-	resolvePresentationCommands,
-} from "./presentation/source.js";
 
 export async function buildToolPresentation(
 	options: BuildToolPresentationOptions,
 ): Promise<ToolPresentation> {
+	const { buildPresentationSource, buildSourcePresentation, resolvePresentationCommands } =
+		await import("./presentation/source.js");
+	const { buildEarlyPresentation, sanitizeModelFacingPresentation } =
+		await import("./presentation/early-result.js");
 	const commands = resolvePresentationCommands(options);
 	const early = await buildEarlyPresentation(options, commands);
 	if (early) {

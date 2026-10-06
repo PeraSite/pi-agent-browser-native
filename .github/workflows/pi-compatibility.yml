@@ -38,7 +38,7 @@ jobs:
     if: ${{ !cancelled() }}
     name: Official Pi / Node 24
     runs-on: ubuntu-26.04
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
       - name: Require resolved latest hosts
         env:
@@ -61,6 +61,10 @@ jobs:
           package-manager-cache: false
       - name: Use the package npm version
         run: npm install --global "$(node -p 'require("./extension/package.json").packageManager')"
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: "1.27.1"
+          cache: false
       - name: Qualify latest official Pi
         working-directory: extension
         env:
@@ -83,7 +87,7 @@ jobs:
     if: ${{ !cancelled() }}
     name: Fork Pi / Node 24
     runs-on: ubuntu-26.04
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
       - name: Require resolved latest hosts
         env:
@@ -113,6 +117,10 @@ jobs:
           package-manager-cache: false
       - name: Use the package npm version
         run: npm install --global "$(node -p 'require("./extension/package.json").packageManager')"
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: "1.27.1"
+          cache: false
       - name: Build the current fork packages
         working-directory: pi-host
         env:
@@ -123,6 +131,8 @@ jobs:
           npm run hydrate:model-data
           PI_OFFLINE=1 PI_TELEMETRY=0 npm run build:offline
           node ../automation/scripts/pack-fork.mjs . "$RUNNER_TEMP/fork-package" "$PI_FORK_REF"
+          mkdir -p "$RUNNER_TEMP/fork-evidence"
+          cp -a "$RUNNER_TEMP/fork-package" "$RUNNER_TEMP/fork-evidence/packages"
           git diff --exit-code
       - name: Qualify the installed fork graph
         working-directory: extension

@@ -29,6 +29,7 @@ const { prepareHost, selectDevelopmentHost } = await import(
 // Nested test sockets need the same short temporary root as the pinned qualifier.
 const root = mkdtempSync("/tmp/pc-");
 const env = isolatedEnvironment(root);
+let goRoot;
 
 function execute(command, args) {
 	console.log(`$ ${command} ${args.join(" ")}`);
@@ -66,11 +67,28 @@ try {
 		PI_HOST_CLI: selected.cli,
 	});
 	if (mode === "full") {
+		// Keep sockets short and large cold-compiler work/caches in owned workspace scratch.
+		const cache = join(source, "node_modules", ".cache");
+		mkdirSync(cache, { recursive: true });
+		goRoot = mkdtempSync(join(cache, "pi-compat-go-"));
+		for (const name of ["GOCACHE", "GOMODCACHE", "GOTMPDIR"]) {
+			const directory = join(goRoot, name);
+			mkdirSync(directory);
+			env[name] = directory;
+		}
+		// This disposable module cache must remain removable by the owning unprivileged job.
+		env.GOFLAGS = "-modcacherw";
 		execute("npm", ["run", "check:compat"]);
 	} else if (mode === "smoke") {
 		execute("npm", ["run", "typecheck"]);
 		execute("node", ["scripts/verify-package.mjs", "--smoke-pi"]);
 	}
 } finally {
-	rmSync(root, { recursive: true, force: true });
+	try {
+		if (goRoot !== undefined) {
+			rmSync(goRoot, { recursive: true, force: true });
+		}
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
 }
