@@ -4,6 +4,16 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
+  workflow_call:
+    inputs:
+      official-version:
+        description: Official stable version resolved for this run; blank resolves latest
+        type: string
+        default: ""
+      fork-ref:
+        description: Maintained fork commit resolved for this run; blank resolves main
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -13,14 +23,27 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  PI_AUTOMATION_REF: febbb67574a846d68b1422dd26c5b5e6b901ca4f # v1.0.0
+  PI_AUTOMATION_REF: 9b08d65d70a01c74c4e01477ccf9473e86be33ee # main
 
 jobs:
+  resolve:
+    uses: fitchmultz/.github/.github/workflows/resolve-hosts.yml@9b08d65d70a01c74c4e01477ccf9473e86be33ee # main
+    with:
+      automation-ref: 9b08d65d70a01c74c4e01477ccf9473e86be33ee # main
+      official-version: ${{ inputs.official-version }}
+      fork-ref: ${{ inputs.fork-ref }}
+
   official:
+    needs: resolve
+    if: ${{ !cancelled() }}
     name: Official Pi / Node 24
     runs-on: ubuntu-26.04
-    timeout-minutes: 10
+    timeout-minutes: 30
     steps:
+      - name: Require resolved latest hosts
+        env:
+          RESOLVE: ${{ needs.resolve.result }}
+        run: test "$RESOLVE" = success
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           path: extension
@@ -34,22 +57,42 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: '24.21.0'
+          node-version: "24.21.0"
           package-manager-cache: false
       - name: Use the package npm version
         run: npm install --global "$(node -p 'require("./extension/package.json").packageManager')"
-      - name: Qualify the locked official graph
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: "1.27.1"
+          cache: false
+      - name: Qualify latest official Pi
         working-directory: extension
+        env:
+          OFFICIAL_VERSION: ${{ needs.resolve.outputs.official-version }}
+          PI_COMPAT_EVIDENCE_DIR: ${{ runner.temp }}/official-evidence
         run: |
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-          node scripts/ci-host-compat.mjs locked full "$GITHUB_WORKSPACE/automation"
+          node scripts/ci-host-compat.mjs official full "$GITHUB_WORKSPACE/automation" "$OFFICIAL_VERSION"
           git diff --exit-code
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: official-host
+          path: ${{ runner.temp }}/official-evidence
+          if-no-files-found: error
+          retention-days: 3
 
   fork:
+    needs: resolve
+    if: ${{ !cancelled() }}
     name: Fork Pi / Node 24
     runs-on: ubuntu-26.04
-    timeout-minutes: 10
+    timeout-minutes: 30
     steps:
+      - name: Require resolved latest hosts
+        env:
+          RESOLVE: ${{ needs.resolve.result }}
+        run: test "$RESOLVE" = success
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           path: extension
@@ -65,15 +108,19 @@ jobs:
         id: fork
         with:
           repository: fitchmultz/pi
-          ref: main
+          ref: ${{ needs.resolve.outputs.fork-ref }}
           path: pi-host
           persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: '24.21.0'
+          node-version: "24.21.0"
           package-manager-cache: false
       - name: Use the package npm version
         run: npm install --global "$(node -p 'require("./extension/package.json").packageManager')"
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: "1.27.1"
+          cache: false
       - name: Build the current fork packages
         working-directory: pi-host
         env:
@@ -84,19 +131,36 @@ jobs:
           npm run hydrate:model-data
           PI_OFFLINE=1 PI_TELEMETRY=0 npm run build:offline
           node ../automation/scripts/pack-fork.mjs . "$RUNNER_TEMP/fork-package" "$PI_FORK_REF"
+          mkdir -p "$RUNNER_TEMP/fork-evidence"
+          cp -a "$RUNNER_TEMP/fork-package" "$RUNNER_TEMP/fork-evidence/packages"
           git diff --exit-code
       - name: Qualify the installed fork graph
         working-directory: extension
+        env:
+          PI_COMPAT_EVIDENCE_DIR: ${{ runner.temp }}/fork-evidence
         run: |
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           node scripts/ci-host-compat.mjs fork full "$GITHUB_WORKSPACE/automation" "$RUNNER_TEMP/fork-package"
           git diff --exit-code
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: fork-host
+          path: ${{ runner.temp }}/fork-evidence
+          if-no-files-found: error
+          retention-days: 3
 
   macos:
+    needs: resolve
+    if: ${{ !cancelled() }}
     name: macOS package smoke
     runs-on: macos-latest
     timeout-minutes: 8
     steps:
+      - name: Require resolved latest hosts
+        env:
+          RESOLVE: ${{ needs.resolve.result }}
+        run: test "$RESOLVE" = success
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           path: extension
@@ -110,14 +174,23 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: '24.21.0'
+          node-version: "24.21.0"
           package-manager-cache: false
       - name: Use the package npm version
         run: npm install --global "$(node -p 'require("./extension/package.json").packageManager')"
-      - name: Load the packed package in Pi
+      - name: Load the packed package in latest Pi
         working-directory: extension
+        env:
+          OFFICIAL_VERSION: ${{ needs.resolve.outputs.official-version }}
+          PI_COMPAT_EVIDENCE_DIR: ${{ runner.temp }}/macos-evidence
         run: |
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-          node scripts/ci-host-compat.mjs locked smoke "$GITHUB_WORKSPACE/automation"
-          node scripts/ci-host-compat.mjs floor smoke "$GITHUB_WORKSPACE/automation"
+          node scripts/ci-host-compat.mjs official smoke "$GITHUB_WORKSPACE/automation" "$OFFICIAL_VERSION"
           git diff --exit-code
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: macos-host
+          path: ${{ runner.temp }}/macos-evidence
+          if-no-files-found: error
+          retention-days: 3

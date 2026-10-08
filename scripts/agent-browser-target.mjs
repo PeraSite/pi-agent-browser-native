@@ -13,9 +13,13 @@ function stableVersionParts(version) {
 export function isSupportedAgentBrowserVersion(version) {
 	const actual = stableVersionParts(version);
 	const minimum = stableVersionParts(MINIMUM_AGENT_BROWSER_VERSION);
-	if (!actual || !minimum) return false;
+	if (!actual || !minimum) {
+		return false;
+	}
 	for (let index = 0; index < minimum.length; index += 1) {
-		if (actual[index] !== minimum[index]) return actual[index] > minimum[index];
+		if (actual[index] !== minimum[index]) {
+			return actual[index] > minimum[index];
+		}
 	}
 	return true;
 }

@@ -32,11 +32,11 @@ npm run verify -- platform-smoke run --target ubuntu --suite platform-build
 
 ## Targets
 
-| Target | Crabbox provider | Shell contract | Release status |
-| --- | --- | --- | --- |
-| `macos` | `ssh` static localhost | POSIX shell on macOS | Required |
-| `ubuntu` | `local-container` | POSIX shell in a Docker-compatible local container | Required |
-| `windows-native` | `parallels` | native Windows PowerShell over OpenSSH | Nonblocking for the owner-waived 0.6.16 rollout; otherwise required |
+| Target           | Crabbox provider       | Shell contract                                     | Release status                                                      |
+| ---------------- | ---------------------- | -------------------------------------------------- | ------------------------------------------------------------------- |
+| `macos`          | `ssh` static localhost | POSIX shell on macOS                               | Required                                                            |
+| `ubuntu`         | `local-container`      | POSIX shell in a Docker-compatible local container | Required                                                            |
+| `windows-native` | `parallels`            | native Windows PowerShell over OpenSSH             | Nonblocking for the owner-waived 0.6.16 rollout; otherwise required |
 
 ## Alternate native transports
 
